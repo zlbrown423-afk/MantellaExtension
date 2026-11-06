@@ -149,7 +149,8 @@ def test_logged_lines_cannot_be_changed(tmp_path, living_world_on):
 
 
 def test_group_conversation_keeps_each_speaker_and_voice(tmp_path, living_world_on):
-    llm = ScriptedLLM(replies=["Gerdur: Hod, come meet our guest. Hod: Well met, friend."])
+    # with the store on, each NPC gets their own AI call (PR C), so each reply is one speaker's
+    llm = ScriptedLLM(replies=["Hod, come meet our guest.", "Well met, friend."])
     with HeadlessSession(str(tmp_path), llm) as s:
         s.start([actors.player(), actors.gerdur(), actors.hod()], location="Riverwood", game_days=5.0)
         s.continue_until_player_turn()

@@ -63,6 +63,7 @@ class LivingWorld:
         self._pending = False
         self._workers: dict[str, JobWorker] = {}
         self.complete: Callable[[str, str], str | None] | None = None
+        self._last_recall: dict[int, tuple[list[int], list[int]]] = {}  # npc_id -> (know_ids, mem_ids) in their last prompt
         self._rehearsed: set[tuple[int, int]] = set()   # (conv_id, npc_id) already counted as recalled
         LivingWorld.latest = self
 
@@ -191,11 +192,84 @@ class LivingWorld:
                 continue
             npc_id = self._npc_ids.get(character.ref_id) or self._register(character, now)
             key = (self.conv_id, npc_id)
-            text = recall_for(store, npc_id, now, player_id, mark_rehearsed=key not in self._rehearsed).text()
+            recall = recall_for(store, npc_id, now, player_id, mark_rehearsed=key not in self._rehearsed)
             self._rehearsed.add(key)
+            self._last_recall[npc_id] = (recall.know_ids, recall.mem_ids)
+            text = recall.text()
             if text:
                 blocks.append(text)
         return "\n\n".join(blocks)
+
+    # ---- dialogue (called from ChatManager) ----
+    @property
+    def context(self) -> Any:
+        return self._context
+
+    def handles_turn(self, characters: Any) -> bool:
+        """Living World generates the turn when a conversation with the player is open."""
+        return (self.enabled and self.conv_id is not None and self._context is not None
+                and characters.contains_player_character())
+
+    def run_turn(self, chat_manager: Any, messages: Any, characters: Any, queue: Any, actions: list,
+                 tools: list | None, game: Any) -> None:
+        if characters.contains_multiple_npcs():
+            from livingworld.dialogue.group import GroupTurn
+            GroupTurn(self).run(chat_manager, messages, characters, queue, actions, tools, game)
+            return
+        import asyncio
+        import time
+        speaker = characters.last_added_character
+        started = time.perf_counter()
+        status, error = "ok", None
+        try:
+            asyncio.run(chat_manager.process_response(speaker, queue, messages, characters, actions, tools, game))
+        except Exception as e:
+            status, error = "error", str(e)
+            raise
+        finally:
+            self.record_dialogue_call(chat_manager, speaker, int((time.perf_counter() - started) * 1000), status, error)
+
+    @_never_raises
+    def record_dialogue_call(self, chat_manager: Any, speaker: Any, latency_ms: int, status: str,
+                             error: str | None) -> None:
+        """One ``llm_request`` row per dialogue call, with the speaker and the rows their prompt held."""
+        import json
+        npc_id = self._npc_ids.get(speaker.ref_id) or self._register(speaker, self._context.game_days)
+        try:
+            model = chat_manager._get_per_character_client(speaker).model_name
+        except Exception:
+            model = "unknown"
+        know_ids, mem_ids = self._last_recall.get(npc_id, ([], []))
+        with self.store.transaction() as db:
+            timeline = db.execute("SELECT timeline_id FROM timeline WHERE is_active = 1").fetchone()[0]
+            trace = db.execute(
+                "INSERT INTO decision_trace (timeline_id, npc_id, summary, inputs_json, game_time) VALUES (?,?,?,?,?)",
+                (timeline, npc_id, f"dialogue prompt for {speaker.name}",
+                 json.dumps({"know": know_ids, "mems": mem_ids}), self._context.game_days)).lastrowid
+            db.execute(
+                "INSERT INTO llm_request (timeline_id, task, model, npc_id, conv_id, trace_id, latency_ms, status, error)"
+                " VALUES (?,?,?,?,?,?,?,?,?)",
+                (timeline, "dialogue", str(model or "unknown"), npc_id, self.conv_id, trace, latency_ms, status, error))
+
+    def voice_allowed(self, character: Any) -> bool:
+        """False if this NPC's bound voice differs from the voice Mantella is about to use."""
+        if not self.enabled or self.store is None or character.is_player_character:
+            return True
+        try:
+            npc_id = self._npc_ids.get(character.ref_id)
+            if npc_id is None:
+                return True
+            bound = self.store.scalar("SELECT voice_model FROM voice_binding WHERE npc_id = ?", (npc_id,))
+        except Exception:
+            logger.exception("Living World: voice check failed; allowing the line")
+            return True
+        if bound is not None and bound != character.tts_voice_model:
+            self.errors += 1
+            logger.error(f"Living World: refused to voice {character.name} with '{character.tts_voice_model}'; "
+                         f"their voice is bound to '{bound}'. No audio was made for this line. To change the voice on "
+                         f"purpose, delete the voice_binding row for npc_id {npc_id}.")
+            return False
+        return True
 
     def wait_for_jobs(self) -> int:
         """Run every due job now, on this thread. Returns how many ran."""

@@ -182,6 +182,10 @@ class ChatManager:
 
         character_to_talk = content.speaker
         text = ' ' + content.text + ' '
+
+        living_world = getattr(self, "living_world", None) # LIVINGWORLD PATCH: refuse a line in the wrong voice
+        if living_world is not None and content.text.strip() and not living_world.voice_allowed(character_to_talk): # LIVINGWORLD PATCH
+            return Sentence(SentenceContent(character_to_talk, "", content.sentence_type, True), "", 0) # LIVINGWORLD PATCH
         
         # Check for short voicelines before sending to TTS
         if len(content.text.strip()) < 3:
@@ -238,6 +242,11 @@ class ChatManager:
         if(not characters.last_added_character):
             return
         self.__is_generating = True
+
+        living_world = getattr(self, "living_world", None) # LIVINGWORLD PATCH: one NPC per AI call in group talk
+        if living_world is not None and living_world.handles_turn(characters): # LIVINGWORLD PATCH
+            living_world.run_turn(self, messages, characters, blocking_queue, actions, tools, game) # LIVINGWORLD PATCH
+            return # LIVINGWORLD PATCH
         
         asyncio.run(self.process_response(characters.last_added_character, blocking_queue, messages, characters, actions, tools, game))
     
@@ -519,4 +528,5 @@ class ChatManager:
                 # This sentence is required to make sure there is one in case the game is already waiting for it
                 # before the ChatManager realises there is not another message coming from the LLM
                 blocking_queue.put(Sentence(SentenceContent(active_character,"",SentenceTypeEnum.SPEECH, True),"",0))
-                self.__is_generating = False
+                if not getattr(self, "living_world_holds_generation", False): # LIVINGWORLD PATCH: a group turn spans several calls
+                    self.__is_generating = False
