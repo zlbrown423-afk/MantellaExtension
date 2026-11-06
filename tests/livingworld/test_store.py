@@ -53,12 +53,12 @@ def talk_to_gerdur(work_dir, start_day=3.5, end_day=3.6):
 def test_store_creates_schema_once(tmp_path):
     path = str(tmp_path / "w.sqlite")
     store = WorldStore(path)
-    assert store.schema_version() == 1
+    assert store.schema_version() == 2
     assert store.scalar("PRAGMA journal_mode") == "wal"
     assert store.active_timeline_id() == 1
     store.close()
     again = WorldStore(path)  # reopening does not re-run the migration
-    assert again.scalar("SELECT COUNT(*) FROM schema_version") == 1
+    assert again.scalar("SELECT COUNT(*) FROM schema_version") == 2
     assert again.scalar("PRAGMA integrity_check") == "ok"
     again.close()
 
@@ -216,3 +216,14 @@ def test_a_bound_voice_cannot_be_swapped(tmp_path):
         log.append(conv, gerdur, "Hello in the wrong voice.", "MaleNord", 1.0)
     # the player is the same row however often they are seen
     assert registry.ensure_npc(ActorIdentity.from_actor_json(actors.player("Torvar")), 2.0) == player
+
+
+def test_an_existing_database_gets_new_migrations(tmp_path):
+    path = str(tmp_path / "w.sqlite")
+    conn = sqlite3.connect(path)
+    from importlib import resources
+    conn.executescript(resources.files("livingworld.store.migrations").joinpath("001_initial.sql").read_text())
+    conn.close()
+    store = WorldStore(path)  # a version 1 file, as PR A created it
+    assert store.schema_version() == 2
+    assert store.scalar("SELECT COUNT(*) FROM game_load") == 0

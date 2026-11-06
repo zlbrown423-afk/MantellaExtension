@@ -115,9 +115,12 @@ class HeadlessSession:
 
     # --- the game's conversation loop -----------------------------------------
     def start(self, actors: list[dict[str, Any]], location: str = "Riverwood", time: int = 12,
-              game_days: float = 1.0, world_id: str = "HeadlessTest", events: list[str] | None = None) -> dict[str, Any]:
+              game_days: float = 1.0, world_id: str = "HeadlessTest", events: list[str] | None = None,
+              extra: dict[str, Any] | None = None) -> dict[str, Any]:
+        """``extra`` adds keys to the start request, e.g. the save-load keys a Living World game build sends."""
         self.post({comm_consts.KEY_REQUESTTYPE: comm_consts.KEY_REQUESTTYPE_INIT})
         return self.post({
+            **(extra or {}),
             comm_consts.KEY_REQUESTTYPE: comm_consts.KEY_REQUESTTYPE_STARTCONVERSATION,
             comm_consts.KEY_ACTORS: actors,
             comm_consts.KEY_CONTEXT: self._context(location, time, game_days, events),

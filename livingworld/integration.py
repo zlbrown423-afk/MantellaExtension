@@ -19,6 +19,7 @@ from livingworld.memory.extraction import Extractor
 from livingworld.memory.jobs import JobQueue, JobWorker
 from livingworld.memory.recall import recall_for
 from livingworld.store.conversation_log import ConversationLog
+from livingworld.store.timeline import resolve_load
 from livingworld.store.identity import ActorIdentity, FormId, IdentityRegistry, VoiceBindingConflict
 from livingworld.store.world_store import WorldStore
 from src import utils
@@ -27,6 +28,11 @@ logger = utils.get_logger()
 
 ENV_VAR = "MANTELLA_LIVING_WORLD"
 EXTRACT_JOB = "extract_conversation"
+
+# Sent by the Living World build of Mantella-Spell with each conversation start
+KEY_TIMELINE_ID = "mantella_lw_timeline_id"            # timeline stored in the save (also sent back)
+KEY_LOAD_NONCE = "mantella_lw_load_nonce"              # random number picked at each game load
+KEY_LOADED_GAME_DAYS = "mantella_lw_loaded_game_days"  # game days passed + 1 when the save loaded
 _ON = {"1", "true", "yes", "on"}
 
 
@@ -107,6 +113,24 @@ class LivingWorld:
             self._identities[identity.ref.mantella_id] = identity
 
     @_never_raises
+    def game_loaded(self, world_id: str, request: dict[str, Any]) -> dict[str, Any]:
+        """Handle the save load the game reports with each conversation start (see ``store/timeline.py``).
+        Returns extra reply keys: the timeline id the game should keep in its save."""
+        nonce = request.get(KEY_LOAD_NONCE)
+        if nonce is None or request.get(KEY_LOADED_GAME_DAYS) is None:
+            return {}
+        store = self._store_for(world_id)
+        save_timeline = request.get(KEY_TIMELINE_ID) or None
+        result = resolve_load(store, int(nonce), int(save_timeline) if save_timeline else None,
+                              float(request[KEY_LOADED_GAME_DAYS]))
+        if not result.repeated:
+            if result.branched:
+                logger.log(23, f"Living World: an older save was loaded (game day {request[KEY_LOADED_GAME_DAYS]:.2f}); "
+                               f"NPCs now forget everything after it (timeline {result.timeline_id}).")
+            else:
+                logger.log(23, f"Living World: save loaded on timeline {result.timeline_id}.")
+        return {KEY_TIMELINE_ID: result.timeline_id}
+
     @_never_raises
     def conversation_starting(self, world_id: str, context: Any) -> None:
         """Called before Mantella reads the start request. Mantella builds the first prompt while it
