@@ -20,6 +20,7 @@ from src.stt.stt import Transcriber
 from src.actions.function_manager import FunctionManager
 from src.random_llm_selector import RandomLLMSelector, LLMSelection
 from src.llm.client_base import ClientBase
+from livingworld.integration import LivingWorld # LIVINGWORLD PATCH
 
 logger = utils.get_logger()
 
@@ -51,12 +52,14 @@ class GameStateManager:
         self.__should_reload: bool = False
         self.__chat_manager.clear_per_character_client_cache()
         self.__random_selector = RandomLLMSelector()
+        self.__living_world: LivingWorld = LivingWorld.from_environment(config) # LIVINGWORLD PATCH
 
 
     @utils.time_it
     def start_conversation(self, input_json: dict[str, Any]) -> dict[str, Any]:
         if self.__talk: #This should only happen if game and server are out of sync due to some previous error -> close conversation and start a new one
             self.__talk.end()
+            self.__living_world.conversation_ended(None, self.__talk.context) # LIVINGWORLD PATCH
             self.__talk = None
 
         world_id = "default"
@@ -71,6 +74,7 @@ class GameStateManager:
         context_for_conversation = Context(world_id, self.__config, conversation_client, self.__rememberer, self.__language_info)
         self.__talk = Conversation(context_for_conversation, self.__chat_manager, self.__rememberer, conversation_client, self.__stt, self.__mic_input, self.__mic_ptt, self.__game)
         self.__update_context(input_json)
+        self.__living_world.conversation_started(world_id, self.__talk.context) # LIVINGWORLD PATCH
         self.__try_preload_voice_model()
         self.__talk.start_conversation()
             
@@ -163,6 +167,7 @@ class GameStateManager:
             if not sentence_to_play.error_message:
                 self.__game.prepare_sentence_for_game(sentence_to_play, self.__talk.context, self.__config, topicInfoID, self.__first_line)            
                 reply[comm_consts.KEY_REPLYTYPE_NPCTALK] = self.sentence_to_json(sentence_to_play, topicInfoID)
+                self.__living_world.npc_line(sentence_to_play, self.__talk.context) # LIVINGWORLD PATCH
                 self.__first_line = False
 
                 if {'identifier': comm_consts.ACTION_RELOADCONVERSATION} in sentence_to_play.actions:
@@ -170,6 +175,7 @@ class GameStateManager:
                     self.__should_reload = True
             else:
                 self.__talk.end()
+                self.__living_world.conversation_ended(None, self.__talk.context) # LIVINGWORLD PATCH
                 return self.error_message(sentence_to_play.error_message)        
         return reply
 
@@ -185,6 +191,7 @@ class GameStateManager:
         updated_player_text, update_events, player_spoken_sentence = self.__talk.process_player_input(player_text)
         if update_events:
             return {comm_consts.KEY_REPLYTYPE: comm_consts.KEY_REQUESTTYPE_TTS, comm_consts.KEY_TRANSCRIBE: updated_player_text}
+        self.__living_world.player_line(updated_player_text, self.__talk.context) # LIVINGWORLD PATCH
 
         cleaned_player_text = utils.clean_text(updated_player_text)
         npcs_in_conversation = self.__talk.context.npcs_in_conversation
@@ -228,6 +235,7 @@ class GameStateManager:
             # Extract end timestamp from game client
             end_timestamp = input_json.get(comm_consts.KEY_ENDCONVERSATION_TIMESTAMP, None)
             self.__talk.end(end_timestamp)
+            self.__living_world.conversation_ended(end_timestamp, self.__talk.context) # LIVINGWORLD PATCH
             self.__talk = None
 
         logger.log(24, '\nConversations not starting when you select an NPC? See here:')
@@ -289,6 +297,7 @@ class GameStateManager:
                         if actor:
                             actors_in_json.append(actor)
                 self.__talk.add_or_update_character(actors_in_json)
+                self.__living_world.actors_seen(json[comm_consts.KEY_ACTORS]) # LIVINGWORLD PATCH
             
             location = None
             time = None
@@ -325,6 +334,7 @@ class GameStateManager:
                     custom_context_values = json[comm_consts.KEY_CONTEXT][comm_consts.KEY_CONTEXT_CUSTOMVALUES]
 
             self.__talk.update_context(location, time, ingame_events, weather, npcs_nearby, custom_context_values, config_settings, game_days)
+            self.__living_world.participants_changed(self.__talk.context) # LIVINGWORLD PATCH
     
     @utils.time_it
     def load_character(self, json: dict[str, Any]) -> Character | None:
