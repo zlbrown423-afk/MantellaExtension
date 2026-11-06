@@ -76,6 +76,7 @@ class GameStateManager:
         conversation_client = self._build_random_conversation_client() or self.__client
         context_for_conversation = Context(world_id, self.__config, conversation_client, self.__rememberer, self.__language_info)
         self.__talk = Conversation(context_for_conversation, self.__chat_manager, self.__rememberer, conversation_client, self.__stt, self.__mic_input, self.__mic_ptt, self.__game)
+        living_world_reply = self.__living_world.game_loaded(world_id, input_json) or {} # LIVINGWORLD PATCH
         self.__living_world.conversation_starting(world_id, self.__talk.context) # LIVINGWORLD PATCH
         self.__update_context(input_json)
         self.__living_world.conversation_started(world_id, self.__talk.context) # LIVINGWORLD PATCH
@@ -84,7 +85,8 @@ class GameStateManager:
             
         return {
             comm_consts.KEY_REPLYTYPE: comm_consts.KEY_REPLYTTYPE_STARTCONVERSATIONCOMPLETED,
-            comm_consts.KEY_STARTCONVERSATION_USENARRATOR: self.__conv_has_narrator}
+            comm_consts.KEY_STARTCONVERSATION_USENARRATOR: self.__conv_has_narrator,
+            **living_world_reply} # LIVINGWORLD PATCH
     
 
     def _build_random_conversation_client(self) -> ClientBase | None:

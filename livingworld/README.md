@@ -65,6 +65,16 @@ extraction call per NPC in it.
 
 Radiant conversations (two NPCs, no player) still use Mantella's own single call for now.
 
+### PR D: save reloads and plugin names (server side, with the Mantella-Spell `living-world-m1` branch)
+
+| Piece | File | What it does |
+| --- | --- | --- |
+| Timelines | `store/timeline.py`, `store/migrations/002_game_load.sql` | The game sends, with each conversation start, the timeline its save was on, a random number picked at load, and the save's game time. If that timeline has rows from after the save, a new timeline branches at the save's game time, so NPCs forget what came after it. Loading the later save makes its timeline active again. Nothing is deleted |
+| Plugin names | `store/identity.py` | Uses `mantella_actor_base_plugin` / `mantella_actor_ref_plugin` from the game when present, instead of the load-order placeholder |
+
+The reply to a conversation start carries `mantella_lw_timeline_id`, which the game keeps in its save.
+Without the game-side change nothing new is sent, and everything stays on one timeline.
+
 ### Upstream patches
 
 | File | Change |
