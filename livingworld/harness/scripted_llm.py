@@ -6,6 +6,9 @@ for example that Hod's prompt never contains Gerdur's private memories.
 """
 from __future__ import annotations
 
+import json
+import re
+
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Callable
 
@@ -78,6 +81,8 @@ class ScriptedLLM(AIClient):
     summary_reply: str = "The player and the NPC had a short conversation."
     token_limit_value: int = 32000
     calls: list[LLMCall] = field(default_factory=list)
+    # Living World extraction: NPC name -> scripted extraction for that NPC's memory
+    extractions: dict[str, "ScriptedExtraction"] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._reply_index = 0
@@ -98,8 +103,19 @@ class ScriptedLLM(AIClient):
 
     def request_call(self, messages: Message | message_thread) -> str | None:
         openai_messages = _to_openai(messages)
-        self.calls.append(LLMCall("request", openai_messages, self.summary_reply))
-        return self.summary_reply
+        reply = self.summary_reply
+        system = _content_text(openai_messages[0].get("content")) if openai_messages else ""
+        match = EXTRACTION_HEADER.match(system)
+        if match:
+            scripted = self.extractions.get(match.group(1))
+            user = _content_text(openai_messages[-1].get("content"))
+            reply = scripted.reply(user) if scripted else '{"facts": [], "memories": []}'
+        self.calls.append(LLMCall("request", openai_messages, reply))
+        return reply
+
+    @property
+    def extraction_calls(self) -> list[LLMCall]:
+        return [c for c in self.calls if c.kind == "request" and EXTRACTION_HEADER.match(c.system_prompt)]
 
     def get_count_tokens(self, messages: message_thread | list[Message] | Message | str) -> int:
         # rough estimate (about 4 characters per token); good enough for prompt-size checks
@@ -167,3 +183,34 @@ def when_player_says(phrase: str, reply: str) -> ReplyRule:
     """Rule: reply with ``reply`` when the last user message contains ``phrase`` (case-insensitive)."""
     phrase_lower = phrase.lower()
     return lambda text: reply if phrase_lower in text.lower() else None
+
+
+EXTRACTION_HEADER = re.compile(r"You maintain the memory of one character in Skyrim, (.+?)\.\n")
+
+
+@dataclass
+class Fact:
+    """A fact the scripted extractor reports, found by a phrase in the transcript it is shown."""
+    phrase: str
+    about: str
+    predicate: str
+    value: str
+    said_by: str
+
+
+@dataclass
+class ScriptedExtraction:
+    facts: list[Fact] = field(default_factory=list)
+    memories: list[str] = field(default_factory=list)
+    raw_facts: list[dict[str, Any]] = field(default_factory=list)  # passed through unchecked
+
+    def reply(self, transcript: str) -> str:
+        facts = list(self.raw_facts)
+        for fact in self.facts:
+            for line in transcript.splitlines():
+                m = re.match(r"\[(\d+)\] ([^:]+): (.*)", line)
+                if m and fact.phrase.lower() in m.group(3).lower():
+                    facts.append({"about": fact.about, "predicate": fact.predicate, "value": fact.value,
+                                  "said_by": fact.said_by, "line": int(m.group(1))})
+                    break
+        return json.dumps({"facts": facts, "memories": [{"text": t, "importance": 0.6} for t in self.memories]})

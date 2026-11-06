@@ -4,7 +4,8 @@
 The hooks only record; they never change what Mantella sends to the game, and any error inside
 them is logged and swallowed so the store can never break a conversation.
 
-Switched on with the environment variable ``MANTELLA_LIVING_WORLD=1``. Off by default until
+Ending a conversation queues a memory-extraction job that a background thread runs, so the game
+never waits on it. Switched on with the environment variable ``MANTELLA_LIVING_WORLD=1``. Off by default until
 Milestone 1 is complete.
 """
 from __future__ import annotations
@@ -14,6 +15,9 @@ import os
 import sqlite3
 from typing import Any, Callable
 
+from livingworld.memory.extraction import Extractor
+from livingworld.memory.jobs import JobQueue, JobWorker
+from livingworld.memory.recall import recall_for
 from livingworld.store.conversation_log import ConversationLog
 from livingworld.store.identity import ActorIdentity, FormId, IdentityRegistry, VoiceBindingConflict
 from livingworld.store.world_store import WorldStore
@@ -22,6 +26,7 @@ from src import utils
 logger = utils.get_logger()
 
 ENV_VAR = "MANTELLA_LIVING_WORLD"
+EXTRACT_JOB = "extract_conversation"
 _ON = {"1", "true", "yes", "on"}
 
 
@@ -40,6 +45,9 @@ def _never_raises(func: Callable) -> Callable:
 
 
 class LivingWorld:
+    latest: "LivingWorld | None" = None   # the most recently created instance (used by tests)
+    start_workers: bool = True            # tests switch this off to run jobs by hand
+
     def __init__(self, save_folder: str, enabled: bool = True, default_tts_service: str = "unknown") -> None:
         self.save_folder = save_folder
         self.default_tts_service = default_tts_service
@@ -52,6 +60,11 @@ class LivingWorld:
         self._present: set[int] = set()
         self.conv_id: int | None = None
         self._context: Any = None
+        self._pending = False
+        self._workers: dict[str, JobWorker] = {}
+        self.complete: Callable[[str, str], str | None] | None = None
+        self._rehearsed: set[tuple[int, int]] = set()   # (conv_id, npc_id) already counted as recalled
+        LivingWorld.latest = self
 
     @classmethod
     def from_environment(cls, config: Any) -> "LivingWorld":
@@ -60,6 +73,29 @@ class LivingWorld:
             logger.log(23, f"Living World store is on ({ENV_VAR}).")
         tts = getattr(config, "tts_service", None)
         return cls(config.save_folder, enabled, str(getattr(tts, "value", tts) or "unknown"))
+
+    def attach_llm(self, client: Any, config: Any) -> None:
+        """Use Mantella's summary client (or main client) for background extraction calls."""
+        from src.llm.message_thread import message_thread
+        from src.llm.messages import UserMessage
+
+        class VerbatimUserMessage(UserMessage):
+            # Mantella's UserMessage collapses newlines; the transcript needs one line per utterance
+            def get_formatted_content(self) -> str:
+                return self.text
+
+        def complete(system: str, user: str) -> str | None:
+            messages = message_thread(config, system)
+            messages.add_message(VerbatimUserMessage(config, user))
+            return client.request_call(messages)
+        self.complete = complete
+
+    def wrap_memory(self, inner: Any) -> Any:
+        """Wrap Mantella's memory so each NPC's own recalled rows are added to the prompt."""
+        if not self.enabled:
+            return inner
+        from livingworld.memory.remembering import LivingWorldMemory
+        return LivingWorldMemory(inner, self)
 
     # ---- hooks ----
     @_never_raises
@@ -70,14 +106,30 @@ class LivingWorld:
             self._identities[identity.ref.mantella_id] = identity
 
     @_never_raises
-    def conversation_started(self, world_id: str, context: Any) -> None:
+    @_never_raises
+    def conversation_starting(self, world_id: str, context: Any) -> None:
+        """Called before Mantella reads the start request. Mantella builds the first prompt while it
+        reads the request, so the conversation row is opened on first need (see ``_ensure_open``)."""
         if self.conv_id is not None:
-            self._close(context.game_days)
+            self._close(None)
         self.store = self._store_for(world_id)
+        self._context = context
+        self._pending = True
+
+    @_never_raises
+    def conversation_started(self, world_id: str, context: Any) -> None:
+        if context is not self._context:
+            self.conversation_starting(world_id, context)
+        self._ensure_open()
+
+    def _ensure_open(self) -> None:
+        if not self._pending:
+            return
+        self._pending = False
+        context = self._context
         npcs = context.npcs_in_conversation
         kind = "player" if npcs.contains_player_character() else "radiant"
         self.conv_id = ConversationLog(self.store).open(context.location, kind, context.game_days)
-        self._context = context
         self._npc_ids.clear()
         self._present.clear()
         self._sync(context)
@@ -123,11 +175,53 @@ class LivingWorld:
             game_days = context.game_days
         self._close(game_days)
 
+    @_never_raises
+    def recall_text(self, characters: list[Any], world_id: str) -> str:
+        """The recalled facts and memories for each NPC, each block holding only that NPC's rows."""
+        if self._context is None or self._store_for(world_id) is not self.store:
+            return ""
+        self._ensure_open()
+        store = self.store
+        now = self._context.game_days
+        player = self._context.npcs_in_conversation.get_player_character()
+        player_id = (self._npc_ids.get(player.ref_id) or self._register(player, now)) if player else None
+        blocks = []
+        for character in characters:
+            if character.is_player_character:
+                continue
+            npc_id = self._npc_ids.get(character.ref_id) or self._register(character, now)
+            key = (self.conv_id, npc_id)
+            text = recall_for(store, npc_id, now, player_id, mark_rehearsed=key not in self._rehearsed).text()
+            self._rehearsed.add(key)
+            if text:
+                blocks.append(text)
+        return "\n\n".join(blocks)
+
+    def wait_for_jobs(self) -> int:
+        """Run every due job now, on this thread. Returns how many ran."""
+        return sum(worker.run_pending() for worker in self._workers.values())
+
+    def stop(self) -> None:
+        for worker in self._workers.values():
+            worker.stop()
+
     # ---- internals ----
     def _store_for(self, world_id: str) -> WorldStore:
         if world_id not in self._stores:
-            self._stores[world_id] = WorldStore.for_world(self.save_folder, world_id)
+            store = WorldStore.for_world(self.save_folder, world_id)
+            self._stores[world_id] = store
+            worker = JobWorker(store, lambda kind, payload, store=store: self._run_job(store, kind, payload))
+            self._workers[world_id] = worker
+            if self.start_workers:
+                worker.start()
         return self._stores[world_id]
+
+    def _run_job(self, store: WorldStore, kind: str, payload: dict[str, Any]) -> None:
+        if kind != EXTRACT_JOB:
+            raise ValueError(f"unknown job kind {kind}")
+        if self.complete is None:
+            raise RuntimeError("no LLM attached for extraction")
+        Extractor(store, self.complete).extract_conversation(payload["conv_id"])
 
     def _close(self, game_days: float | None) -> None:
         if game_days is None:
@@ -136,6 +230,11 @@ class LivingWorld:
                 " FROM utterance WHERE conv_id = ?", (self.conv_id, self.conv_id))
         ConversationLog(self.store).close(self.conv_id, game_days)
         logger.log(23, f"Living World: conversation {self.conv_id} closed at game day {game_days:.2f}")
+        if self.store.scalar("SELECT COUNT(*) FROM utterance WHERE conv_id = ?", (self.conv_id,)):
+            JobQueue(self.store).enqueue(EXTRACT_JOB, {"conv_id": self.conv_id}, f"extract:conv:{self.conv_id}")
+            for world_id, store in self._stores.items():
+                if store is self.store:
+                    self._workers[world_id].notify()
         self.conv_id = None
         self._context = None
 

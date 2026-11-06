@@ -43,10 +43,24 @@ Mantella's own summaries keep working as before.
 Until the game sends plugin file names (PR D), actors outside Skyrim.esm get a placeholder plugin such as
 `load_index:05`, which stays stable as long as your load order does.
 
+### PR B: per-NPC memory extraction and recall
+
+| Piece | File | What it does |
+| --- | --- | --- |
+| Job queue and worker | `memory/jobs.py` | Ending a conversation only queues a job; a background thread runs it. Failed jobs retry after 5 s, 30 s, 2 min, 10 min, 30 min, then stop as `dead`. Jobs left running by a crash restart on the next launch |
+| Extraction | `memory/extraction.py` | One AI call per NPC who took part, from that NPC's point of view, using only the lines they heard. Each fact must name the line it came from and who said it, or it is dropped. Facts become `knowledge` rows (`self`, or `told` with the teller and the teller's own copy linked); impressions become `memory` rows |
+| Recall | `memory/recall.py`, `memory/remembering.py` | Adds each NPC's own facts and memories (with "about 7 days ago" timing) to Mantella's prompt, reading only that NPC's rows through the timeline views |
+
+Extraction uses Mantella's summary model if one is set, otherwise the main model. One conversation costs one
+extraction call per NPC in it.
+
+Known gap until PR C: in a group conversation Mantella still writes every NPC's lines from one prompt, so that
+prompt holds every participant's recall block. PR C gives each speaker their own prompt.
+
 ### Upstream patches
 
 | File | Change |
 | --- | --- |
 | `src/http/routes/mantella_route.py` | Optional traffic recording (does nothing unless `MANTELLA_RECORD_TRAFFIC` is set) |
 | `tests/conftest.py` | Registers the `baseline_behaviour` test marker |
-| `src/game_manager.py` | Calls the Living World hooks at conversation start, each spoken line, player input, actor changes and conversation end (does nothing unless `MANTELLA_LIVING_WORLD` is set) |
+| `src/game_manager.py` | Calls the Living World hooks at conversation start, each spoken line, player input, actor changes and conversation end, and wraps Mantella's memory with the recall (does nothing unless `MANTELLA_LIVING_WORLD` is set) |

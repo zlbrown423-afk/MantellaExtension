@@ -41,7 +41,6 @@ class GameStateManager:
         self.__language_info: dict[Hashable, str] = language_info
         self.__client: LLMClient = client
         self.__chat_manager: ChatManager = chat_manager
-        self.__rememberer: Remembering = Summaries(game, config, client, language_info['language'], summary_client)
         self.__talk: Conversation | None = None
         self.__mic_input: bool = False
         self.__mic_ptt: bool = False # push-to-talk
@@ -53,6 +52,8 @@ class GameStateManager:
         self.__chat_manager.clear_per_character_client_cache()
         self.__random_selector = RandomLLMSelector()
         self.__living_world: LivingWorld = LivingWorld.from_environment(config) # LIVINGWORLD PATCH
+        self.__living_world.attach_llm(summary_client or client, config) # LIVINGWORLD PATCH
+        self.__rememberer: Remembering = self.__living_world.wrap_memory(Summaries(game, config, client, language_info['language'], summary_client)) # LIVINGWORLD PATCH
 
 
     @utils.time_it
@@ -73,6 +74,7 @@ class GameStateManager:
         conversation_client = self._build_random_conversation_client() or self.__client
         context_for_conversation = Context(world_id, self.__config, conversation_client, self.__rememberer, self.__language_info)
         self.__talk = Conversation(context_for_conversation, self.__chat_manager, self.__rememberer, conversation_client, self.__stt, self.__mic_input, self.__mic_ptt, self.__game)
+        self.__living_world.conversation_starting(world_id, self.__talk.context) # LIVINGWORLD PATCH
         self.__update_context(input_json)
         self.__living_world.conversation_started(world_id, self.__talk.context) # LIVINGWORLD PATCH
         self.__try_preload_voice_model()
