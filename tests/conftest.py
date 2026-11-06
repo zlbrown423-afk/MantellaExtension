@@ -10,6 +10,7 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "requires_audio: test requires an audio device (playsound, sounddevice, etc)")
     config.addinivalue_line("markers", "requires_external_exe: test requires an external executable (eg piper.exe)")
     config.addinivalue_line("markers", "requires_llm: test requires a real LLM API connection")
+    config.addinivalue_line("markers", "baseline_behaviour: documents current upstream behaviour that a later Living World milestone is expected to change")
 
     # Suppress deprecation warnings from third party packages during test execution
     config.addinivalue_line("filterwarnings", "ignore:np.find_common_type is deprecated:DeprecationWarning")
