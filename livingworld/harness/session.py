@@ -96,6 +96,9 @@ class HeadlessSession:
         return self
 
     def __exit__(self, *exc: Any) -> None:
+        from livingworld.integration import LivingWorld
+        if LivingWorld.latest is not None:
+            LivingWorld.latest.stop()   # background workers end with the session
         for p in reversed(self._patches):
             p.stop()
         self._patches = []
