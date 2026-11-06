@@ -53,6 +53,8 @@ class GameStateManager:
         self.__random_selector = RandomLLMSelector()
         self.__living_world: LivingWorld = LivingWorld.from_environment(config) # LIVINGWORLD PATCH
         self.__living_world.attach_llm(summary_client or client, config) # LIVINGWORLD PATCH
+        if self.__living_world.enabled: # LIVINGWORLD PATCH
+            self.__chat_manager.living_world = self.__living_world # LIVINGWORLD PATCH
         self.__rememberer: Remembering = self.__living_world.wrap_memory(Summaries(game, config, client, language_info['language'], summary_client)) # LIVINGWORLD PATCH
 
 

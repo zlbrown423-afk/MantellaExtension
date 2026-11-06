@@ -1,3 +1,4 @@
+import copy # LIVINGWORLD PATCH
 from typing import Any, Hashable
 from src.conversation.action import Action
 from src.http.communication_constants import communication_constants
@@ -413,6 +414,18 @@ class Context:
         return result
     
     @utils.time_it
+    def focused_on(self, character: Character) -> "Context": # LIVINGWORLD PATCH
+        """A view of this context that holds only the player and one NPC, so a prompt built from it
+        carries only that NPC's identity and memories. The real context is not changed."""
+        view = copy.copy(self)
+        focused = Characters()
+        player = self.__npcs_in_conversation.get_player_character()
+        if player:
+            focused.add_or_update_character(player)
+        focused.add_or_update_character(character)
+        view.__npcs_in_conversation = focused
+        return view
+
     def generate_system_message(self, prompt: str, actions_for_prompt: list[Action]) -> str:
         """Fills the variables in the prompt with the values calculated from the context
 

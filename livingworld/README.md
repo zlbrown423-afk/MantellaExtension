@@ -54,8 +54,16 @@ Until the game sends plugin file names (PR D), actors outside Skyrim.esm get a p
 Extraction uses Mantella's summary model if one is set, otherwise the main model. One conversation costs one
 extraction call per NPC in it.
 
-Known gap until PR C: in a group conversation Mantella still writes every NPC's lines from one prompt, so that
-prompt holds every participant's recall block. PR C gives each speaker their own prompt.
+### PR C: one NPC per AI call in group talk, voice check
+
+| Piece | File | What it does |
+| --- | --- | --- |
+| Group turns | `dialogue/group.py` | Each NPC gets their own AI call with their own one-on-one prompt (their bio and their recall only) plus a note naming who else is present. Others' lines are shown as "Name: text". A reply that tries to speak as someone else is cut off there |
+| Who speaks | `dialogue/group.py` | The NPC the player names first, otherwise the one who did not speak last. If the speaker names another NPC, that NPC answers next, up to 2 speakers per player turn |
+| Voice check | `integration.py` (`voice_allowed`) | Before synthesis, the voice Mantella picked must match the NPC's bound voice, or no audio is made and the error is logged |
+| Call log | `integration.py` (`record_dialogue_call`) | One `llm_request` row per dialogue call with the speaker, and a `decision_trace` row listing the knowledge and memory ids that call's prompt held |
+
+Radiant conversations (two NPCs, no player) still use Mantella's own single call for now.
 
 ### Upstream patches
 
@@ -63,4 +71,6 @@ prompt holds every participant's recall block. PR C gives each speaker their own
 | --- | --- |
 | `src/http/routes/mantella_route.py` | Optional traffic recording (does nothing unless `MANTELLA_RECORD_TRAFFIC` is set) |
 | `tests/conftest.py` | Registers the `baseline_behaviour` test marker |
+| `src/output_manager.py` | Hands each turn to the Living World when it is on (group turns), refuses synthesis in the wrong voice, and keeps the "generating" flag up across a multi-speaker turn |
+| `src/conversation/context.py` | `focused_on(character)`: a copy of the context holding only the player and one NPC, for building that NPC's own prompt |
 | `src/game_manager.py` | Calls the Living World hooks at conversation start, each spoken line, player input, actor changes and conversation end, and wraps Mantella's memory with the recall (does nothing unless `MANTELLA_LIVING_WORLD` is set) |
