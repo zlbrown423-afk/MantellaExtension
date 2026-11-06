@@ -18,6 +18,8 @@ from src import utils
 from src.config.definitions.game_definitions import GameEnum
 from src.config.definitions.tts_definitions import TTSEnum
 from src.actions.function_manager import FunctionManager
+import time
+from livingworld.harness.recorder import TrafficRecorder  # LIVINGWORLD PATCH: optional traffic recording
 
 logger = utils.get_logger()
 
@@ -32,6 +34,10 @@ class mantella_route(routeable):
         super().__init__(config)
         self.__language_info: dict[Hashable, str] = language_info
         self.__game: GameStateManager | None = None
+        # LIVINGWORLD PATCH: record /mantella traffic when MANTELLA_RECORD_TRAFFIC is set (off by default)
+        self.__recorder: TrafficRecorder | None = TrafficRecorder.from_environment(config.save_folder)
+        if self.__recorder:
+            logger.info(f"Recording game traffic to {self.__recorder.file_path}")
 
         # if not self._can_route_be_used():
         #     error_message = "MantellaSoftware settings faulty. Please check MantellaSoftware's window or log."
@@ -73,6 +79,7 @@ class mantella_route(routeable):
                 logger.error(error_message)
                 return self.error_message(error_message)
             reply = {}
+            request_start = time.perf_counter()  # LIVINGWORLD PATCH
             received_json: dict[str, Any] | None = await request.json()
             if received_json:
                 logger.debug('Processing request...')
@@ -99,4 +106,9 @@ class mantella_route(routeable):
 
             if self._config.show_http_debug_messages:
                 logger.log(self._log_level_http_out, json.dumps(reply, indent=4))
+            if self.__recorder:  # LIVINGWORLD PATCH
+                try:
+                    self.__recorder.record(received_json, reply, (time.perf_counter() - request_start) * 1000)
+                except Exception as e:
+                    logger.warning(f"Could not record game traffic: {e}")
             return reply
