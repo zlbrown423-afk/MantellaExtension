@@ -161,6 +161,30 @@ def test_parse_function_calls_valid():
     assert result[0]['arguments'] == {'source': ['Guard']}
 
 
+def _call(name: str, **arguments) -> dict:
+    return {'function': {'name': name, 'arguments': json.dumps(arguments)}}
+
+
+def test_a_filtered_duplicate_does_not_block_the_action_for_good():
+    """The same call on consecutive turns is filtered once, then allowed again on the next turn.
+    Before the fix the cache only updated on non-empty turns, so Follow stayed blocked forever."""
+    FunctionManager.load_all_actions()
+    follow = _call('Follow', source=['Guard'])
+    assert len(FunctionManager.parse_function_calls([follow])) == 1     # turn 1: runs
+    assert FunctionManager.parse_function_calls([follow]) == []         # turn 2: same call, filtered
+    assert len(FunctionManager.parse_function_calls([follow])) == 1     # turn 3: allowed again
+    assert FunctionManager.parse_function_calls([follow]) == []
+
+
+def test_inventory_may_be_opened_on_consecutive_turns():
+    """Giving several items in a row needs the Inventory action every turn"""
+    FunctionManager.load_all_actions()
+    assert FunctionManager._actions['mantella_npc_inventory']['allow_repeat'] is True
+    inventory = _call('Inventory', source=['Guard'])
+    for _ in range(3):
+        assert len(FunctionManager.parse_function_calls([inventory])) == 1
+
+
 def test_parse_function_calls_malformed_json():
     """Test parsing function calls with malformed JSON arguments"""
     # Load actions first to have action mappings
