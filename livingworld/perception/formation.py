@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from livingworld.perception.records import (SENSITIVE_PARTS, PerceptionRecord, Witness, body_part,
+from livingworld.perception.records import (SENSITIVE_PARTS, PerceptionRecord, Witness, grab_area,
                                             consume_verb, item_category)
 
 # What a witness can perceive (metres). Configurable; see README.
@@ -76,7 +76,7 @@ def _place(record: PerceptionRecord) -> str:
 def _grab_phrase(record: PerceptionRecord, seen_form: bool = False) -> tuple[str, str]:
     """('grabbed', ' by the left forearm') etc., from duration and body part.
     ``seen_form`` gives the verb as in "I saw him grab her"."""
-    part = body_part(record.node)
+    part = grab_area(record)
     dur = record.duration_s or 0.0
     brief = dur < BRIEF_S
     if seen_form:
@@ -99,7 +99,7 @@ def grab_for_target(record: PerceptionRecord, to_actor: Bond) -> MemoryDraft:
     actor = record.actor.name
     verb, where = _grab_phrase(record)
     where_mine = where.replace(" the ", " my ")
-    part = body_part(record.node) or ""
+    part = grab_area(record) or ""
     dur = record.duration_s or 0.0
     sensitive = part.split(" ")[-1] in SENSITIVE_PARTS
     if to_actor.close and dur < LONG_S and not sensitive:

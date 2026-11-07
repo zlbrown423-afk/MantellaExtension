@@ -39,9 +39,10 @@ def seen(actor_json: dict[str, Any], distance_m: float, los: bool = True, rank_t
 
 def grab(actor_json: dict[str, Any], target_json: dict[str, Any], node: str | None, seconds: float,
          game_days: float, location: str = "Riverwood", hand: str = "L", witnesses: list[str] | None = None,
-         target_rank: int | None = 0, key: str | None = None) -> str:
+         target_rank: int | None = 0, key: str | None = None, area: str | None = None) -> str:
     parts = [f"v=1", f"key={key or _key()}", "type=grab", f"gt={game_days}", f"loc={location}",
              f"actor={actor_field(actor_json)}", f"target={actor_field(target_json)}", f"node={node or ''}",
+             f"area={area or ''}",
              f"hand={hand}", f"dur={seconds}", f"trank={'' if target_rank is None else target_rank}"]
     parts += [f"w={w}" for w in witnesses or []]
     return "|".join(parts)

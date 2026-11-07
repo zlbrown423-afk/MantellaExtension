@@ -14,7 +14,7 @@ from src import utils
 
 from livingworld.perception import formation, intoxication
 from livingworld.perception.formation import Bond, MemoryDraft, Perception
-from livingworld.perception.records import (BadRecord, PerceptionRecord, body_part, item_category, parse_record,
+from livingworld.perception.records import (BadRecord, PerceptionRecord, grab_area, item_category, parse_record,
                                             status_for_rank)
 from livingworld.store.identity import IdentityRegistry
 from livingworld.store.minors import is_child
@@ -150,7 +150,7 @@ class PerceptionPipeline:
         if record.type == "grab":
             dur = record.duration_s or 0.0
             payload = {"interaction": "touch" if dur < formation.BRIEF_S else ("hold" if dur >= formation.LONG_S else "grab"),
-                       "body_part": body_part(record.node), "node": record.node, "hand": record.hand,
+                       "body_part": grab_area(record), "node": record.node, "area": record.area, "hand": record.hand,
                        "intent": "intentional", "detector": "higgs_grab"}
         elif record.type == "purchase":
             payload = {"item": record.item, "item_form": record.item_form, "quantity": record.quantity,
