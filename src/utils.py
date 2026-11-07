@@ -73,6 +73,11 @@ def parse_race_name(raw_race: str | None) -> str | None:
     return raw_race
 
 
+# LIVINGWORLD PATCH: the game's mod folder from config.ini (e.g. SkyrimVR\Data), set once config is loaded.
+# Lets a run from source find GPT_SECRET_KEY.txt where the exe would.
+configured_mod_folder: str | None = None
+
+
 def resolve_path():
     if getattr(sys, 'frozen', False):
         resolved_path = os.path.dirname(sys.executable)

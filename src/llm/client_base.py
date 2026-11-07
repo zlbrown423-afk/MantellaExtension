@@ -397,20 +397,24 @@ class ClientBase(AIClient):
     def _get_api_key(service: str, show_error: bool = True) -> str | None:
         '''Resolves an API key for the given service.
 
-        Lookup order:
-        1. secret_keys.json in the mod folder
-        2. secret_keys.json next to the executable
-        3. GPT_SECRET_KEY.txt in the mod folder
-        4. GPT_SECRET_KEY.txt next to the executable
+        Lookup order (each folder in turn: the mod folder from config.ini, the mod folder worked out from
+        the exe's location, then the current folder):
+        1. secret_keys.json
+        2. GPT_SECRET_KEY.txt
 
         Args:
             service (str): The LLM service name / URL
         '''
         mod_parent_folder = Path(utils.resolve_path()).parent.parent.parent
         target_service = ClientBase._get_endpoint(service)
+        # LIVINGWORLD PATCH: also the configured mod folder, so running from source finds the key too
+        key_folders: list[Path] = []
+        for folder in [utils.configured_mod_folder, mod_parent_folder, Path('.')]:
+            if folder and Path(folder) not in key_folders:
+                key_folders.append(Path(folder))
 
         api_key = None
-        for folder in [mod_parent_folder, Path('.')]:
+        for folder in key_folders:
             json_path = folder / 'secret_keys.json'
             try:
                 with open(json_path, 'r') as f:
@@ -427,7 +431,7 @@ class ClientBase(AIClient):
                 pass
 
         if not api_key:
-            for folder in [mod_parent_folder, Path('.')]:
+            for folder in key_folders:
                 try:
                     with open(folder / 'GPT_SECRET_KEY.txt', 'r') as f:
                         val = f.readline().strip()

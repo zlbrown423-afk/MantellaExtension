@@ -143,9 +143,9 @@ class FunctionManager:
                 except Exception as e:
                     logger.error(f"Error parsing function call: {e}")
         
-        # Update cache with this turn's tool calls
-        if len(parsed_tools) > 0:
-            FunctionManager._last_tool_calls = parsed_tools
+        # Update cache with this turn's tool calls. Always, even when empty: keeping the old list after a
+        # turn whose only call was filtered meant that call stayed "duplicate" for the rest of the session.
+        FunctionManager._last_tool_calls = parsed_tools
         
         return parsed_tools
 

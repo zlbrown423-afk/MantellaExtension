@@ -105,6 +105,7 @@ def parse_record(text: str) -> PerceptionRecord:
         if "=" not in part:
             continue
         name, value = part.split("=", 1)
+        name = name.strip().lower()
         if name == "w":
             witnesses.append(_witness(value))
         else:
@@ -114,7 +115,13 @@ def parse_record(text: str) -> PerceptionRecord:
     for required in ("key", "type", "gt", "actor"):
         if not fields.get(required):
             raise BadRecord(f"record has no {required}")
-    kind = fields["type"]
+    # Papyrus keeps one case-insensitive table of every string and identifier, so a literal such as
+    # "grab" can arrive as "Grab". Enumerated values are compared lowercased.
+    kind = fields["type"].strip().lower()
+    if fields.get("via"):
+        fields["via"] = fields["via"].strip().lower()
+    if fields.get("hand"):
+        fields["hand"] = fields["hand"].strip().upper()
     if kind not in ("grab", "consume"):
         raise BadRecord(f"unknown event type {kind!r}")
     record = PerceptionRecord(
