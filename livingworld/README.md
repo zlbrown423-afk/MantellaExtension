@@ -125,6 +125,37 @@ Drinking is the `Drink` action above.
 
 When there is nothing to sit on or nowhere pointed at, the game adds an in-game event line so the NPC can say so.
 
+## Reputation and gossip (S1: word gets around Riverwood)
+
+On with `MANTELLA_LIVING_WORLD=1`. Switch gossip off with `set MANTELLA_LW_GOSSIP=0` (claims and opinions
+are still recorded). No AI call is made for any of it except one more field in the existing extraction call.
+
+| Part | Where | What it does |
+| --- | --- | --- |
+| Seed | `social/data/riverwood.json`, `social/seed.py` | Riverwood's households, kin, friendships and rivalries (Hod and Gerdur married; Sven and Faendal rivals over Camilla), village membership and how gossipy each person is. Matched by Skyrim.esm base form ID, applied once each person has been seen. Edit the JSON freely |
+| Claims | `social/claims.py`, table `claim` | Something people can pass on: "Torvar grabbed Gerdur by the left forearm". Made from perceived events (grabs, drinking, buying a round); each person who saw it holds a copy (`knowledge.claim_id`, `believed`) |
+| Event processor | `social/processor.py`, table `event_cursor` | Reads `world_event` once per consumer, so each event is appraised once; later goals, player knowledge and body language plug in here |
+| Gossip | `social/gossip.py` | When a conversation starts, the village is caught up from its last `sim_tick` in quarter-day steps (at most 60 steps, 150 ms budget). Household and close friends talk most, rivals hardly at all; gossipy people pass news on more; old news fades after 7 days and stops after 30. Each telling is a `gossip_exchange` event, the listener gets their own copy with how much they believe it (trust in the teller, never above 0.9), and their view of the person it is about moves |
+| Reports | `memory/extraction.py` | The extraction call also returns "reports": someone telling the NPC what a person did ("I helped Gerdur fix the mill wheel"). Each must cite the line and speaker, like facts; it becomes a claim the NPC can repeat |
+| Prompt | `memory/recall.py` | Up to 3 things the NPC was told, with who told them and how sure they are ("I'm not sure I believe it. I did not see it myself."), and a line on how they feel about the player from their own relationship values (`v_relationship`, now with respect, admiration and suspicion) |
+| Children | `store/minors.py`, `npc.is_child` | Child NPCs are left out of everything Living World works out: no grabs, clothing, drinking, witnesses, memories, seed, gossip or reputation. Recognised by Mantella's character list (child voices), a child race or voice type, and on the game side by `Actor.IsChild()` |
+
+Everything is on the save timeline: loading an older save takes back the gossip that happened after it.
+
+## Mood meter and quiet vanilla chatter
+
+Both are on with `MANTELLA_LIVING_WORLD=1`. Switch either off with `set MANTELLA_LW_MOOD_METER=0` or
+`set MANTELLA_LW_QUIET_CHATTER=0`.
+
+| Part | Where | What it does |
+| --- | --- | --- |
+| Mood tag | `mood.py` | Each NPC's prompt asks them to open every reply with `<mood wary 4>`: a feeling word and 0 (furious, hostile) to 5 (calm) to 10 (delighted). The tag is cut from the streamed reply before it is split into sentences, so it is never voiced, subtitled or kept in the history. No extra AI call |
+| Storage | `emotion_state` | The latest mood per NPC. A conversation within half a game day starts from it ("still feeling annoyed"); a mood stored after the loaded save's time is ignored |
+| Meter | `mantella_lw_mood` on the NPC's line | When the mood changes, the line carries text such as `Gerdur: wary [====------] tipsy` (drink stage added when not sober). Mantella-Spell shows it as a notification |
+| Quiet chatter | `mantella_lw_quiet_chatter` on the start reply | Mantella-Spell turns off vanilla hellos, idle chatter, NPC-to-NPC small talk and comments on the player's actions until the conversation ends (game settings, restored afterwards and on load) |
+
+A mood never changes a relationship or what an NPC is willing to do with their body.
+
 ### Upstream patches
 
 | File | Change |
@@ -132,7 +163,7 @@ When there is nothing to sit on or nowhere pointed at, the game adds an in-game 
 | `src/http/routes/mantella_route.py` | Optional traffic recording (does nothing unless `MANTELLA_RECORD_TRAFFIC` is set) |
 | `src/actions/function_manager.py` | Also loads `livingworld/actions/*.json` (does nothing unless `MANTELLA_LIVING_WORLD` is set) |
 | `tests/conftest.py` | Registers the `baseline_behaviour` test marker |
-| `src/output_manager.py` | Hands each turn to the Living World when it is on (group turns), refuses synthesis in the wrong voice, and keeps the "generating" flag up across a multi-speaker turn |
+| `src/output_manager.py` | Hands each turn to the Living World when it is on (group turns), refuses synthesis in the wrong voice, keeps the "generating" flag up across a multi-speaker turn, and cuts mood tags out of the streamed reply |
 | `src/conversation/context.py` | `focused_on(character)`: a copy of the context holding only the player and one NPC, for building that NPC's own prompt |
 | `src/actions/function_manager.py` | Skips actions marked `living_world` unless `MANTELLA_LIVING_WORLD` is set |
-| `src/game_manager.py` | Calls the Living World hooks at conversation start, on each request's context (perception records), each spoken line, player input, actor changes and conversation end, and wraps Mantella's memory with the recall (does nothing unless `MANTELLA_LIVING_WORLD` is set) |
+| `src/game_manager.py` | Calls the Living World hooks at conversation start, on each request's context (perception records), each spoken line (plus its mood meter), player input, actor changes and conversation end, adds the quiet-chatter key to the start reply, and wraps Mantella's memory with the recall (does nothing unless `MANTELLA_LIVING_WORLD` is set) |

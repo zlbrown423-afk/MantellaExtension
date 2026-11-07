@@ -18,8 +18,11 @@ from typing import Any, Callable
 from livingworld.memory.extraction import Extractor
 from livingworld.memory.jobs import JobQueue, JobWorker
 from livingworld.memory.recall import recall_for
+from livingworld import mood as moods
 from livingworld.perception import awareness
+from livingworld.perception.intoxication import drink_state
 from livingworld.perception.pipeline import PerceptionPipeline
+from livingworld.social.world import SocialWorld
 from livingworld.perception.records import KEY_ATTIRE, BadRecord, parse_record, records_from_context
 from livingworld.store.conversation_log import ConversationLog
 from livingworld.store.timeline import resolve_load
@@ -37,6 +40,13 @@ KEY_TIMELINE_ID = "mantella_lw_timeline_id"            # timeline stored in the 
 KEY_LOAD_NONCE = "mantella_lw_load_nonce"              # random number picked at each game load
 KEY_LOADED_GAME_DAYS = "mantella_lw_loaded_game_days"  # game days passed + 1 when the save loaded
 _ON = {"1", "true", "yes", "on"}
+_OFF = {"0", "false", "no", "off"}
+
+# Mood meter and quiet vanilla chatter: on with the Living World unless switched off
+MOOD_ENV = "MANTELLA_LW_MOOD_METER"
+QUIET_ENV = "MANTELLA_LW_QUIET_CHATTER"
+KEY_MOOD = "mantella_lw_mood"                    # sent with an NPC line: the meter text to show
+KEY_QUIET_CHATTER = "mantella_lw_quiet_chatter"  # sent with the start reply: mute vanilla chatter until the end
 
 
 def _never_raises(func: Callable) -> Callable:
@@ -75,6 +85,12 @@ class LivingWorld:
         self._last_recall: dict[int, tuple[list[int], list[int]]] = {}  # npc_id -> (know_ids, mem_ids) in their last prompt
         self._rehearsed: set[tuple[int, int]] = set()   # (conv_id, npc_id) already counted as recalled
         self._attire_now: dict[int, awareness.AttireNow] = {}   # latest attire snapshot from the game, by npc_id
+        self.mood_meter = enabled and os.environ.get(MOOD_ENV, "").strip().lower() not in _OFF
+        self.quiet_chatter = enabled and os.environ.get(QUIET_ENV, "").strip().lower() not in _OFF
+        self._moods_shown: dict[int, str] = {}      # npc_id -> meter text the game last showed
+        self._moods_to_send: dict[str, str] = {}    # speaker ref id -> meter text to send with their next line
+        self._social: dict[int, SocialWorld] = {}   # id(store) -> reputation and gossip for that world
+        self._social_refreshed: int | None = None   # conv_id the social world was last brought up to date for
         LivingWorld.latest = self
 
     @classmethod
@@ -126,6 +142,8 @@ class LivingWorld:
             return 0
         pipeline = PerceptionPipeline(self.store)
         stored = len([o for o in pipeline.ingest(raw + attire_raw) if not o.duplicate])
+        if stored:
+            self._social_for(self.store).appraise_new()   # what was seen becomes something people can pass on
         if attire_raw:
             self._attire_now = self._attire_snapshot(attire_raw, pipeline)
         return stored
@@ -173,6 +191,8 @@ class LivingWorld:
         self._context = context
         self._pending = True
         self._attire_now = {}
+        self._moods_shown = {}
+        self._moods_to_send = {}
 
     @_never_raises
     def conversation_started(self, world_id: str, context: Any) -> None:
@@ -246,6 +266,7 @@ class LivingWorld:
         present = {}
         for c in self._context.npcs_in_conversation.get_all_characters():
             present[self._npc_ids.get(c.ref_id) or self._register(c, now)] = c.name
+        self._refresh_social(now, list(present))
         blocks = []
         for character in characters:
             if character.is_player_character:
@@ -261,7 +282,68 @@ class LivingWorld:
             noticed = self._noticed(npc_id, character.name, now, present)
             if noticed:
                 blocks.append(f"What {character.name} notices right now:\n" + "\n".join(f"- {line}" for line in noticed))
+            if self.mood_meter and player is not None:
+                blocks.append("\n".join(moods.prompt_lines(character.name, self._carried_mood(npc_id, now))))
         return "\n\n".join(blocks)
+
+    def _social_for(self, store: WorldStore) -> SocialWorld:
+        if id(store) not in self._social:
+            self._social[id(store)] = SocialWorld(store)
+        return self._social[id(store)]
+
+    def _refresh_social(self, now: float, present: list[int]) -> None:
+        """Once per conversation, before the first prompt: seed, appraise and catch gossip up."""
+        if self._social_refreshed == self.conv_id:
+            return
+        self._social_refreshed = self.conv_id
+        try:
+            self._social_for(self.store).refresh(now, present)
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not bring gossip up to date; carrying on without it")
+
+    def _carried_mood(self, npc_id: int, now: float) -> "moods.Mood | None":
+        try:
+            with self.store.transaction() as db:
+                return moods.carried_over(db, npc_id, now)
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not read an NPC's last mood; leaving it out")
+            return None
+
+    # ---- mood meter (called from ChatManager and GameStateManager) ----
+    @_never_raises
+    def mood_filter(self, character: Any, characters: Any) -> "moods.MoodFilter | None":
+        """A filter that cuts mood tags out of ``character``'s streamed reply, or None when the meter is off."""
+        if not self.mood_meter or character.is_player_character or not self.handles_turn(characters):
+            return None
+        return moods.MoodFilter(lambda mood: self._mood_seen(character, mood))
+
+    @_never_raises
+    def _mood_seen(self, character: Any, mood: "moods.Mood") -> None:
+        now = self._context.game_days
+        npc_id = self._npc_ids.get(character.ref_id) or self._register(character, now)
+        with self.store.transaction() as db:
+            moods.save(db, npc_id, mood, now)
+            stage = drink_state(db, npc_id, now).stage
+        text = moods.meter_text(character.name, mood, stage)
+        logger.log(23, f"Living World mood: {text}")
+        if self._moods_shown.get(npc_id) != text:
+            self._moods_shown[npc_id] = text
+            self._moods_to_send[character.ref_id] = text
+
+    @_never_raises
+    def line_reply_keys(self, sentence: Any) -> dict[str, Any]:
+        """Extra keys for an NPC line sent to the game: the speaker's mood meter, when it changed."""
+        speaker = getattr(sentence, "speaker", None)
+        if speaker is None or sentence.is_narration:
+            return {}
+        text = self._moods_to_send.pop(speaker.ref_id, None)
+        return {KEY_MOOD: text} if text else {}
+
+    def start_reply_keys(self) -> dict[str, Any]:
+        """Extra keys for the conversation start reply."""
+        return {KEY_QUIET_CHATTER: True} if self.quiet_chatter else {}
 
     def _noticed(self, npc_id: int, name: str, now: float, present: dict[int, str]) -> list[str]:
         try:
@@ -399,7 +481,8 @@ class LivingWorld:
         identity = self._identities.get(character.ref_id) or self._identity_from_character(character)
         registry = IdentityRegistry(self.store)
         npc_id = registry.ensure_npc(identity, game_time, race=character.race, sex=character.gender,
-                                     is_generic=character.is_generic_npc)
+                                     is_generic=character.is_generic_npc,
+                                     voice=getattr(character, "in_game_voice_model", None))
         if not character.is_player_character:
             try:
                 registry.bind_voice(npc_id, character.tts_service or self.default_tts_service, character.tts_voice_model,

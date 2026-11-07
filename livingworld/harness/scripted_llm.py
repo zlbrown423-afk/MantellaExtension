@@ -203,6 +203,7 @@ class ScriptedExtraction:
     facts: list[Fact] = field(default_factory=list)
     memories: list[str] = field(default_factory=list)
     raw_facts: list[dict[str, Any]] = field(default_factory=list)  # passed through unchecked
+    reports: list[dict[str, Any]] = field(default_factory=list)    # passed through unchecked
 
     def reply(self, transcript: str) -> str:
         facts = list(self.raw_facts)
@@ -213,4 +214,17 @@ class ScriptedExtraction:
                     facts.append({"about": fact.about, "predicate": fact.predicate, "value": fact.value,
                                   "said_by": fact.said_by, "line": int(m.group(1))})
                     break
-        return json.dumps({"facts": facts, "memories": [{"text": t, "importance": 0.6} for t in self.memories]})
+        reports = []
+        for report in self.reports:
+            report = dict(report)
+            phrase = report.pop("phrase", None)
+            if phrase:   # find the line the report was said on, like Fact does
+                for line in transcript.splitlines():
+                    m = re.match(r"\[(\d+)\] ([^:]+): (.*)", line)
+                    if m and phrase.lower() in m.group(3).lower():
+                        report.setdefault("line", int(m.group(1)))
+                        report.setdefault("said_by", m.group(2))
+                        break
+            reports.append(report)
+        return json.dumps({"facts": facts, "memories": [{"text": t, "importance": 0.6} for t in self.memories],
+                           "reports": reports})

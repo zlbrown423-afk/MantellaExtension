@@ -306,7 +306,7 @@ def test_migration_keeps_existing_memories(tmp_path):
     conn.close()
 
     store = WorldStore(path)
-    assert store.schema_version() == 3
+    assert store.schema_version() == 4
     assert tuple(store.query("SELECT content, created_by, source_kind FROM memory")[0]) == \
         ("I met Torvar at the mill.", "extraction", None)
     assert store.query("SELECT rowid FROM memory_fts WHERE memory_fts MATCH 'mill'")[0][0] == 1

@@ -80,6 +80,12 @@ class WorldStore:
             else:
                 self._conn.execute("COMMIT")
 
+    @contextmanager
+    def reading(self) -> Iterator[sqlite3.Connection]:
+        """The connection under the lock, for several reads in a row (no transaction is opened)."""
+        with self._lock:
+            yield self._conn
+
     def query(self, sql: str, params: tuple | dict = ()) -> list[sqlite3.Row]:
         with self._lock:
             return self._conn.execute(sql, params).fetchall()
