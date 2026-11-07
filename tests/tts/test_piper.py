@@ -170,3 +170,25 @@ def test_voice_models(piper: Piper):
         if count >= num_models_to_check:
             break
         count += 1
+
+def test_drain_stderr_keeps_a_chatty_child_from_blocking():
+    """A child that writes far more than a pipe buffer to stderr still finishes when stderr is drained.
+
+    Piper logs to stderr on every line; an unread stderr pipe used to fill up and hang it."""
+    import subprocess
+    import sys
+    from threading import Thread
+    from src.tts.piper import drain_stderr
+
+    child = subprocess.Popen(
+        [sys.executable, '-c', "import sys\nfor i in range(5000): sys.stderr.write('[piper] [info] Real-time factor: 0.05\\n')\nprint('Synthesis complete', flush=True)"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        universal_newlines=True, encoding='utf-8', bufsize=1,
+    )
+    t = Thread(target=drain_stderr, args=(child.stderr, lambda: False), daemon=True)
+    t.start()
+    line = child.stdout.readline()
+    assert child.wait(timeout=10) == 0
+    assert line.strip() == 'Synthesis complete'
+    t.join(timeout=5)
+    assert not t.is_alive()

@@ -25,6 +25,29 @@ def enqueue_output(out, queue, stop_flag):
             break
     out.close()
 
+
+def drain_stderr(err, stop_flag):
+    """Keep reading Piper's stderr so its pipe never fills up.
+
+    Piper logs ~200 bytes to stderr per synthesized line and ~330 per voice load.
+    If nobody reads that pipe, the OS buffer fills after a dozen or so lines and Piper
+    blocks on its next log write, which shows up as 'Synthesis timed out' and a restart.
+    """
+    try:
+        for line in iter(err.readline, ''):
+            line = line.rstrip()
+            if line:
+                logger.debug(f'Piper: {line}')
+            if stop_flag():
+                break
+    except (ValueError, OSError):
+        pass # pipe closed while Piper was being restarted
+    finally:
+        try:
+            err.close()
+        except Exception:
+            pass
+
 class TTSServiceFailure(Exception):
     pass
 
@@ -240,6 +263,10 @@ class Piper(TTSable):
             self.t = Thread(target=enqueue_output, args=(self.process.stdout, self.q, lambda: self.stop_thread))
             self.t.daemon = True # thread dies with the program
             self.t.start()
+
+            self.t_err = Thread(target=drain_stderr, args=(self.process.stderr, lambda: self.stop_thread))
+            self.t_err.daemon = True
+            self.t_err.start()
         
         except Exception as e:
             utils.play_error_sound()
