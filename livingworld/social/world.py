@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
-from livingworld.social import gossip, processor
+from livingworld.social import gossip, processor, romance
 from livingworld.social.seed import Seeder
 from livingworld.store.minors import mark_children
 from livingworld.store.world_store import WorldStore
@@ -31,6 +31,7 @@ class Refresh:
     children_flagged: int = 0
     appraised: dict = field(default_factory=dict)
     catch_ups: list = field(default_factory=list)
+    romance: list = field(default_factory=list)
 
 
 class SocialWorld:
@@ -52,6 +53,11 @@ class SocialWorld:
             if gossip_enabled():
                 for key in self._communities(db, present_npc_ids):
                     result.catch_ups.append(gossip.catch_up(db, key, now_gt, budget_ms))
+            if romance.romance_enabled():
+                for key in self._communities(db, present_npc_ids):
+                    result.romance.append(romance.catch_up(db, key, now_gt, budget_ms))
+                # what romance just recorded becomes claims people can pass on
+                result.appraised = {k: result.appraised.get(k, 0) + v for k, v in processor.process(db).items()}
         told = sum(c.tellings for c in result.catch_ups)
         if result.seeded or told or result.appraised:
             logger.log(23, f"Living World social: seeded {result.seeded}, appraised {result.appraised}, "

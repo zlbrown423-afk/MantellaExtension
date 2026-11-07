@@ -92,6 +92,11 @@ def appraise(db, event) -> int | None:
         detail, valence = "", 0.3
         if is_child(db, obj):
             return None
+    elif etype.startswith("romance."):
+        romantic = _romance_claim(etype, payload)
+        if romantic is None:
+            return None
+        act_name, detail, magnitude, sensitivity, valence = romantic
     else:
         return None
 
@@ -108,11 +113,41 @@ def appraise(db, event) -> int | None:
         if is_player or npc_id == subject or is_child(db, npc_id):
             continue
         share = "yes"
-        if npc_id == obj and sensitivity == "private":
+        if npc_id == obj and act_name in ("spent_night", "caught_with"):
+            share = "no"             # their own night is not something they pass on
+        elif npc_id == obj and sensitivity == "private":
             share = "trusted_only"   # embarrassing for them: only told to people they are close to
+        believed = min(WITNESS_CAP, confidence if confidence is not None else 0.9)
         _hold(db, event["timeline_id"], npc_id, claim_id, subject, "witnessed", None, None, event["event_id"], None,
-              magnitude, min(WITNESS_CAP, confidence if confidence is not None else 0.9), share, event["game_time"])
+              magnitude, believed, share, event["game_time"])
+        if etype.startswith("romance."):
+            from livingworld.social import romance
+            romance.on_learned(db, event["timeline_id"], npc_id,
+                               {"act": act_name, "subject_id": subject, "object_id": obj}, believed,
+                               event["game_time"], event["event_id"])
     return claim_id
+
+
+BOND_ACTS = {"courting": "is_courting", "dating": "is_seeing", "partners": "together", "betrothed": "betrothed",
+             "married": "married", "ended": "broke_up"}
+
+
+def _romance_claim(etype: str, payload: dict) -> tuple[str, str, float, str, float] | None:
+    """(act, detail, magnitude, sensitivity, valence) for a romance event people would talk about."""
+    secret = bool(payload.get("secret"))
+    if etype == "romance.flirt":
+        return "flirted", "", 0.3, "public", 0.0
+    if etype == "romance.encounter":
+        return "spent_night", f" at {payload.get('place_name') or 'a private place'}", 0.6, "private", \
+            -0.3 if secret else 0.0
+    if etype == "romance.interrupted":
+        return "caught_with", f" at {payload.get('place_name') or 'a private place'}", 0.8, "private", \
+            -0.5 if secret else -0.1
+    if etype == "romance.bond_changed" and not secret:
+        act_name = "reconciled" if payload.get("reason") == "reconciled" else BOND_ACTS.get(payload.get("stage_to"))
+        if act_name:
+            return act_name, "", 0.4, "public", 0.1 if act_name in ("married", "betrothed") else 0.0
+    return None
 
 
 def _party_id(db, event_id: int, buyer: int) -> int | None:
@@ -163,6 +198,9 @@ def hear(db, timeline: int, listener: int, teller: int, claim: dict, teller_know
                        " reason, game_time) VALUES (?,?,?,?,?,?,?)",
                        (timeline, listener, claim["subject_id"], json.dumps(deltas), event_id,
                         f"heard from {teller_name}: claim {claim['claim_id']}", gt))
+        if claim["act"] in ("flirted", "spent_night", "caught_with"):
+            from livingworld.social import romance
+            romance.on_learned(db, timeline, listener, claim, believed, gt, event_id)
     return know_id
 
 
