@@ -5,7 +5,7 @@ something eaten or drunk) and sends the queue with the next Mantella request, un
 ``mantella_lw_events``. Each record is ``key=value`` pairs joined by ``|``::
 
     v=1|key=812345-3|type=grab|gt=3.512|loc=Riverwood|actor=<actor>|target=<actor>
-      |node=NPC L Forearm [LLar]|hand=L|dur=4.2|w=<witness>|w=<witness>
+      |node=NPC L Forearm [LLar]|area=left forearm|hand=L|dur=4.2|w=<witness>|w=<witness>
 
     v=1|key=812345-4|type=consume|gt=3.6|loc=Riverwood|actor=<actor>|item=Ale|item_form=<int>
       |food=1|via=higgs_mouth|qty=1|w=<witness>
@@ -14,6 +14,11 @@ something eaten or drunk) and sends the queue with the next Mantella request, un
 
     v=1|key=812345-6|type=purchase|gt=3.8|loc=Sleeping Giant Inn|actor=<actor>|target=<actor>|item=Nord Mead
       |item_form=<int>|qty=2|gold=10|payer=player|party=<actor>|w=<witness>
+
+On a grab, ``node`` is the ragdoll body HIGGS holds and ``area`` is where the player's hand actually is,
+worked out in game from the hand's position against the NPC's skeleton (empty when the game could not
+tell). Skyrim's ragdoll has only a few large spine bodies for the whole torso, so ``node`` alone cannot
+tell a shoulder from the waist or the chest from the back.
 
 An ``attire`` record is a snapshot of what one actor wears in the body slot (32): ``cover`` is
 ``clothing``, ``armor`` or ``none`` (nothing in the body slot), and witnesses are listed only when
@@ -81,6 +86,7 @@ class PerceptionRecord:
     actor: GameActor
     target: GameActor | None = None
     node: str | None = None         # skeleton node HIGGS reports as held
+    area: str | None = None         # grab: where the hand was, from its position ('left shoulder', 'lower back')
     hand: str | None = None         # 'L' | 'R'
     duration_s: float | None = None
     item: str | None = None
@@ -153,7 +159,7 @@ def parse_record(text: str) -> PerceptionRecord:
     record = PerceptionRecord(
         key=fields["key"], type=kind, game_time=float(fields["gt"]), location=fields.get("loc") or None,
         actor=_actor(fields["actor"]), target=_actor(fields["target"]) if fields.get("target") else None,
-        node=fields.get("node") or None, hand=fields.get("hand") or None,
+        node=fields.get("node") or None, area=_area(fields.get("area")), hand=fields.get("hand") or None,
         duration_s=float(fields["dur"]) if fields.get("dur") else None,
         item=fields.get("item") or None, item_form=int(fields["item_form"]) if fields.get("item_form") else None,
         is_food=fields.get("food") == "1", via=fields.get("via") or None,
@@ -191,12 +197,30 @@ def status_for_rank(rank: int | None) -> str | None:
 
 
 # ---- body parts ----------------------------------------------------------------------------------
-# Skyrim skeleton node names look like "NPC L Forearm [LLar]". HIGGS names the node the hand holds.
+# Skyrim skeleton node names look like "NPC L Forearm [LLar]". HIGGS names the ragdoll body the hand
+# holds. The torso has only a few large spine bodies, so a spine node says little more than "the torso":
+# grabbing the shoulder, the waist or the back all report a spine. The game therefore also sends ``area``,
+# worked out from the hand's position; the node is only the fallback (older saves, or no hand position).
 _PARTS = [
     (r"head|face|jaw", "head"), (r"neck", "neck"), (r"clavicle", "shoulder"), (r"upperarm", "upper arm"),
-    (r"forearm", "forearm"), (r"hand|finger|thumb", "hand"), (r"spine2|chest|breast", "chest"),
-    (r"spine|back", "back"), (r"pelvis", "hips"), (r"thigh", "thigh"), (r"calf", "leg"), (r"foot|toe", "foot"),
+    (r"forearm", "forearm"), (r"hand|finger|thumb", "hand"), (r"spine2", "upper body"),
+    (r"spine", "waist"), (r"pelvis", "hips"), (r"thigh", "thigh"), (r"calf", "leg"), (r"foot|toe", "foot"),
 ]
+
+# Every area the game can send, without its side. Anything else is ignored, so a garbled record can
+# never put odd words into a memory.
+AREAS = {"head", "face", "neck", "shoulder", "upper arm", "forearm", "hand", "chest", "upper back", "stomach",
+         "lower back", "side", "hips", "hip", "backside", "thigh", "leg", "foot"}
+
+
+def _area(text: str | None) -> str | None:
+    if not text:
+        return None
+    words = " ".join(text.lower().split())
+    side, _, rest = words.partition(" ")
+    if side in ("left", "right") and rest in AREAS:
+        return words
+    return words if words in AREAS else None
 
 
 def body_part(node: str | None) -> str | None:
@@ -215,7 +239,12 @@ def body_part(node: str | None) -> str | None:
     return None
 
 
-SENSITIVE_PARTS = {"head", "neck", "chest", "hips"}
+def grab_area(record: "PerceptionRecord") -> str | None:
+    """Where the grab landed: the area the game worked out from the hand's position, else from the node."""
+    return record.area or body_part(record.node)
+
+
+SENSITIVE_PARTS = {"head", "face", "neck", "chest", "hips", "backside"}
 
 
 # ---- consumables ---------------------------------------------------------------------------------

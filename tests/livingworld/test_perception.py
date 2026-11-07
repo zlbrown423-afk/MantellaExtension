@@ -14,7 +14,8 @@ from livingworld.harness.perception import KEY_EVENTS, consume, grab, seen
 from livingworld.harness.scripted_llm import ScriptedLLM
 from livingworld.harness.session import HeadlessSession
 from livingworld.integration import ENV_VAR, KEY_LOAD_NONCE, KEY_LOADED_GAME_DAYS, KEY_TIMELINE_ID, LivingWorld
-from livingworld.perception.records import BadRecord, body_part, item_category, parse_record
+from livingworld.perception.formation import Bond, grab_for_target
+from livingworld.perception.records import BadRecord, body_part, grab_area, item_category, parse_record
 from livingworld.store.world_store import WorldStore
 
 FOREARM = "NPC L Forearm [LLar]"
@@ -75,9 +76,37 @@ def test_body_part_names_come_from_skeleton_nodes():
     assert body_part("NPC R UpperArm [RUar]") == "right upper arm"
     assert body_part("NPC L Clavicle [LClv]") == "left shoulder"
     assert body_part("NPC Head [Head]") == "head"
-    assert body_part("NPC Spine2 [Spn2]") == "chest"
+    # a spine body covers the whole torso, front and back, so the node alone stays vague
+    assert body_part("NPC Spine2 [Spn2]") == "upper body"
+    assert body_part("NPC Spine1 [Spn1]") == "waist"
+    assert "spine" not in body_part("NPC Spine [Spn0]")
     assert body_part("SomeWeirdNode") is None
     assert body_part(None) is None
+
+
+def test_area_from_hand_position_wins_over_node():
+    rec = parse_record(grab(actors.player("Torvar"), actors.gerdur(), node="NPC Spine1 [Spn1]", seconds=2.0,
+                            game_days=3.5, area="Left Shoulder"))
+    assert rec.area == "left shoulder"
+    assert grab_area(rec) == "left shoulder"
+    memory = grab_for_target(rec, Bond())
+    assert "by my left shoulder" in memory.content and "spine" not in memory.content.lower()
+
+
+def test_unknown_area_falls_back_to_node():
+    rec = parse_record(grab(actors.player("Torvar"), actors.gerdur(), node="NPC Spine2 [Spn2]", seconds=2.0,
+                            game_days=3.5, area="kidneys please"))
+    assert rec.area is None and grab_area(rec) == "upper body"
+    rec = parse_record(grab(actors.player("Torvar"), actors.gerdur(), node="NPC Pelvis [Pelv]", seconds=2.0,
+                            game_days=3.5))
+    assert rec.area is None and grab_area(rec) == "hips"
+
+
+def test_sensitive_area_from_position_reads_as_threatening():
+    rec = parse_record(grab(actors.player("Torvar"), actors.gerdur(), node="NPC Pelvis [Pelv]", seconds=2.0,
+                            game_days=3.5, area="backside"))
+    memory = grab_for_target(rec, Bond(status="friend"))
+    assert "backside" in memory.content and memory.valence <= -0.5
 
 
 def test_item_categories_treat_alcohol_separately():
