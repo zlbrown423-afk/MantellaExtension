@@ -228,3 +228,32 @@ def test_long_absence_is_covered_in_a_bounded_number_of_steps(tmp_path):
     with store.transaction() as db:
         result = gossip.catch_up(db, "riverwood", 400.0)
     assert result.steps <= gossip.MAX_STEPS
+
+
+def test_riverwood_seed_data_is_consistent():
+    """Every name and community exists, no child is seeded, each pair has both directions once, and
+    kinship read from each side matches (Hilde is Sven's parent, Sven is Hilde's child)."""
+    from livingworld.social.seed import seeds, _local_id
+    from livingworld.store.minors import looks_like_child
+    inverse = {"spouse": {"spouse"}, "sibling": {"sibling"}, "parent": {"child"}, "child": {"parent"},
+               "nephew": {"uncle", "aunt"}, "uncle": {"nephew"}, "aunt": {"nephew"}}
+    for seed in seeds():
+        communities = {c["key"] for c in seed["communities"]}
+        people = {p["key"] for p in seed["people"]}
+        for p in seed["people"]:
+            assert not looks_like_child(_local_id(p["base_id"])), p["key"]
+            assert set(p["member_of"]) <= communities, p["key"]
+        rows = {}
+        for r in seed["relationships"]:
+            assert r["a"] in people and r["b"] in people
+            back = r.get("back") or {}
+            directions = [(r["a"], r["b"], r.get("kinship"))]
+            if not r.get("one_way"):
+                directions.append((r["b"], r["a"], back.get("kinship", r.get("kinship"))))
+            for a, b, kinship in directions:
+                assert (a, b) not in rows, f"{a}->{b} written twice"
+                rows[(a, b)] = kinship
+        for (a, b), kinship in rows.items():
+            assert (b, a) in rows, f"{a}->{b} has no {b}->{a}"
+            if kinship:
+                assert rows[(b, a)] in inverse[kinship], (a, b, kinship, rows[(b, a)])
