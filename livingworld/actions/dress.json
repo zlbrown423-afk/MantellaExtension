@@ -1,0 +1,23 @@
+{
+    "identifier": "mantella_lw_npc_dress",
+    "name": "Dress",
+    "description": "The NPC puts their clothes and armor back on: what they took off with Undress, or else the best they carry. They may do it whenever they want to, including to end something they no longer want, and no one can stop them.",
+    "note": "Living World (MANTELLA_LIVING_WORLD=1). The game re-equips the items Undress removed.",
+    "key": "Dress",
+    "parameters": {
+        "source": {
+            "type": "string",
+            "description": "The NPC who gets dressed.",
+            "scope": "conversation"
+        }
+    },
+    "required": ["source"],
+    "prompt": "If you want to put your clothes back on, begin your response with '{key}:'",
+    "allowed_games": ["skyrim"],
+    "requires_response": false,
+    "is-interrupting": false,
+    "allow_repeat": true,
+    "one-on-one": true,
+    "multi-npc": true,
+    "radiant": false
+}
