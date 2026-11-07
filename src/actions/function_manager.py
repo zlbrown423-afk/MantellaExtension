@@ -1,3 +1,4 @@
+import os
 import json
 from pathlib import Path
 from copy import deepcopy
@@ -263,6 +264,10 @@ class FunctionManager:
             name = action_data.get('name')
             if not name:
                 logger.warning(f"Action in '{file_path.name}' is missing a 'name' field, skipping")
+                continue
+
+            # LIVINGWORLD PATCH: actions marked "living_world" need the Living World build and are off without it
+            if action_data.get('living_world') and os.environ.get('MANTELLA_LIVING_WORLD', '').strip().lower() not in ('1', 'true', 'yes', 'on'):
                 continue
 
             # Skip actions whose name is in the disabled set
