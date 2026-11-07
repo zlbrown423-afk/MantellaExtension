@@ -185,3 +185,44 @@ def consume_for_actor(record: PerceptionRecord) -> MemoryDraft:
     _, phrase = _item_phrase(record)
     return MemoryDraft(content=f"I {phrase}{_place(record)}.", interpretation=None, importance=0.15, valence=0.1,
                        intensity=0.1, confidence=1.0, source_kind="experienced", deltas_to_actor={})
+
+
+# ---- buying a round (OrderDrinks action) ----------------------------------------------------------
+
+def _round(record: PerceptionRecord) -> str:
+    return f"{record.quantity} {record.item}" if record.quantity > 1 else f"a {record.item}"
+
+
+def _price(record: PerceptionRecord) -> str:
+    return f" for {record.gold} gold" if record.gold else ""
+
+
+def purchase_for_actor(record: PerceptionRecord) -> MemoryDraft:
+    """The NPC who went to the bar."""
+    party = record.party.name if record.party else None
+    if record.payer == "player" and party:
+        paid, interpretation = f" {party} paid.", None
+    else:
+        paid = " I paid."
+        interpretation = f"My treat for {party}." if party else None
+    share = f", a round for {party} and me" if party else ""
+    return MemoryDraft(content=f"I bought {_round(record)} from {record.target.name}{_price(record)}"
+                               f"{_place(record)}{share}.{paid}",
+                       interpretation=interpretation, importance=0.25, valence=0.2, intensity=0.15, confidence=1.0,
+                       source_kind="experienced", deltas_to_actor={})
+
+
+def purchase_for_seller(record: PerceptionRecord) -> MemoryDraft:
+    """The bartender: a sale, nothing more."""
+    return MemoryDraft(content=f"{record.actor.name} bought {_round(record)} from me{_price(record)}{_place(record)}.",
+                       interpretation=None, importance=0.1, valence=0.1, intensity=0.05, confidence=1.0,
+                       source_kind="experienced", deltas_to_actor={})
+
+
+def purchase_for_witness(record: PerceptionRecord, seen: Perception) -> MemoryDraft:
+    hedge = "I saw" if seen.confidence >= 0.8 else "I think I saw"
+    share = f" for {record.actor.name} and {record.party.name}" if record.party else ""
+    return MemoryDraft(content=f"{hedge} {record.actor.name} buy {_round(record)} from {record.target.name}{share}"
+                               f"{_place(record)}.",
+                       interpretation=None, importance=0.15, valence=0.0, intensity=0.05, confidence=seen.confidence,
+                       source_kind="witnessed", deltas_to_actor={})

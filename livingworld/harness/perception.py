@@ -65,3 +65,16 @@ def attire(actor_json: dict[str, Any], cover: str, game_days: float, body: str =
              f"actor={actor_field(actor_json)}", f"body={body}", f"cover={cover}"]
     parts += [f"w={w}" for w in witnesses or []]
     return "|".join(parts)
+
+
+def purchase(buyer_json: dict[str, Any], seller_json: dict[str, Any], item: str, quantity: int, gold: int,
+             game_days: float, payer: str = "player", party_json: dict[str, Any] | None = None,
+             location: str = "Sleeping Giant Inn", witnesses: list[str] | None = None, key: str | None = None) -> str:
+    """A round bought by the OrderDrinks action, as MantellaRepository.LwRecordPurchase writes it."""
+    parts = ["v=1", f"key={key or _key()}", "type=purchase", f"gt={game_days}", f"loc={location}",
+             f"actor={actor_field(buyer_json)}", f"target={actor_field(seller_json)}", f"item={item}", "item_form=0",
+             f"qty={quantity}", f"gold={gold}", f"payer={payer}"]
+    if party_json:
+        parts.append(f"party={actor_field(party_json)}")
+    parts += [f"w={w}" for w in witnesses or []]
+    return "|".join(parts)
