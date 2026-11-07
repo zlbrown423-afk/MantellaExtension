@@ -8,6 +8,9 @@ Only changes are stored, as ``world_event`` rows of type ``attire`` on the activ
 * while they stay that way, NPCs who arrive and see them get the same event and a memory, once;
 * they dress again: one event that closes the state, no memories.
 
+When an NPC chose it (the Undress action, ``via=action``), the memories say they took their clothes
+off themself, not that they were seen going about like that.
+
 Someone never seen before counts as dressed. This is perception only. Nothing here changes a
 relationship, and nothing here changes what anyone is willing to do.
 """
@@ -23,6 +26,7 @@ from livingworld.perception.records import PerceptionRecord
 
 EVENT_TYPE = "attire"
 UNCOVERED_IMPORTANCE = 0.45   # just above recall's threshold, so an NPC may bring it up unprompted
+CHOSEN_IMPORTANCE = 0.55      # undressing by choice is more memorable
 
 
 @dataclass
@@ -49,9 +53,19 @@ def _place(record: PerceptionRecord) -> str:
     return f" in {record.location}" if record.location else ""
 
 
+def chosen(record: PerceptionRecord) -> bool:
+    """The actor undressed by their own choice (the Living World Undress action)."""
+    return record.via == "action"
+
+
 def uncovered_for_witness(record: PerceptionRecord, seen: Perception, to_actor: Bond) -> MemoryDraft:
     actor = record.actor.name
     hedge = "I saw" if seen.confidence >= 0.8 else "I think I saw"
+    if chosen(record):
+        return MemoryDraft(
+            content=f"{hedge} {actor} take off their clothes, down to their underclothes{_place(record)}.",
+            interpretation=None, importance=formation._clamp(CHOSEN_IMPORTANCE * (0.7 + 0.3 * seen.confidence)),
+            valence=0.0, intensity=0.4, confidence=seen.confidence, source_kind="witnessed", deltas_to_actor={})
     if to_actor.close:
         interpretation = f"Strange to see {actor} like that. I hope nothing is wrong."
         valence = -0.1
@@ -70,6 +84,10 @@ def uncovered_for_self(record: PerceptionRecord, seen_by: list[str]) -> MemoryDr
         who = f" {names} saw me."
     else:
         who = ""
+    if chosen(record):
+        return MemoryDraft(content=f"I chose to take off my clothes, down to my underclothes{_place(record)}.{who}",
+                           interpretation=None, importance=CHOSEN_IMPORTANCE, valence=0.0, intensity=0.4,
+                           confidence=1.0, source_kind="experienced", deltas_to_actor={})
     return MemoryDraft(content=f"I had no clothes or armor on, only underclothes{_place(record)}.{who}",
                        interpretation=None, importance=0.4, valence=-0.1, intensity=0.3, confidence=1.0,
                        source_kind="experienced", deltas_to_actor={})
@@ -114,7 +132,7 @@ class AttireTracker:
                     " game_key, real_time, confidence) VALUES (?,?,?,?,?,?,?,?,?,?)",
                     (timeline, EVENT_TYPE, record.location, json.dumps([actor_id]),
                      json.dumps({"covered": covered, "cover": record.cover, "body": record.body,
-                                 "nearby_but_unseen": unseen}),
+                                 "chosen": chosen(record), "nearby_but_unseen": unseen}),
                      "game", gt, record.key, datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"), 1.0)
                 ).lastrowid
                 new_state = True

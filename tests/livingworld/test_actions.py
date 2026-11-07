@@ -102,3 +102,25 @@ def test_basic_mode_sends_sit_and_stand_up_to_the_game(living_world_on, tmp_path
     assert any({'identifier': lw_actions.SIT} in line.actions for line in sit_lines)
     assert any({'identifier': lw_actions.STAND_UP} in line.actions for line in stand_lines)
 
+
+
+# ---- Undress / Dress ----------------------------------------------------------------------------------
+
+def test_undress_is_the_npcs_own_choice(living_world_on):
+    """The NPC decides; persuasion, gifts and gold are only weighed, drink never makes them willing."""
+    FunctionManager.load_all_actions()
+    action = FunctionManager._actions[lw_actions.UNDRESS]
+    text = action['description']
+    for words in ("own choice", "refuse", "who else is nearby", "gold", "never obliges", "Drink never",
+                  "Never for children"):
+        assert words in text, words
+    assert "decide" in action['prompt'] and "may refuse" in action['prompt']
+    assert "drink" in action['prompt']
+
+
+def test_undress_and_dress_calls_reach_the_game(living_world_on):
+    FunctionManager.load_all_actions()
+    assert FunctionManager.parse_function_calls([_call('Undress', source='Gerdur')]) == [
+        {'identifier': lw_actions.UNDRESS, 'arguments': {'source': 'Gerdur'}}]
+    assert FunctionManager.parse_function_calls([_call('Dress', source='Gerdur')]) == [
+        {'identifier': lw_actions.DRESS, 'arguments': {'source': 'Gerdur'}}]

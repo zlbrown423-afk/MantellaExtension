@@ -232,3 +232,58 @@ def test_what_a_drunk_npc_sees_is_hazy(tmp_path):
     assert len(seen_it) == 1
     assert seen_it[0]["content"].endswith("I'd had a lot to drink.")
     assert seen_it[0]["confidence"] < 0.95
+
+
+# ---- an NPC choosing to undress (Undress / Dress actions) -------------------------------------------
+
+def frodnar():
+    # a child, recognised from Mantella's character list
+    return actors.actor("Frodnar", 0x0001347E, 0x0001348B, 0, "Nord", "MaleEvenToned")
+
+
+def test_npc_who_chose_to_undress_and_witnesses_remember_it_as_her_choice(tmp_path):
+    talk(tmp_path, [actors.gerdur()], 3.5)
+    talk(tmp_path, [actors.gerdur()], 3.52, events=[
+        attire(actors.gerdur(), "none", 3.52, via="action", witnesses=[seen(actors.hod(), 3.0)])],
+        snapshot=[undressed(actors.gerdur(), 3.52, witnesses=[seen(actors.hod(), 3.0)])])
+    db = open_db(tmp_path)
+    (event,) = db.execute("SELECT * FROM world_event WHERE type = 'attire'").fetchall()
+    assert json.loads(event["payload_json"])["chosen"] is True
+    (own,) = memories(db, "Gerdur")
+    assert own["content"] == "I chose to take off my clothes, down to my underclothes in Riverwood. Hod saw me."
+    (h,) = memories(db, "Hod")
+    assert h["content"] == "I saw Gerdur take off their clothes, down to their underclothes in Riverwood."
+    assert db.execute("SELECT COUNT(*) FROM relationship_change").fetchone()[0] == 0
+
+
+def test_dressing_by_choice_closes_it(tmp_path):
+    talk(tmp_path, [actors.gerdur()], 3.5)
+    talk(tmp_path, [actors.gerdur()], 3.52, events=[attire(actors.gerdur(), "none", 3.52, via="action")])
+    prompt = talk(tmp_path, [actors.gerdur()], 3.53, events=[
+        attire(actors.gerdur(), "clothing", 3.53, body="Farm Clothes", via="action")],
+        snapshot=[dressed(actors.gerdur(), 3.53)])
+    db = open_db(tmp_path)
+    covered = [json.loads(r[0])["covered"] for r in
+               db.execute("SELECT payload_json FROM world_event WHERE type = 'attire' ORDER BY game_time")]
+    assert covered == [False, True]
+    assert "Gerdur has no clothes or armor on right now" not in prompt
+
+
+def test_a_child_undressing_record_is_ignored(tmp_path):
+    talk(tmp_path, [actors.gerdur()], 3.5)
+    talk(tmp_path, [actors.gerdur()], 3.52, events=[
+        attire(frodnar(), "none", 3.52, via="action", witnesses=[seen(actors.gerdur(), 2.0)])])
+    db = open_db(tmp_path)
+    assert db.execute("SELECT COUNT(*) FROM world_event WHERE type = 'attire'").fetchone()[0] == 0
+    assert memories(db, "Gerdur") == []
+
+
+def test_npc_knows_who_else_is_nearby(tmp_path):
+    talk(tmp_path, [actors.gerdur()], 3.5)
+    prompt = talk(tmp_path, [actors.gerdur()], 3.51, snapshot=[
+        dressed(PLAYER, 3.51), dressed(actors.gerdur(), 3.51), dressed(actors.hod(), 3.51), dressed(frodnar(), 3.51)])
+    assert "Also nearby, not part of this conversation: Hod." in prompt
+    alone = talk(tmp_path, [actors.gerdur()], 3.52, snapshot=[dressed(PLAYER, 3.52), dressed(actors.gerdur(), 3.52)])
+    assert "No one else is nearby" in alone
+    no_snapshot = talk(tmp_path, [actors.gerdur()], 3.53)
+    assert "Also nearby" not in no_snapshot and "No one else is nearby" not in no_snapshot

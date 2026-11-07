@@ -59,11 +59,13 @@ def consume(actor_json: dict[str, Any], item: str, game_days: float, is_food: bo
 
 
 def attire(actor_json: dict[str, Any], cover: str, game_days: float, body: str = "", location: str = "Riverwood",
-           witnesses: list[str] | None = None, key: str | None = None) -> str:
+           witnesses: list[str] | None = None, key: str | None = None, via: str | None = None) -> str:
     """What ``actor_json`` wears in the body slot: cover is 'clothing', 'armor' or 'none'.
-    The game lists witnesses only when cover is 'none'."""
+    The game lists witnesses only when cover is 'none'. ``via='action'``: the NPC chose it (Undress / Dress)."""
     parts = ["v=1", f"key={key or _key('attire')}", "type=attire", f"gt={game_days}", f"loc={location}",
              f"actor={actor_field(actor_json)}", f"body={body}", f"cover={cover}"]
+    if via:
+        parts.append(f"via={via}")
     parts += [f"w={w}" for w in witnesses or []]
     return "|".join(parts)
 
