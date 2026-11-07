@@ -26,7 +26,8 @@ You read a conversation {owner} took part in and record only what {owner} now kn
 
 Return JSON only, with this shape:
 {{"facts": [{{"about": "<name>", "predicate": "<short_snake_case>", "value": "<short value>", "said_by": "<name>", "line": <line number>}}],
- "memories": [{{"text": "<one sentence, first person, as {owner}>", "importance": <0.0 to 1.0>}}]}}
+ "memories": [{{"text": "<one sentence, first person, as {owner}>", "importance": <0.0 to 1.0>}}],
+ "reports": [{{"about": "<name>", "did": "<short past-tense phrase>", "valence": <-1.0 to 1.0>, "said_by": "<name>", "line": <line number>}}]}}
 
 Rules:
 - A fact is a lasting personal detail about a named person: age, hometown, family, job, likes, fears, plans, and so on.
@@ -35,6 +36,10 @@ Rules:
 - "about" must be one of: {names}.
 - Facts {owner} states about themselves count too (about = said_by = {owner}).
 - Memories are what {owner} would remember about this conversation, at most 3.
+- A report is someone other than {owner} telling {owner} what a person did: a past action, not an opinion or a plan.
+  "did" continues the person's name, e.g. "helped Gerdur carry timber" or "stole a sweetroll from Lucan".
+  "valence" is how well it reflects on that person (-1 very badly, 1 very well). "about" may be anyone named,
+  present or not, but never {owner}. Only record reports that were actually said; at most 3.
 """
 
 USER_PROMPT = """Conversation at {location}. People present: {names}.
@@ -56,6 +61,7 @@ class Line:
 @dataclass
 class ExtractionResult:
     facts_added: int = 0
+    reports_added: int = 0
     facts_skipped: int = 0
     memories_added: int = 0
     rejected: list[str] = field(default_factory=list)
@@ -77,6 +83,7 @@ def parse_reply(reply: str | None) -> dict[str, Any]:
         raise ValueError("extraction reply is not a JSON object")
     data.setdefault("facts", [])
     data.setdefault("memories", [])
+    data.setdefault("reports", [])
     return data
 
 
@@ -200,16 +207,71 @@ class Extractor:
                 db.execute("INSERT INTO memory_source (mem_id, utt_id) VALUES (?, ?)", (cur.lastrowid, heard[-1].utt_id))
                 result.memories_added += 1
 
+        self._apply_reports(owner_id, data, by_seq, names, location, game_time, result)
         for reason in result.rejected:
             logger.log(23, f"Living World: dropped a fact for {names[owner_id]}: {reason}")
         return result
+
+    # ---- reports about other people become claims that can spread (livingworld/social) ----
+    def _apply_reports(self, owner_id: int, data: dict[str, Any], by_seq: dict[int, Line], names: dict[int, str],
+                       location: str, game_time: float, result: ExtractionResult) -> None:
+        from livingworld.social import claims
+        from livingworld.store.minors import is_child
+        by_name = {name.lower(): npc_id for npc_id, name in names.items()}
+        with self.store.transaction() as db:
+            timeline = db.execute("SELECT timeline_id FROM timeline WHERE is_active = 1").fetchone()[0]
+            if is_child(db, owner_id):
+                return
+            for report in (data.get("reports") or [])[:3]:
+                try:
+                    said_by = by_name.get(str(report.get("said_by", "")).strip().lower())
+                    about_name = str(report.get("about", "")).strip()
+                    did = " ".join(str(report.get("did", "")).split())[:160]
+                    valence = max(-1.0, min(1.0, float(report.get("valence", 0))))
+                    line = by_seq.get(int(report.get("line")))
+                except (TypeError, ValueError, AttributeError):
+                    result.rejected.append(f"malformed report: {report}")
+                    continue
+                about = by_name.get(about_name.lower()) or self._named(db, about_name)
+                if said_by is None or about is None or not did:
+                    result.rejected.append(f"report with unknown person or nothing said: {report}")
+                    continue
+                if line is None or line.speaker_id != said_by or said_by == owner_id or about == owner_id:
+                    result.rejected.append(f"report not said on that line by someone else: {report}")
+                    continue
+                if is_child(db, about) or is_child(db, said_by):
+                    continue
+                if db.execute("SELECT 1 FROM v_claim_knowledge WHERE holder_id = ? AND subject_id = ? AND act = 'reported'"
+                              " AND lower(detail) = lower(?)", (owner_id, about, did)).fetchone():
+                    continue
+                magnitude = round(0.3 + 0.5 * abs(valence), 3)
+                claim_id = db.execute(
+                    "INSERT INTO claim (timeline_id, subject_id, act, detail, valence, magnitude, location, game_time)"
+                    " VALUES (?,?,?,?,?,?,?,?)", (timeline, about, "reported", did, valence, magnitude, location,
+                                                  game_time)).lastrowid
+                claim = {"claim_id": claim_id, "subject_id": about, "act": "reported", "object_id": None,
+                         "valence": valence}
+                claims.hear(db, timeline, owner_id, said_by, claim, None, 1.0, magnitude, game_time,
+                            utt_id=line.utt_id)
+                result.reports_added += 1
+
+    def _is_child(self, npc_id: int) -> bool:
+        from livingworld.store.minors import is_child
+        with self.store.transaction() as db:
+            return is_child(db, npc_id)
+
+    @staticmethod
+    def _named(db, name: str) -> int | None:
+        """An NPC not in the conversation, by name, only if the name is unambiguous."""
+        rows = db.execute("SELECT npc_id FROM npc WHERE lower(display_name) = lower(?) AND is_player = 0", (name,)).fetchall()
+        return rows[0][0] if len(rows) == 1 else None
 
     # ---- the whole conversation ----
     def extract_conversation(self, conv_id: int) -> dict[str, ExtractionResult]:
         results = {}
         for npc_id, name, is_player in self.participants(conv_id):
-            if is_player:
-                continue
+            if is_player or self._is_child(npc_id):
+                continue   # children are left out of Living World memory
             results[name] = self.extract_for(conv_id, npc_id)
             r = results[name]
             logger.log(23, f"Living World: {name} learned {r.facts_added} facts and {r.memories_added} memories"

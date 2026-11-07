@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from livingworld.perception import formation
 from livingworld.perception.intoxication import drink_state, drinks_seen
 from livingworld.perception.records import PerceptionRecord
+from livingworld.store.minors import is_child
 
 SEEN_DRINKS_WORTH_MENTIONING = 2
 NOTICING_UNCHANGED = "Noticing this does not change what {name} wants or is willing to do."
@@ -44,11 +45,13 @@ def lines_for(db, npc_id: int, name: str, now_gt: float, present: dict[int, str]
               attire: dict[int, AttireNow]) -> list[str]:
     """Prompt lines for ``npc_id``. ``present`` maps everyone in the conversation (player included) to names."""
     lines: list[str] = []
+    if is_child(db, npc_id):
+        return lines        # children are left out of clothing and drink awareness entirely
     mine = attire.get(npc_id)
     if mine and not mine.covered:
         lines.append(f"{name} has no clothes or armor on right now, only underclothes, and is aware of it.")
     for other_id, other in attire.items():
-        if other_id == npc_id or other.covered:
+        if other_id == npc_id or other.covered or is_child(db, other_id):
             continue
         if other_id in present or npc_id in other.seen_by:
             lines.append(f"{name} can see that {other.name} has no clothes or armor on, only underclothes.")
@@ -60,7 +63,7 @@ def lines_for(db, npc_id: int, name: str, now_gt: float, present: dict[int, str]
     if own:
         lines.append(own)
     for other_id, other_name in present.items():
-        if other_id == npc_id:
+        if other_id == npc_id or is_child(db, other_id):
             continue
         seen = drinks_seen(db, npc_id, other_id, now_gt)
         if seen >= SEEN_DRINKS_WORTH_MENTIONING:

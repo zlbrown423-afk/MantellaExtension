@@ -125,6 +125,23 @@ Drinking is the `Drink` action above.
 
 When there is nothing to sit on or nowhere pointed at, the game adds an in-game event line so the NPC can say so.
 
+## Reputation and gossip (S1: word gets around Riverwood)
+
+On with `MANTELLA_LIVING_WORLD=1`. Switch gossip off with `set MANTELLA_LW_GOSSIP=0` (claims and opinions
+are still recorded). No AI call is made for any of it except one more field in the existing extraction call.
+
+| Part | Where | What it does |
+| --- | --- | --- |
+| Seed | `social/data/riverwood.json`, `social/seed.py` | Riverwood's households, kin, friendships and rivalries (Hod and Gerdur married; Sven and Faendal rivals over Camilla), village membership and how gossipy each person is. Matched by Skyrim.esm base form ID, applied once each person has been seen. Edit the JSON freely |
+| Claims | `social/claims.py`, table `claim` | Something people can pass on: "Torvar grabbed Gerdur by the left forearm". Made from perceived events (grabs, drinking, buying a round); each person who saw it holds a copy (`knowledge.claim_id`, `believed`) |
+| Event processor | `social/processor.py`, table `event_cursor` | Reads `world_event` once per consumer, so each event is appraised once; later goals, player knowledge and body language plug in here |
+| Gossip | `social/gossip.py` | When a conversation starts, the village is caught up from its last `sim_tick` in quarter-day steps (at most 60 steps, 150 ms budget). Household and close friends talk most, rivals hardly at all; gossipy people pass news on more; old news fades after 7 days and stops after 30. Each telling is a `gossip_exchange` event, the listener gets their own copy with how much they believe it (trust in the teller, never above 0.9), and their view of the person it is about moves |
+| Reports | `memory/extraction.py` | The extraction call also returns "reports": someone telling the NPC what a person did ("I helped Gerdur fix the mill wheel"). Each must cite the line and speaker, like facts; it becomes a claim the NPC can repeat |
+| Prompt | `memory/recall.py` | Up to 3 things the NPC was told, with who told them and how sure they are ("I'm not sure I believe it. I did not see it myself."), and a line on how they feel about the player from their own relationship values (`v_relationship`, now with respect, admiration and suspicion) |
+| Children | `store/minors.py`, `npc.is_child` | Child NPCs are left out of everything Living World works out: no grabs, clothing, drinking, witnesses, memories, seed, gossip or reputation. Recognised by Mantella's character list (child voices), a child race or voice type, and on the game side by `Actor.IsChild()` |
+
+Everything is on the save timeline: loading an older save takes back the gossip that happened after it.
+
 ## Mood meter and quiet vanilla chatter
 
 Both are on with `MANTELLA_LIVING_WORLD=1`. Switch either off with `set MANTELLA_LW_MOOD_METER=0` or

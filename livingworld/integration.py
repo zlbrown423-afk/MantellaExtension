@@ -22,6 +22,7 @@ from livingworld import mood as moods
 from livingworld.perception import awareness
 from livingworld.perception.intoxication import drink_state
 from livingworld.perception.pipeline import PerceptionPipeline
+from livingworld.social.world import SocialWorld
 from livingworld.perception.records import KEY_ATTIRE, BadRecord, parse_record, records_from_context
 from livingworld.store.conversation_log import ConversationLog
 from livingworld.store.timeline import resolve_load
@@ -88,6 +89,8 @@ class LivingWorld:
         self.quiet_chatter = enabled and os.environ.get(QUIET_ENV, "").strip().lower() not in _OFF
         self._moods_shown: dict[int, str] = {}      # npc_id -> meter text the game last showed
         self._moods_to_send: dict[str, str] = {}    # speaker ref id -> meter text to send with their next line
+        self._social: dict[int, SocialWorld] = {}   # id(store) -> reputation and gossip for that world
+        self._social_refreshed: int | None = None   # conv_id the social world was last brought up to date for
         LivingWorld.latest = self
 
     @classmethod
@@ -139,6 +142,8 @@ class LivingWorld:
             return 0
         pipeline = PerceptionPipeline(self.store)
         stored = len([o for o in pipeline.ingest(raw + attire_raw) if not o.duplicate])
+        if stored:
+            self._social_for(self.store).appraise_new()   # what was seen becomes something people can pass on
         if attire_raw:
             self._attire_now = self._attire_snapshot(attire_raw, pipeline)
         return stored
@@ -261,6 +266,7 @@ class LivingWorld:
         present = {}
         for c in self._context.npcs_in_conversation.get_all_characters():
             present[self._npc_ids.get(c.ref_id) or self._register(c, now)] = c.name
+        self._refresh_social(now, list(present))
         blocks = []
         for character in characters:
             if character.is_player_character:
@@ -279,6 +285,22 @@ class LivingWorld:
             if self.mood_meter and player is not None:
                 blocks.append("\n".join(moods.prompt_lines(character.name, self._carried_mood(npc_id, now))))
         return "\n\n".join(blocks)
+
+    def _social_for(self, store: WorldStore) -> SocialWorld:
+        if id(store) not in self._social:
+            self._social[id(store)] = SocialWorld(store)
+        return self._social[id(store)]
+
+    def _refresh_social(self, now: float, present: list[int]) -> None:
+        """Once per conversation, before the first prompt: seed, appraise and catch gossip up."""
+        if self._social_refreshed == self.conv_id:
+            return
+        self._social_refreshed = self.conv_id
+        try:
+            self._social_for(self.store).refresh(now, present)
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not bring gossip up to date; carrying on without it")
 
     def _carried_mood(self, npc_id: int, now: float) -> "moods.Mood | None":
         try:
@@ -459,7 +481,8 @@ class LivingWorld:
         identity = self._identities.get(character.ref_id) or self._identity_from_character(character)
         registry = IdentityRegistry(self.store)
         npc_id = registry.ensure_npc(identity, game_time, race=character.race, sex=character.gender,
-                                     is_generic=character.is_generic_npc)
+                                     is_generic=character.is_generic_npc,
+                                     voice=getattr(character, "in_game_voice_model", None))
         if not character.is_player_character:
             try:
                 registry.bind_voice(npc_id, character.tts_service or self.default_tts_service, character.tts_voice_model,
