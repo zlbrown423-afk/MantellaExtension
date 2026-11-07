@@ -1,0 +1,24 @@
+{
+    "identifier": "mantella_lw_npc_gothere",
+    "name": "GoThere",
+    "description": "Walk over to the spot or object the player is pointing at and stay there for a while. Only if the NPC is willing; they can refuse in character instead. To walk to a person, use MoveTo instead.",
+    "note": "Living World (MANTELLA_LIVING_WORLD=1). The target is what the player points at in VR (the activation crosshair).",
+    "key": "GoThere",
+    "parameters": {
+        "source": {
+            "type": "array",
+            "description": "The NPC(s) who will go.",
+            "items": {"type": "string"},
+            "scope": "conversation"
+        }
+    },
+    "required": ["source"],
+    "prompt": "If the player points somewhere and asks you to go or stand 'over there', and you are willing to, begin your response with '{key}:'",
+    "allowed_games": ["skyrim"],
+    "requires_response": false,
+    "is-interrupting": false,
+    "allow_repeat": true,
+    "one-on-one": true,
+    "multi-npc": true,
+    "radiant": false
+}

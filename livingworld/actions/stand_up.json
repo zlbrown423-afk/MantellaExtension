@@ -1,0 +1,24 @@
+{
+    "identifier": "mantella_lw_npc_standup",
+    "name": "StandUp",
+    "description": "Get up from a chair, bench or bed, and stop staying where the player told the NPC to go.",
+    "note": "Living World (MANTELLA_LIVING_WORLD=1).",
+    "key": "StandUp",
+    "parameters": {
+        "source": {
+            "type": "array",
+            "description": "The NPC(s) who will get up.",
+            "items": {"type": "string"},
+            "scope": "conversation"
+        }
+    },
+    "required": ["source"],
+    "prompt": "If the player asks you to stand up or get up, and you are willing to, begin your response with '{key}:'",
+    "allowed_games": ["skyrim"],
+    "requires_response": false,
+    "is-interrupting": false,
+    "allow_repeat": true,
+    "one-on-one": true,
+    "multi-npc": true,
+    "radiant": false
+}
