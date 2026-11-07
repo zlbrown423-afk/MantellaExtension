@@ -75,6 +75,25 @@ Radiant conversations (two NPCs, no player) still use Mantella's own single call
 The reply to a conversation start carries `mantella_lw_timeline_id`, which the game keeps in its save.
 Without the game-side change nothing new is sent, and everything stays on one timeline.
 
+## Perception prototype: grabs, eating and drinking, witnesses
+
+NPCs remember being grabbed by the player and seeing it happen, and seeing someone eat or drink,
+with no LLM call. Game side: the Living World build of Mantella-Spell (`MantellaRepository.psc`).
+
+| Piece | File | What it does |
+| --- | --- | --- |
+| Records | `perception/records.py` | Parses the text records the game queues under the context key `mantella_lw_events` (format in the module docstring); maps skeleton nodes to body parts and items to food, drink, alcohol or potion |
+| Who perceived it | `perception/formation.py` | A nearby NPC "saw" the event only with line of sight and within 20 m; confidence falls from 0.95 at 8 m to 0.5 at 20 m |
+| Memories | `perception/formation.py` | One first-person memory per NPC, by role: experienced (the person grabbed), witnessed (a bystander), or did it. Each has an interpretation from local rules (relationship, duration, body part); a witness never learns why |
+| Storage | `perception/pipeline.py`, `store/migrations/003_perception.sql` | One `world_event` (objective record), `event_witness` rows, `memory` rows with `source_kind`, `interpretation`, `confidence`, `event_id`; duplicates dropped by the game's event key |
+| Reactions | `perception/pipeline.py` | Small trust changes as `relationship_change` rows; `v_relationship` sums them on the active timeline, so a reload undoes them |
+| Recall | `memory/recall.py` | Marks each memory "it happened to me" or "I saw it myself", adds what the NPC made of it, and lets the NPC raise a fresh one unprompted |
+| Simulation | `harness/perception.py` | Builds records exactly as the game does, for tests without Skyrim |
+
+Not detected yet: touching without grabbing, pushing and bumps (HIGGS and PLANCK do not expose them),
+NPCs eating, and environmental events. Records reach the server with the next Mantella request, so a
+memory forms when a conversation next starts or continues.
+
 ### Upstream patches
 
 | File | Change |
@@ -83,4 +102,4 @@ Without the game-side change nothing new is sent, and everything stays on one ti
 | `tests/conftest.py` | Registers the `baseline_behaviour` test marker |
 | `src/output_manager.py` | Hands each turn to the Living World when it is on (group turns), refuses synthesis in the wrong voice, and keeps the "generating" flag up across a multi-speaker turn |
 | `src/conversation/context.py` | `focused_on(character)`: a copy of the context holding only the player and one NPC, for building that NPC's own prompt |
-| `src/game_manager.py` | Calls the Living World hooks at conversation start, each spoken line, player input, actor changes and conversation end, and wraps Mantella's memory with the recall (does nothing unless `MANTELLA_LIVING_WORLD` is set) |
+| `src/game_manager.py` | Calls the Living World hooks at conversation start, on each request's context (perception records), each spoken line, player input, actor changes and conversation end, and wraps Mantella's memory with the recall (does nothing unless `MANTELLA_LIVING_WORLD` is set) |

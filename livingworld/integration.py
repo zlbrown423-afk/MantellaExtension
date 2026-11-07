@@ -18,6 +18,8 @@ from typing import Any, Callable
 from livingworld.memory.extraction import Extractor
 from livingworld.memory.jobs import JobQueue, JobWorker
 from livingworld.memory.recall import recall_for
+from livingworld.perception.pipeline import PerceptionPipeline
+from livingworld.perception.records import records_from_context
 from livingworld.store.conversation_log import ConversationLog
 from livingworld.store.timeline import resolve_load
 from livingworld.store.identity import ActorIdentity, FormId, IdentityRegistry, VoiceBindingConflict
@@ -111,6 +113,15 @@ class LivingWorld:
         for actor_json in actor_jsons or []:
             identity = ActorIdentity.from_actor_json(actor_json)
             self._identities[identity.ref.mantella_id] = identity
+
+    @_never_raises
+    def perceived(self, context_json: dict[str, Any] | None) -> int:
+        """Store the perception records the game queued since its last request (see ``perception/``).
+        Runs before Mantella reads the rest of the request, so the first prompt already holds the new memories."""
+        raw = records_from_context(context_json)
+        if not raw or self.store is None:
+            return 0
+        return len([o for o in PerceptionPipeline(self.store).ingest(raw) if not o.duplicate])
 
     @_never_raises
     def game_loaded(self, world_id: str, request: dict[str, Any]) -> dict[str, Any]:
