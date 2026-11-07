@@ -1,3 +1,4 @@
+import os
 import json
 from pathlib import Path
 from copy import deepcopy
@@ -177,7 +178,7 @@ class FunctionManager:
             except Exception as e:
                 logger.warning(f"Failed to load action file {file_path}: {e}")
 
-        # LIVINGWORLD PATCH: sit, stand up, go there and drink, only when MANTELLA_LIVING_WORLD=1
+        # LIVINGWORLD PATCH: sit, stand up and go there, only when MANTELLA_LIVING_WORLD=1
         from livingworld.actions import action_files as living_world_action_files
         for file_path in living_world_action_files():
             try:
@@ -271,6 +272,10 @@ class FunctionManager:
             name = action_data.get('name')
             if not name:
                 logger.warning(f"Action in '{file_path.name}' is missing a 'name' field, skipping")
+                continue
+
+            # LIVINGWORLD PATCH: actions marked "living_world" need the Living World build and are off without it
+            if action_data.get('living_world') and os.environ.get('MANTELLA_LIVING_WORLD', '').strip().lower() not in ('1', 'true', 'yes', 'on'):
                 continue
 
             # Skip actions whose name is in the disabled set

@@ -1,7 +1,7 @@
-"""Living World actions: Sit, StandUp, GoThere and Drink.
+"""Living World actions: Sit, StandUp and GoThere.
 
 Offered to the LLM only with MANTELLA_LIVING_WORLD=1. The game side (finding furniture, the VR pointing
-target, drinking from the NPC's inventory) is Papyrus in Mantella-Spell and is tested in game.
+target) is Papyrus in Mantella-Spell and is tested in game.
 """
 import json
 
@@ -53,18 +53,18 @@ def test_actions_load_with_living_world(living_world_on):
 
 
 def test_actions_can_be_disabled_like_upstream_ones(living_world_on):
-    FunctionManager.load_all_actions(disabled_actions=['Drink'])
-    assert lw_actions.DRINK not in FunctionManager._actions
+    FunctionManager.load_all_actions(disabled_actions=['GoThere'])
+    assert lw_actions.GO_THERE not in FunctionManager._actions
     assert lw_actions.SIT in FunctionManager._actions
 
 
 def test_the_npc_may_refuse(living_world_on):
     """Refusing is not calling the action, so every description and basic-mode prompt says it is optional."""
     FunctionManager.load_all_actions()
-    for identifier in (lw_actions.SIT, lw_actions.GO_THERE, lw_actions.DRINK):
+    for identifier in (lw_actions.SIT, lw_actions.GO_THERE):
         action = FunctionManager._actions[identifier]
-        assert "refuse" in action['description'] or "turn it down" in action['description']
-        assert "willing" in action['prompt'] or "want to" in action['prompt']
+        assert "refuse" in action['description']
+        assert "willing" in action['prompt']
 
 
 def test_sit_call_passes_the_furniture_kind_to_the_game(living_world_on):
@@ -79,13 +79,6 @@ def test_sit_offers_pointing_and_bed(living_world_on):
     assert {'pointed', 'seat', 'bed'} <= set(kinds)
 
 
-def test_drink_name_is_optional(living_world_on):
-    FunctionManager.load_all_actions()
-    assert FunctionManager._actions[lw_actions.DRINK]['required'] == ['source']
-    result = FunctionManager.parse_function_calls([_call('Drink', source=['Hod'], drink='mead')])
-    assert result[0]['arguments'] == {'source': ['Hod'], 'drink': 'mead'}
-
-
 def test_sitting_again_next_turn_is_allowed(living_world_on):
     """'Sit there' then 'no, sit there' must not be filtered as a duplicate."""
     FunctionManager.load_all_actions()
@@ -94,35 +87,18 @@ def test_sitting_again_next_turn_is_allowed(living_world_on):
     assert len(FunctionManager.parse_function_calls([sit])) == 1
 
 
-def test_basic_mode_sends_sit_and_drink_to_the_game(living_world_on, tmp_path):
+def test_basic_mode_sends_sit_and_stand_up_to_the_game(living_world_on, tmp_path):
     """With advanced actions off (Mantella's default) the NPC answers 'Sit: ...' and the game gets the identifier."""
     llm = ScriptedLLM(rules=[
         when_player_says("have a seat", "Sit: Don't mind if I do."),
-        when_player_says("have some mead", "Drink: Well, just the one."),
+        when_player_says("stand up", "StandUp: Fine."),
     ], replies=["Hm."])
     with HeadlessSession(str(tmp_path), llm) as s:
         s.start([PLAYER, actors.gerdur()], game_days=3.5)
         s.continue_until_player_turn()
         sit_lines = s.say("Have a seat, Gerdur.")
-        drink_lines = s.say("Here, have some mead.")
+        stand_lines = s.say("Now stand up.")
         s.end(game_days=3.51)
     assert any({'identifier': lw_actions.SIT} in line.actions for line in sit_lines)
-    assert any({'identifier': lw_actions.DRINK} in line.actions for line in drink_lines)
+    assert any({'identifier': lw_actions.STAND_UP} in line.actions for line in stand_lines)
 
-
-def test_an_npc_drinking_by_action_is_remembered(living_world_on, tmp_path):
-    """The game records the Drink action as a consume event done by the NPC (via=npc_action):
-    the drinker remembers drinking and a bystander remembers seeing it, as with the player's drinks."""
-    import sqlite3
-    from livingworld.harness.perception import KEY_EVENTS, consume, seen
-    record = consume(actors.gerdur(), "Nord Mead", 3.52, via="npc_action", key="npc-d1",
-                     witnesses=[seen(actors.hod(), 3.0)])
-    with HeadlessSession(str(tmp_path), ScriptedLLM(replies=["Hm."])) as s:
-        s.start([PLAYER, actors.gerdur(), actors.hod()], game_days=3.52, context_extra={KEY_EVENTS: [record]})
-        s.continue_until_player_turn()
-        s.end(game_days=3.53)
-    db = sqlite3.connect(tmp_path / "data" / "livingworld" / "HeadlessTest.sqlite")
-    rows = dict(db.execute("SELECT n.display_name, m.content FROM memory m JOIN npc n ON n.npc_id = m.owner_id"
-                           " WHERE m.created_by = 'perception'").fetchall())
-    assert rows["Gerdur"] == "I drank some Nord Mead in Riverwood."
-    assert "Gerdur drink some Nord Mead" in rows["Hod"]

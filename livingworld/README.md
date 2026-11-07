@@ -94,22 +94,35 @@ Not detected yet: touching without grabbing, pushing and bumps (HIGGS and PLANCK
 NPCs eating, and environmental events. Records reach the server with the next Mantella request, so a
 memory forms when a conversation next starts or continues.
 
-## Actions: sit, stand up, go there, drink
+## Clothing awareness and drinking
 
-Four extra actions the LLM can use, offered only with `MANTELLA_LIVING_WORLD=1`. They are ordinary
+Both are perception changes. Neither changes a relationship, and drink never changes what an NPC is
+willing to do: every prompt that mentions drink says that anything the NPC would refuse sober, such as
+undressing or intimacy, they still refuse.
+
+| Piece | File | What it does |
+| --- | --- | --- |
+| Attire records | `perception/records.py` | Type `attire`: what one person wears in the body slot (`cover` = clothing, armor or none). The game sends one per nearby person with every request (`mantella_lw_attire`) and queues one when the player takes off or puts on body clothing |
+| Attire memory | `perception/attire.py` | Stores only changes, as `attire` world events on the active timeline. Someone seen with nothing in the body slot gives each NPC who could see them (line of sight, within 20 m) a memory, and the NPC themself one too. NPCs who arrive later while it lasts get the same event once. Dressing again closes it |
+| Drink action | `data/actions/livingworld_drink.json` | "Drink": the NPC drinks ale, mead, wine and the like from their own inventory. Only loaded with `MANTELLA_LIVING_WORLD=1` (actions marked `living_world`) |
+| Intoxication | `perception/intoxication.py` | Counts the NPC's own drinks (skooma does not count); about 0.35 drinks wear off per game hour. Stages merry, tipsy, drunk, very drunk change speech, mood and social behaviour: louder, looser lips with gossip and secrets, singing and dancing, affection or quarrels by temperament. Memories formed while drunk are marked hazy and less certain |
+| What an NPC notices | `perception/awareness.py` | Adds to each NPC's own prompt: who present has no clothes or armor on (including themself), their own drink stage, and how many drinks they saw others present have |
+
+## Actions: sit, stand up, go there
+
+Three extra actions the LLM can use, offered only with `MANTELLA_LIVING_WORLD=1`. They are ordinary
 action files (`actions/*.json`, same format as `data/actions/`), loaded by `FunctionManager.load_all_actions`.
 They work in Mantella's basic mode ("Sit: ..." at the start of a reply) and with advanced actions on.
 Refusing is not calling the action, so each description tells the NPC it may refuse in character.
+Drinking is the `Drink` action above.
 
 | Action | Game side (Mantella-Spell `MantellaRepository.psc`) |
 | --- | --- |
 | `Sit` (furniture: pointed, seat, chair, bench, stool, bed) | The furniture the player last pointed at in VR (within 20 s), else the nearest free one of that kind in the cell, found by name. The NPC walks there, sits or lies down, and sits back down if their AI makes them get up, for up to 3 minutes |
 | `StandUp` | Ends a sit or stay order and gets the NPC out of the furniture |
 | `GoThere` | Walks to the last non-person thing the player pointed at and stays near it for up to 3 minutes (a pointed seat means Sit). People: use upstream `MoveTo` |
-| `Drink` (optional drink name) | Drinks from the NPC's own inventory, so the player hands drinks over with `Inventory` first. Queues a `consume` perception record (`via=npc_action`), so witnesses remember it and it counts towards being tipsy |
 
-When there is nothing to sit on, nowhere pointed at, or nothing to drink, the game adds an in-game event
-line so the NPC can say so.
+When there is nothing to sit on or nowhere pointed at, the game adds an in-game event line so the NPC can say so.
 
 ### Upstream patches
 
@@ -120,4 +133,5 @@ line so the NPC can say so.
 | `tests/conftest.py` | Registers the `baseline_behaviour` test marker |
 | `src/output_manager.py` | Hands each turn to the Living World when it is on (group turns), refuses synthesis in the wrong voice, and keeps the "generating" flag up across a multi-speaker turn |
 | `src/conversation/context.py` | `focused_on(character)`: a copy of the context holding only the player and one NPC, for building that NPC's own prompt |
+| `src/actions/function_manager.py` | Skips actions marked `living_world` unless `MANTELLA_LIVING_WORLD` is set |
 | `src/game_manager.py` | Calls the Living World hooks at conversation start, on each request's context (perception records), each spoken line, player input, actor changes and conversation end, and wraps Mantella's memory with the recall (does nothing unless `MANTELLA_LIVING_WORLD` is set) |

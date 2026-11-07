@@ -1,0 +1,24 @@
+{
+    "identifier": "mantella_npc_lw_drink",
+    "name": "Drink",
+    "description": "The NPC drinks one alcoholic drink (ale, mead, wine and the like) from their own inventory. Use only when the NPC decides to have a drink, for example when offered one.",
+    "note": "Living World only (MANTELLA_LIVING_WORLD=1). The NPC needs the drink in their inventory; the player can hand one over first. Each drink is remembered and makes the NPC merrier, then tipsy, then drunk, in speech and mood only.",
+    "key": "Drink",
+    "parameters": {
+        "source": {
+            "type": "string",
+            "description": "The NPC who drinks.",
+            "scope": "conversation"
+        }
+    },
+    "required": ["source"],
+    "prompt": "If you decide to have a drink of ale, mead or wine that you are carrying, begin your response with '{key}:'.",
+    "allowed_games": ["skyrim"],
+    "requires_response": false,
+    "is-interrupting": false,
+    "allow_repeat": true,
+    "one-on-one": true,
+    "multi-npc": true,
+    "radiant": true,
+    "living_world": true
+}

@@ -10,6 +10,14 @@ something eaten or drunk) and sends the queue with the next Mantella request, un
     v=1|key=812345-4|type=consume|gt=3.6|loc=Riverwood|actor=<actor>|item=Ale|item_form=<int>
       |food=1|via=higgs_mouth|qty=1|w=<witness>
 
+    v=1|key=812345-5|type=attire|gt=3.7|loc=Riverwood|actor=<actor>|body=Farm Clothes|cover=clothing|w=<witness>
+
+An ``attire`` record is a snapshot of what one actor wears in the body slot (32): ``cover`` is
+``clothing``, ``armor`` or ``none`` (nothing in the body slot), and witnesses are listed only when
+``cover`` is ``none``. The game sends one per nearby person with every request, under the context key
+``mantella_lw_attire``, and queues one with the events when the player takes off or puts on body
+clothing. ``via=action`` on a consume record means an NPC chose to drink (the Living World Drink action).
+
 ``<actor>`` is ``ref^base^ref_plugin^base_plugin^is_player^name`` and ``<witness>`` is
 ``distance_m^had_los^rank_to_actor^rank_to_target^`` followed by an actor. Ranks are the game's own
 ``GetRelationshipRank`` (4 lover .. 0 acquaintance .. -4 archnemesis); ``trank`` is the target's rank
@@ -25,6 +33,7 @@ from typing import Any
 from livingworld.store.identity import ActorIdentity, parse_form_id
 
 KEY_EVENTS = "mantella_lw_events"
+KEY_ATTIRE = "mantella_lw_attire"
 RECORD_VERSION = "1"
 
 
@@ -58,7 +67,7 @@ class Witness:
 @dataclass
 class PerceptionRecord:
     key: str
-    type: str                       # 'grab' | 'consume'
+    type: str                       # 'grab' | 'consume' | 'attire'
     game_time: float
     location: str | None
     actor: GameActor
@@ -69,9 +78,11 @@ class PerceptionRecord:
     item: str | None = None
     item_form: int | None = None
     is_food: bool = False
-    via: str | None = None          # 'higgs_mouth' | 'equip' | 'npc_action' (an NPC drinking by Drink action)
+    via: str | None = None          # 'higgs_mouth' | 'equip' | 'action'
     quantity: int = 1
     target_rank: int | None = None  # the target's relationship rank towards the actor
+    body: str | None = None         # attire: the item worn in the body slot
+    cover: str | None = None        # attire: 'clothing' | 'armor' | 'none'
     witnesses: list[Witness] = field(default_factory=list)
     raw: str = ""
 
@@ -122,7 +133,9 @@ def parse_record(text: str) -> PerceptionRecord:
         fields["via"] = fields["via"].strip().lower()
     if fields.get("hand"):
         fields["hand"] = fields["hand"].strip().upper()
-    if kind not in ("grab", "consume"):
+    if fields.get("cover"):
+        fields["cover"] = fields["cover"].strip().lower()
+    if kind not in ("grab", "consume", "attire"):
         raise BadRecord(f"unknown event type {kind!r}")
     record = PerceptionRecord(
         key=fields["key"], type=kind, game_time=float(fields["gt"]), location=fields.get("loc") or None,
@@ -131,18 +144,21 @@ def parse_record(text: str) -> PerceptionRecord:
         duration_s=float(fields["dur"]) if fields.get("dur") else None,
         item=fields.get("item") or None, item_form=int(fields["item_form"]) if fields.get("item_form") else None,
         is_food=fields.get("food") == "1", via=fields.get("via") or None,
-        quantity=int(fields.get("qty") or 1), target_rank=_rank(fields.get("trank", "")), witnesses=witnesses, raw=text)
+        quantity=int(fields.get("qty") or 1), target_rank=_rank(fields.get("trank", "")),
+        body=fields.get("body") or None, cover=fields.get("cover") or None, witnesses=witnesses, raw=text)
     if kind == "grab" and record.target is None:
         raise BadRecord("a grab needs a target")
     if kind == "consume" and not record.item:
         raise BadRecord("a consume event needs an item")
+    if kind == "attire" and record.cover not in ("clothing", "armor", "none"):
+        raise BadRecord(f"an attire record needs cover=clothing, armor or none, not {record.cover!r}")
     return record
 
 
-def records_from_context(context: dict[str, Any] | None) -> list[str]:
+def records_from_context(context: dict[str, Any] | None, key: str = KEY_EVENTS) -> list[str]:
     if not context:
         return []
-    value = context.get(KEY_EVENTS) or []
+    value = context.get(key) or []
     return [v for v in value if isinstance(v, str) and v.strip()]
 
 
@@ -188,6 +204,12 @@ ALCOHOL_NAMES = (
     "ale", "mead", "wine", "sujamma", "flin", "brandy", "shein", "matze", "skooma",
 )
 DRINK_WORDS = ("milk", "water", "tea", "juice", "drink")
+
+
+def is_alcohol(item: str | None) -> bool:
+    """An alcoholic drink, for counting drinks. Skooma is a drug, not a drink, and is not counted."""
+    words = re.findall(r"[a-z]+", (item or "").lower())
+    return any(w in ALCOHOL_NAMES for w in words) and "skooma" not in words
 
 
 def item_category(item: str, is_food: bool) -> str:

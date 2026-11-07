@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 from src import utils
 
-from livingworld.perception import formation
+from livingworld.perception import formation, intoxication
 from livingworld.perception.formation import Bond, MemoryDraft, Perception
 from livingworld.perception.records import (BadRecord, PerceptionRecord, body_part, item_category, parse_record,
                                             status_for_rank)
@@ -49,6 +49,9 @@ class PerceptionPipeline:
         return outcomes
 
     def record(self, record: PerceptionRecord) -> Outcome:
+        if record.type == "attire":
+            from livingworld.perception.attire import AttireTracker
+            return AttireTracker(self).record(record)
         timeline = self.store.active_timeline_id()
         existing = self.store.scalar("SELECT event_id FROM world_event WHERE timeline_id = ? AND game_key = ?",
                                      (timeline, record.key))
@@ -105,6 +108,7 @@ class PerceptionPipeline:
                 draft = self._draft(db, record, role, seen, npc_id, actor_id, target_id)
                 if draft is None:
                     continue
+                intoxication.hazy(draft, intoxication.drink_state(db, npc_id, gt).stage)
                 about = [i for i in (actor_id, target_id) if i is not None and i != npc_id]
                 mem_id = db.execute(
                     "INSERT INTO memory (timeline_id, owner_id, kind, content, about_ids_json, location, occurred_gt,"
@@ -136,7 +140,7 @@ class PerceptionPipeline:
         else:
             payload = {"item": record.item, "item_form": record.item_form,
                        "category": item_category(record.item or "", record.is_food), "quantity": record.quantity,
-                       "via": record.via, "confirmed": record.via in ("higgs_mouth", "equip")}
+                       "via": record.via, "confirmed": record.via in ("higgs_mouth", "equip", "action")}
         payload["nearby_but_unseen"] = unseen
         return payload
 
