@@ -128,7 +128,8 @@ class PerceptionPipeline:
     # ---- internals ----
     @staticmethod
     def _event_type(record: PerceptionRecord) -> str:
-        return "physical_interaction" if record.type == "grab" else "consumption"
+        # a purchase is 'trade', never 'consumption': buying a round does not count as drinking it
+        return {"grab": "physical_interaction", "purchase": "trade"}.get(record.type, "consumption")
 
     @staticmethod
     def _payload(record: PerceptionRecord, unseen: list[str]) -> dict:
@@ -137,6 +138,10 @@ class PerceptionPipeline:
             payload = {"interaction": "touch" if dur < formation.BRIEF_S else ("hold" if dur >= formation.LONG_S else "grab"),
                        "body_part": body_part(record.node), "node": record.node, "hand": record.hand,
                        "intent": "intentional", "detector": "higgs_grab"}
+        elif record.type == "purchase":
+            payload = {"item": record.item, "item_form": record.item_form, "quantity": record.quantity,
+                       "gold": record.gold, "payer": record.payer, "party": record.party.name if record.party else None,
+                       "via": "action"}
         else:
             payload = {"item": record.item, "item_form": record.item_form,
                        "category": item_category(record.item or "", record.is_food), "quantity": record.quantity,
@@ -165,6 +170,12 @@ class PerceptionPipeline:
                 return formation.grab_for_actor(record)
             return formation.grab_for_witness(record, seen, self._bond(db, npc_id, actor_id),
                                               self._bond(db, npc_id, target_id))
+        if record.type == "purchase":
+            if role == "actor":
+                return formation.purchase_for_actor(record)
+            if role == "target":
+                return formation.purchase_for_seller(record)
+            return formation.purchase_for_witness(record, seen)
         if role == "actor":
             return formation.consume_for_actor(record)
         return formation.consume_for_witness(record, seen, self._bond(db, npc_id, actor_id))

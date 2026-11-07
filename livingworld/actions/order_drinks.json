@@ -1,0 +1,37 @@
+{
+    "identifier": "mantella_lw_npc_orderdrinks",
+    "name": "OrderDrinks",
+    "description": "Go to the bartender or innkeeper, buy a round of drinks (one for the NPC, one for the player), and bring them back so the two can drink together. Only if the NPC is willing; they can refuse in character instead. The NPC decides who pays: the player, or the NPC as their treat.",
+    "note": "Living World (MANTELLA_LIVING_WORLD=1). Then use Drink to drink yours. If the payer cannot afford it, the NPC comes back without drinks.",
+    "key": "OrderDrinks",
+    "parameters": {
+        "source": {
+            "type": "string",
+            "description": "The NPC who goes to the bar.",
+            "scope": "conversation"
+        },
+        "bartender": {
+            "type": "string",
+            "description": "The name of the bartender or innkeeper to buy from, if known. Leave empty and the NPC finds the innkeeper."
+        },
+        "drink": {
+            "type": "string",
+            "description": "What to order, one word: 'mead', 'ale' or 'wine'. Leave empty for mead.",
+            "enum": ["mead", "ale", "wine"]
+        },
+        "payer": {
+            "type": "string",
+            "description": "Who pays: 'player' (the player's gold, the default) or 'npc' (the NPC treats the player from their own gold).",
+            "enum": ["player", "npc"]
+        }
+    },
+    "required": ["source"],
+    "prompt": "If the player asks you to get drinks from the bartender, and you are willing to, begin your response with '{key}:'",
+    "allowed_games": ["skyrim"],
+    "requires_response": false,
+    "is-interrupting": false,
+    "allow_repeat": true,
+    "one-on-one": true,
+    "multi-npc": true,
+    "radiant": false
+}

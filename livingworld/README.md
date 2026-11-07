@@ -108,9 +108,9 @@ undressing or intimacy, they still refuse.
 | Intoxication | `perception/intoxication.py` | Counts the NPC's own drinks (skooma does not count); about 0.35 drinks wear off per game hour. Stages merry, tipsy, drunk, very drunk change speech, mood and social behaviour: louder, looser lips with gossip and secrets, singing and dancing, affection or quarrels by temperament. Memories formed while drunk are marked hazy and less certain |
 | What an NPC notices | `perception/awareness.py` | Adds to each NPC's own prompt: who present has no clothes or armor on (including themself), their own drink stage, and how many drinks they saw others present have |
 
-## Actions: sit, stand up, go there
+## Actions: sit, stand up, go there, order drinks
 
-Three extra actions the LLM can use, offered only with `MANTELLA_LIVING_WORLD=1`. They are ordinary
+Extra actions the LLM can use, offered only with `MANTELLA_LIVING_WORLD=1`. They are ordinary
 action files (`actions/*.json`, same format as `data/actions/`), loaded by `FunctionManager.load_all_actions`.
 They work in Mantella's basic mode ("Sit: ..." at the start of a reply) and with advanced actions on.
 Refusing is not calling the action, so each description tells the NPC it may refuse in character.
@@ -121,6 +121,7 @@ Drinking is the `Drink` action above.
 | `Sit` (furniture: pointed, seat, chair, bench, stool, bed) | The furniture the player last pointed at in VR (within 20 s), else the nearest free one of that kind in the cell, found by name. The NPC walks there, sits or lies down, and sits back down if their AI makes them get up, for up to 3 minutes |
 | `StandUp` | Ends a sit or stay order and gets the NPC out of the furniture |
 | `GoThere` | Walks to the last non-person thing the player pointed at and stays near it for up to 3 minutes (a pointed seat means Sit). People: use upstream `MoveTo` |
+| `OrderDrinks` (bartender, drink: mead/ale/wine, payer: player/npc) | Walks to the bartender (named, else the person the player last pointed at), buys two of the drink at its base value each, walks back and hands one to the player. The drink is the bartender's own, else the kind of a bottle standing in the cell. If the payer cannot afford it, the NPC comes back empty-handed. Queues a `purchase` perception record: the buyer, the bartender and witnesses remember the round (world event type `trade`, so it never counts as drinking) |
 
 When there is nothing to sit on or nowhere pointed at, the game adds an in-game event line so the NPC can say so.
 

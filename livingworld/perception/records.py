@@ -12,11 +12,19 @@ something eaten or drunk) and sends the queue with the next Mantella request, un
 
     v=1|key=812345-5|type=attire|gt=3.7|loc=Riverwood|actor=<actor>|body=Farm Clothes|cover=clothing|w=<witness>
 
+    v=1|key=812345-6|type=purchase|gt=3.8|loc=Sleeping Giant Inn|actor=<actor>|target=<actor>|item=Nord Mead
+      |item_form=<int>|qty=2|gold=10|payer=player|party=<actor>|w=<witness>
+
 An ``attire`` record is a snapshot of what one actor wears in the body slot (32): ``cover`` is
 ``clothing``, ``armor`` or ``none`` (nothing in the body slot), and witnesses are listed only when
 ``cover`` is ``none``. The game sends one per nearby person with every request, under the context key
 ``mantella_lw_attire``, and queues one with the events when the player takes off or puts on body
 clothing. ``via=action`` on a consume record means an NPC chose to drink (the Living World Drink action).
+
+A ``purchase`` record is an NPC (``actor``) buying a round from a bartender (``target``) with the
+Living World OrderDrinks action: ``gold`` paid in total, ``payer`` is ``player`` or ``npc`` (the buyer),
+and ``party`` is who the round is shared with (the player). Buying is not drinking: it never counts
+towards being tipsy.
 
 ``<actor>`` is ``ref^base^ref_plugin^base_plugin^is_player^name`` and ``<witness>`` is
 ``distance_m^had_los^rank_to_actor^rank_to_target^`` followed by an actor. Ranks are the game's own
@@ -67,7 +75,7 @@ class Witness:
 @dataclass
 class PerceptionRecord:
     key: str
-    type: str                       # 'grab' | 'consume' | 'attire'
+    type: str                       # 'grab' | 'consume' | 'attire' | 'purchase'
     game_time: float
     location: str | None
     actor: GameActor
@@ -83,6 +91,9 @@ class PerceptionRecord:
     target_rank: int | None = None  # the target's relationship rank towards the actor
     body: str | None = None         # attire: the item worn in the body slot
     cover: str | None = None        # attire: 'clothing' | 'armor' | 'none'
+    gold: int | None = None         # purchase: total paid
+    payer: str | None = None        # purchase: 'player' | 'npc' (the buyer)
+    party: GameActor | None = None  # purchase: who the round is shared with
     witnesses: list[Witness] = field(default_factory=list)
     raw: str = ""
 
@@ -135,7 +146,9 @@ def parse_record(text: str) -> PerceptionRecord:
         fields["hand"] = fields["hand"].strip().upper()
     if fields.get("cover"):
         fields["cover"] = fields["cover"].strip().lower()
-    if kind not in ("grab", "consume", "attire"):
+    if fields.get("payer"):
+        fields["payer"] = fields["payer"].strip().lower()
+    if kind not in ("grab", "consume", "attire", "purchase"):
         raise BadRecord(f"unknown event type {kind!r}")
     record = PerceptionRecord(
         key=fields["key"], type=kind, game_time=float(fields["gt"]), location=fields.get("loc") or None,
@@ -145,13 +158,20 @@ def parse_record(text: str) -> PerceptionRecord:
         item=fields.get("item") or None, item_form=int(fields["item_form"]) if fields.get("item_form") else None,
         is_food=fields.get("food") == "1", via=fields.get("via") or None,
         quantity=int(fields.get("qty") or 1), target_rank=_rank(fields.get("trank", "")),
-        body=fields.get("body") or None, cover=fields.get("cover") or None, witnesses=witnesses, raw=text)
+        body=fields.get("body") or None, cover=fields.get("cover") or None,
+        gold=int(fields["gold"]) if fields.get("gold") else None, payer=fields.get("payer") or None,
+        party=_actor(fields["party"]) if fields.get("party") else None, witnesses=witnesses, raw=text)
     if kind == "grab" and record.target is None:
         raise BadRecord("a grab needs a target")
     if kind == "consume" and not record.item:
         raise BadRecord("a consume event needs an item")
     if kind == "attire" and record.cover not in ("clothing", "armor", "none"):
         raise BadRecord(f"an attire record needs cover=clothing, armor or none, not {record.cover!r}")
+    if kind == "purchase":
+        if record.target is None or not record.item:
+            raise BadRecord("a purchase needs a seller (target) and an item")
+        if record.payer not in ("player", "npc"):
+            raise BadRecord(f"a purchase needs payer=player or npc, not {record.payer!r}")
     return record
 
 
