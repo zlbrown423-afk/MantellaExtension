@@ -53,12 +53,12 @@ def talk_to_gerdur(work_dir, start_day=3.5, end_day=3.6):
 def test_store_creates_schema_once(tmp_path):
     path = str(tmp_path / "w.sqlite")
     store = WorldStore(path)
-    assert store.schema_version() == 3
+    assert store.schema_version() == 4
     assert store.scalar("PRAGMA journal_mode") == "wal"
     assert store.active_timeline_id() == 1
     store.close()
     again = WorldStore(path)  # reopening does not re-run the migration
-    assert again.scalar("SELECT COUNT(*) FROM schema_version") == 3
+    assert again.scalar("SELECT COUNT(*) FROM schema_version") == 4
     assert again.scalar("PRAGMA integrity_check") == "ok"
     again.close()
 
@@ -225,5 +225,5 @@ def test_an_existing_database_gets_new_migrations(tmp_path):
     conn.executescript(resources.files("livingworld.store.migrations").joinpath("001_initial.sql").read_text())
     conn.close()
     store = WorldStore(path)  # a version 1 file, as PR A created it
-    assert store.schema_version() == 3
+    assert store.schema_version() == 4
     assert store.scalar("SELECT COUNT(*) FROM game_load") == 0

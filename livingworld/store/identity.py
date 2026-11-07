@@ -90,7 +90,9 @@ class IdentityRegistry:
         self.store = store
 
     def ensure_npc(self, identity: ActorIdentity, game_time: float, race: str | None = None,
-                   sex: str | None = None, is_generic: bool = False) -> int:
+                   sex: str | None = None, is_generic: bool = False, voice: str | None = None) -> int:
+        from livingworld.store.minors import looks_like_child
+        child = (not identity.is_player) and looks_like_child(identity.base.local_id, race, voice)
         with self.store.transaction() as db:
             if identity.is_player:
                 row = db.execute("SELECT npc_id FROM npc WHERE is_player = 1").fetchone()
@@ -102,12 +104,15 @@ class IdentityRegistry:
                 (identity.base.plugin, identity.base.local_id, identity.ref.full),
             ).fetchone()
             if row:
+                if child:
+                    db.execute("UPDATE npc SET is_child = 1 WHERE npc_id = ? AND is_child = 0", (row[0],))
                 return row[0]
             cur = db.execute(
                 "INSERT INTO npc (plugin, base_form_id, ref_form_id, display_name, race, sex, is_player,"
-                " is_generic, created_gt) VALUES (?,?,?,?,?,?,?,?,?)",
+                " is_generic, created_gt, is_child) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (identity.base.plugin, identity.base.local_id, identity.ref.full, identity.name, race,
-                 sex if sex in ("male", "female") else None, int(identity.is_player), int(is_generic), game_time),
+                 sex if sex in ("male", "female") else None, int(identity.is_player), int(is_generic), game_time,
+                 int(child)),
             )
             logger.info("Living World: new NPC %s (%s %s) -> npc_id %s",
                         identity.name, identity.base.plugin, identity.base.local_id, cur.lastrowid)

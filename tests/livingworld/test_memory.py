@@ -200,7 +200,7 @@ def test_a_corrected_fact_supersedes_the_old_one(tmp_path):
 
 
 def test_reply_parsing_tolerates_code_fences():
-    assert parse_reply('```json\n{"facts": [], "memories": []}\n```') == {"facts": [], "memories": []}
+    assert parse_reply('```json\n{"facts": [], "memories": []}\n```') == {"facts": [], "memories": [], "reports": []}
     with pytest.raises(ValueError):
         parse_reply("Sorry, I can't help with that.")
 

@@ -87,12 +87,14 @@ class AttireTracker:
         from livingworld.perception.pipeline import Outcome
         gt = record.game_time
         actor_id = self.identities.ensure_npc(record.actor.identity(), gt)
+        if self.pipeline._child(actor_id):
+            return Outcome(None)                              # children are left out entirely
         covered = is_covered(record)
         seers: dict[int, tuple[str, Perception]] = {}
         unseen = []
         for witness in record.witnesses:
             npc_id = self.identities.ensure_npc(witness.actor.identity(), gt)
-            if npc_id == actor_id:
+            if npc_id == actor_id or self.pipeline._child(npc_id):
                 continue
             seen = formation.perceives(witness)
             if seen is None:

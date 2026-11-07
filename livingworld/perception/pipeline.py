@@ -17,6 +17,7 @@ from livingworld.perception.formation import Bond, MemoryDraft, Perception
 from livingworld.perception.records import (BadRecord, PerceptionRecord, body_part, item_category, parse_record,
                                             status_for_rank)
 from livingworld.store.identity import IdentityRegistry
+from livingworld.store.minors import is_child
 from livingworld.store.world_store import WorldStore
 
 logger = utils.get_logger()
@@ -61,6 +62,11 @@ class PerceptionPipeline:
         gt = record.game_time
         actor_id = self.identities.ensure_npc(record.actor.identity(), gt)
         target_id = self.identities.ensure_npc(record.target.identity(), gt) if record.target else None
+        party_id = self.identities.ensure_npc(record.party.identity(), gt) if record.party else None
+        if any(self._child(i) for i in (actor_id, target_id, party_id)):
+            # children are left out of every Living World system: no event, no memories, no claims
+            logger.log(23, f"Living World: {record.type} record {record.key} involves a child; not stored")
+            return Outcome(None)
         people: dict[int, tuple[str, Perception]] = {}   # npc_id -> (role, perception)
         people[actor_id] = ("actor", Perception("participated", "experienced", 1.0))
         if target_id is not None:
@@ -69,6 +75,8 @@ class PerceptionPipeline:
         witness_ids = []
         for witness in record.witnesses:
             npc_id = self.identities.ensure_npc(witness.actor.identity(), gt)
+            if self._child(npc_id):
+                continue   # children are never witnesses
             witness_ids.append((npc_id, witness))
             if npc_id in people:
                 continue
@@ -126,6 +134,12 @@ class PerceptionPipeline:
         return outcome
 
     # ---- internals ----
+    def _child(self, npc_id: int | None) -> bool:
+        if npc_id is None:
+            return False
+        with self.store.transaction() as db:
+            return is_child(db, npc_id)
+
     @staticmethod
     def _event_type(record: PerceptionRecord) -> str:
         # a purchase is 'trade', never 'consumption': buying a round does not count as drinking it
