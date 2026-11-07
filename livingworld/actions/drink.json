@@ -1,0 +1,28 @@
+{
+    "identifier": "mantella_lw_npc_drink",
+    "name": "Drink",
+    "description": "Drink something from the NPC's own inventory (including anything the player just gave them), such as ale, mead or wine. Only if the NPC actually wants to; they can turn it down in character instead.",
+    "note": "Living World (MANTELLA_LIVING_WORLD=1). Recorded as a consume perception event, so witnesses remember it and it counts towards being tipsy.",
+    "key": "Drink",
+    "parameters": {
+        "source": {
+            "type": "array",
+            "description": "The NPC(s) who will drink.",
+            "items": {"type": "string"},
+            "scope": "conversation"
+        },
+        "drink": {
+            "type": "string",
+            "description": "What to drink, as one word from the item's name (for example 'mead', 'ale', 'wine', 'water'). Leave empty for any drink they have."
+        }
+    },
+    "required": ["source"],
+    "prompt": "If you are offered a drink or asked to drink, and you want to, begin your response with '{key}:'",
+    "allowed_games": ["skyrim"],
+    "requires_response": false,
+    "is-interrupting": false,
+    "allow_repeat": true,
+    "one-on-one": true,
+    "multi-npc": true,
+    "radiant": true
+}

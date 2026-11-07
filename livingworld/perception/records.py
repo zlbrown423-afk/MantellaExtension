@@ -69,7 +69,7 @@ class PerceptionRecord:
     item: str | None = None
     item_form: int | None = None
     is_food: bool = False
-    via: str | None = None          # 'higgs_mouth' | 'equip'
+    via: str | None = None          # 'higgs_mouth' | 'equip' | 'npc_action' (an NPC drinking by Drink action)
     quantity: int = 1
     target_rank: int | None = None  # the target's relationship rank towards the actor
     witnesses: list[Witness] = field(default_factory=list)

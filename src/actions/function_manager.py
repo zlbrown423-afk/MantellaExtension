@@ -177,6 +177,14 @@ class FunctionManager:
             except Exception as e:
                 logger.warning(f"Failed to load action file {file_path}: {e}")
 
+        # LIVINGWORLD PATCH: sit, stand up, go there and drink, only when MANTELLA_LIVING_WORLD=1
+        from livingworld.actions import action_files as living_world_action_files
+        for file_path in living_world_action_files():
+            try:
+                FunctionManager._load_action_file(file_path, disabled_set)
+            except Exception as e:
+                logger.warning(f"Failed to load Living World action file {file_path}: {e}")
+
         # TODO: Load new functions folder
         # Load functions folder
         # functions_dir = actions_dir / "functions"
