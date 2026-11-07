@@ -86,7 +86,8 @@ class GameStateManager:
         return {
             comm_consts.KEY_REPLYTYPE: comm_consts.KEY_REPLYTTYPE_STARTCONVERSATIONCOMPLETED,
             comm_consts.KEY_STARTCONVERSATION_USENARRATOR: self.__conv_has_narrator,
-            **living_world_reply} # LIVINGWORLD PATCH
+            **living_world_reply, # LIVINGWORLD PATCH
+            **self.__living_world.start_reply_keys()} # LIVINGWORLD PATCH: mute vanilla chatter while talking
     
 
     def _build_random_conversation_client(self) -> ClientBase | None:
@@ -173,6 +174,7 @@ class GameStateManager:
             if not sentence_to_play.error_message:
                 self.__game.prepare_sentence_for_game(sentence_to_play, self.__talk.context, self.__config, topicInfoID, self.__first_line)            
                 reply[comm_consts.KEY_REPLYTYPE_NPCTALK] = self.sentence_to_json(sentence_to_play, topicInfoID)
+                reply[comm_consts.KEY_REPLYTYPE_NPCTALK].update(self.__living_world.line_reply_keys(sentence_to_play) or {}) # LIVINGWORLD PATCH: mood meter
                 self.__living_world.npc_line(sentence_to_play, self.__talk.context) # LIVINGWORLD PATCH
                 self.__first_line = False
 
