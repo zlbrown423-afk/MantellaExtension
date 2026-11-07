@@ -12,7 +12,7 @@ from typing import Any
 
 from src.http.communication_constants import communication_constants as comm_consts
 
-from livingworld.perception.records import KEY_EVENTS  # noqa: F401  (re-exported for tests)
+from livingworld.perception.records import KEY_ATTIRE, KEY_EVENTS  # noqa: F401  (re-exported for tests)
 from livingworld.store.identity import KEY_BASE_PLUGIN, KEY_REF_PLUGIN
 
 _counter = 0
@@ -53,5 +53,15 @@ def consume(actor_json: dict[str, Any], item: str, game_days: float, is_food: bo
     parts = ["v=1", f"key={key or _key()}", "type=consume", f"gt={game_days}", f"loc={location}",
              f"actor={actor_field(actor_json)}", f"item={item}", "item_form=0", f"food={1 if is_food else 0}",
              f"via={via}", f"qty={quantity}"]
+    parts += [f"w={w}" for w in witnesses or []]
+    return "|".join(parts)
+
+
+def attire(actor_json: dict[str, Any], cover: str, game_days: float, body: str = "", location: str = "Riverwood",
+           witnesses: list[str] | None = None, key: str | None = None) -> str:
+    """What ``actor_json`` wears in the body slot: cover is 'clothing', 'armor' or 'none'.
+    The game lists witnesses only when cover is 'none'."""
+    parts = ["v=1", f"key={key or _key('attire')}", "type=attire", f"gt={game_days}", f"loc={location}",
+             f"actor={actor_field(actor_json)}", f"body={body}", f"cover={cover}"]
     parts += [f"w={w}" for w in witnesses or []]
     return "|".join(parts)

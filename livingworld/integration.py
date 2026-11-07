@@ -18,8 +18,9 @@ from typing import Any, Callable
 from livingworld.memory.extraction import Extractor
 from livingworld.memory.jobs import JobQueue, JobWorker
 from livingworld.memory.recall import recall_for
+from livingworld.perception import awareness
 from livingworld.perception.pipeline import PerceptionPipeline
-from livingworld.perception.records import records_from_context
+from livingworld.perception.records import KEY_ATTIRE, BadRecord, parse_record, records_from_context
 from livingworld.store.conversation_log import ConversationLog
 from livingworld.store.timeline import resolve_load
 from livingworld.store.identity import ActorIdentity, FormId, IdentityRegistry, VoiceBindingConflict
@@ -73,6 +74,7 @@ class LivingWorld:
         self.complete: Callable[[str, str], str | None] | None = None
         self._last_recall: dict[int, tuple[list[int], list[int]]] = {}  # npc_id -> (know_ids, mem_ids) in their last prompt
         self._rehearsed: set[tuple[int, int]] = set()   # (conv_id, npc_id) already counted as recalled
+        self._attire_now: dict[int, awareness.AttireNow] = {}   # latest attire snapshot from the game, by npc_id
         LivingWorld.latest = self
 
     @classmethod
@@ -119,9 +121,28 @@ class LivingWorld:
         """Store the perception records the game queued since its last request (see ``perception/``).
         Runs before Mantella reads the rest of the request, so the first prompt already holds the new memories."""
         raw = records_from_context(context_json)
-        if not raw or self.store is None:
+        attire_raw = records_from_context(context_json, KEY_ATTIRE)
+        if not (raw or attire_raw) or self.store is None:
             return 0
-        return len([o for o in PerceptionPipeline(self.store).ingest(raw) if not o.duplicate])
+        pipeline = PerceptionPipeline(self.store)
+        stored = len([o for o in pipeline.ingest(raw + attire_raw) if not o.duplicate])
+        if attire_raw:
+            self._attire_now = self._attire_snapshot(attire_raw, pipeline)
+        return stored
+
+    def _attire_snapshot(self, attire_raw: list[str], pipeline: PerceptionPipeline) -> dict[int, awareness.AttireNow]:
+        records = []
+        for raw in attire_raw:
+            try:
+                records.append(parse_record(raw))
+            except (BadRecord, ValueError):
+                continue   # already logged by the pipeline
+        ids: dict[int, int] = {}
+        for record in records:
+            for actor in [record.actor] + [w.actor for w in record.witnesses]:
+                if actor.ref_id not in ids:
+                    ids[actor.ref_id] = pipeline.identities.ensure_npc(actor.identity(), record.game_time)
+        return awareness.snapshot(records, ids, ids)
 
     @_never_raises
     def game_loaded(self, world_id: str, request: dict[str, Any]) -> dict[str, Any]:
@@ -151,6 +172,7 @@ class LivingWorld:
         self.store = self._store_for(world_id)
         self._context = context
         self._pending = True
+        self._attire_now = {}
 
     @_never_raises
     def conversation_started(self, world_id: str, context: Any) -> None:
@@ -221,6 +243,9 @@ class LivingWorld:
         now = self._context.game_days
         player = self._context.npcs_in_conversation.get_player_character()
         player_id = (self._npc_ids.get(player.ref_id) or self._register(player, now)) if player else None
+        present = {}
+        for c in self._context.npcs_in_conversation.get_all_characters():
+            present[self._npc_ids.get(c.ref_id) or self._register(c, now)] = c.name
         blocks = []
         for character in characters:
             if character.is_player_character:
@@ -233,7 +258,19 @@ class LivingWorld:
             text = recall.text()
             if text:
                 blocks.append(text)
+            noticed = self._noticed(npc_id, character.name, now, present)
+            if noticed:
+                blocks.append(f"What {character.name} notices right now:\n" + "\n".join(f"- {line}" for line in noticed))
         return "\n\n".join(blocks)
+
+    def _noticed(self, npc_id: int, name: str, now: float, present: dict[int, str]) -> list[str]:
+        try:
+            with self.store.transaction() as db:
+                return awareness.lines_for(db, npc_id, name, now, present, self._attire_now)
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not work out what an NPC notices; leaving it out")
+            return []
 
     # ---- dialogue (called from ChatManager) ----
     @property
