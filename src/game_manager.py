@@ -295,6 +295,7 @@ class GameStateManager:
     @utils.time_it
     def __update_context(self,  json: dict[str, Any]):
         if self.__talk:
+            self.__living_world.perceived(json.get(comm_consts.KEY_CONTEXT)) # LIVINGWORLD PATCH
             if json.__contains__(comm_consts.KEY_ACTORS):
                 actors_in_json: list[Character] = []
                 for actorJson in json[comm_consts.KEY_ACTORS]:

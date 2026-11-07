@@ -11,6 +11,7 @@ from livingworld.store.world_store import WorldStore
 
 MAX_FACTS = 40
 MAX_MEMORIES = 8
+FRESH_DAYS = 3.0   # a perceived event this recent, never yet recalled, may be raised unprompted
 
 
 def time_ago(days: float) -> str:
@@ -39,6 +40,7 @@ class Recall:
     know_ids: list[int] = field(default_factory=list)
     mem_ids: list[int] = field(default_factory=list)
     last_spoke: str | None = None
+    fresh_perceptions: int = 0   # things they saw or went through recently and have not had a chance to raise
 
     def text(self) -> str:
         if not (self.facts or self.memories or self.last_spoke):
@@ -49,6 +51,9 @@ class Recall:
             parts.append(f"- {self.last_spoke}")
         parts += [f"- {line}" for line in self.facts]
         parts += [f"- {line}" for line in self.memories]
+        if self.fresh_perceptions:
+            parts.append(f"- {self.name} may bring up something they recently saw or went through without being asked, "
+                         f"if it fits the moment. {self.name} only knows what they perceived, not why it happened.")
         return "\n".join(parts)
 
 
@@ -65,11 +70,19 @@ def recall_for(store: WorldStore, npc_id: int, now_gt: float, player_id: int | N
         recall.facts.append(line)
 
     memories = store.query(
-        "SELECT mem_id, content, occurred_gt FROM v_visible_memory WHERE owner_id = ?"
+        "SELECT mem_id, content, occurred_gt, source_kind, interpretation, rehearsal_count, importance"
+        " FROM v_visible_memory WHERE owner_id = ?"
         " ORDER BY occurred_gt DESC, importance DESC LIMIT ?", (npc_id, MAX_MEMORIES))
-    for mem_id, content, occurred in reversed(memories):
+    for mem_id, content, occurred, source_kind, interpretation, rehearsals, importance in reversed(memories):
         recall.mem_ids.append(mem_id)
-        recall.memories.append(f"({time_ago(now_gt - occurred)}) {content}")
+        how = {"experienced": ", it happened to me", "witnessed": ", I saw it myself"}.get(source_kind or "", "")
+        line = f"({time_ago(now_gt - occurred)}{how}) {content}"
+        if interpretation:
+            line += f" What I made of it: {interpretation}"
+        recall.memories.append(line)
+        if source_kind in ("experienced", "witnessed") and rehearsals == 0 and importance >= 0.4 \
+                and now_gt - occurred <= FRESH_DAYS:
+            recall.fresh_perceptions += 1
 
     if player_id is not None:
         last = store.scalar(
