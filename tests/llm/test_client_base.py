@@ -83,6 +83,30 @@ def test_service_key_not_found_returns_none(tmp_path, monkeypatch):
         os.chdir(previous_cwd)
 
 
+def test_running_from_source_finds_key_in_configured_mod_folder(tmp_path, monkeypatch):
+    """From source, the exe-relative guess points nowhere useful; the mod folder from config.ini is searched"""
+    source_folder = tmp_path / "Mantella-source"   # resolve_path() when not frozen
+    source_folder.mkdir()
+    monkeypatch.setattr('src.utils.resolve_path', lambda: source_folder)
+    mod_folder = tmp_path / "SkyrimVR" / "Data"
+    mod_folder.mkdir(parents=True)
+    (mod_folder / "GPT_SECRET_KEY.txt").write_text("sk-from-data\n", encoding="utf-8")
+    monkeypatch.setattr('src.utils.configured_mod_folder', str(mod_folder))
+    isolated_cwd = tmp_path / "isolated"
+    isolated_cwd.mkdir()
+    monkeypatch.chdir(isolated_cwd)
+    assert ClientBase._get_api_key("OpenRouter", False) == "sk-from-data"
+
+
+def test_configured_mod_folder_unset_keeps_old_behaviour(tmp_path, monkeypatch):
+    monkeypatch.setattr('src.utils.configured_mod_folder', None)
+    runtime_path = tmp_path / "a" / "b" / "c"
+    runtime_path.mkdir(parents=True)
+    monkeypatch.setattr('src.utils.resolve_path', lambda: runtime_path)
+    monkeypatch.chdir(tmp_path / "a")
+    assert ClientBase._get_api_key("OpenRouter", False) is None
+
+
 def test_unknown_service_returns_custom():
     result = ClientBase.get_model_list("Unknown")
     assert result.available_models == [("Custom model", "Custom model")]

@@ -113,6 +113,30 @@ def test_record_as_papyrus_writes_it():
     assert record.witnesses[1].actor.identity().ref.plugin.startswith("light:")
 
 
+def test_papyrus_recased_values_are_accepted():
+    # Papyrus's string table is case-insensitive: "grab" arrived as "Grab" in the first in-game test
+    grab_rec = parse_record(grab_scene().replace("type=grab", "type=Grab").replace("hand=L", "hand=l"))
+    assert grab_rec.type == "grab" and grab_rec.hand == "L"
+    drink = parse_record(drink_scene().replace("type=consume", "type=Consume").replace("via=higgs_mouth", "via=Higgs_Mouth"))
+    assert drink.type == "consume" and drink.via == "higgs_mouth"
+
+
+def test_recased_grab_goes_all_the_way_to_memories(tmp_path):
+    talk(tmp_path, [actors.gerdur()], 3.5)
+    talk(tmp_path, [actors.gerdur()], 3.55, [grab_scene().replace("type=grab", "type=Grab")])
+    db = open_db(tmp_path)
+    assert len(memories(db, "Gerdur")) == 1 and len(memories(db, "Hod")) == 1
+    assert json.loads(db.execute("SELECT payload_json FROM world_event").fetchone()[0])["hand"] == "L"
+
+
+def test_recased_equip_drink_is_still_confirmed(tmp_path):
+    talk(tmp_path, [actors.gerdur()], 3.5)
+    talk(tmp_path, [actors.gerdur()], 3.55, [consume(PLAYER, "Nord Mead", 3.52, via="Equip", witnesses=[seen(actors.gerdur(), 2.0)])
+                                             .replace("type=consume", "type=Consume")])
+    payload = json.loads(open_db(tmp_path).execute("SELECT payload_json FROM world_event").fetchone()[0])
+    assert payload["via"] == "equip" and payload["confirmed"] is True
+
+
 # ---- the target scenario -----------------------------------------------------------------------
 
 def test_one_event_three_perspectives(tmp_path):

@@ -177,6 +177,7 @@ class ConfigLoader:
                 self.facefx_path = self.__definitions.get_string_value("facefx_folder")
 
             self.mod_path_base = self.mod_path
+            utils.configured_mod_folder = self.mod_path_base # LIVINGWORLD PATCH: key lookup when run from source
             self.mod_path += os.path.join("/", "Sound", "Voice", "Mantella.esp")
 
             self.language = self.__definitions.get_string_value("language")
