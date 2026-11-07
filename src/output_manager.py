@@ -322,6 +322,8 @@ class ChatManager:
                 for i in indicators:
                     cut_indicators.add(i)
             accumulator: sentence_accumulator = sentence_accumulator(list(cut_indicators))
+            living_world = getattr(self, "living_world", None) # LIVINGWORLD PATCH: cut mood tags out before parsing
+            mood_filter = living_world.mood_filter(active_character, characters) if living_world is not None else None # LIVINGWORLD PATCH
         
             try:
                 current_sentence: str = ''
@@ -358,7 +360,7 @@ class ChatManager:
                                     has_text_response = True
                                     content = item_data
                                     raw_response += content
-                                    accumulator.accumulate(content)
+                                    accumulator.accumulate(mood_filter.feed(content) if mood_filter else content) # LIVINGWORLD PATCH: mood tags
                                 elif item_type == "tool_calls":
                                     # Collect tool calls
                                     collected_tool_calls = item_data
@@ -422,7 +424,7 @@ class ChatManager:
                                 has_text_response = True
                                 content = item
                                 raw_response += content
-                                accumulator.accumulate(content)
+                                accumulator.accumulate(mood_filter.feed(content) if mood_filter else content) # LIVINGWORLD PATCH: mood tags
                             
                             # Only process sentences if we have text content
                             if has_text_response:
