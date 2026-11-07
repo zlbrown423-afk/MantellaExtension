@@ -1,0 +1,23 @@
+{
+    "identifier": "mantella_lw_npc_undress",
+    "name": "Undress",
+    "description": "The NPC takes off the clothes and armor they are wearing, down to their underclothes. The items stay in their own inventory. This is the NPC's own choice and they may refuse in character, which is simply not using this action. Decide as the NPC would: their personality and modesty, what they feel for and remember of the people present, their mood, and the situation, such as whether the place is private, who else is nearby and could see, and whether it is safe. Being asked, flattered, persuaded, given a gift or offered gold is only something they weigh: it never obliges them, and many people would refuse or be offended. Drink never makes them more willing: anything they would refuse sober, they still refuse. Never for children.",
+    "note": "Living World (MANTELLA_LIVING_WORLD=1). The game unequips every worn armor and clothing item (weapons stay); the NPC keeps them and Dress puts them back on. Children are excluded in game. Witnesses within sight remember it (attire perception, via=action).",
+    "key": "Undress",
+    "parameters": {
+        "source": {
+            "type": "string",
+            "description": "The one NPC who chooses to undress. Only the NPC who decided it themself.",
+            "scope": "conversation"
+        }
+    },
+    "required": ["source"],
+    "prompt": "Only if you yourself decide, in character, to take off your clothes (for example, to bathe, to change, or because you truly want to with someone you trust, somewhere private enough for you), begin your response with '{key}:'. You are never obliged to: being asked, flattered, offered gifts or gold, or having had drink does not make you willing, and you may refuse.",
+    "allowed_games": ["skyrim"],
+    "requires_response": false,
+    "is-interrupting": false,
+    "allow_repeat": true,
+    "one-on-one": true,
+    "multi-npc": true,
+    "radiant": false
+}

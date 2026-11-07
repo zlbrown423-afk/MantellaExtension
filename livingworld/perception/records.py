@@ -24,7 +24,9 @@ An ``attire`` record is a snapshot of what one actor wears in the body slot (32)
 ``clothing``, ``armor`` or ``none`` (nothing in the body slot), and witnesses are listed only when
 ``cover`` is ``none``. The game sends one per nearby person with every request, under the context key
 ``mantella_lw_attire``, and queues one with the events when the player takes off or puts on body
-clothing. ``via=action`` on a consume record means an NPC chose to drink (the Living World Drink action).
+clothing. ``via=action`` on a consume record means an NPC chose to drink (the Living World Drink action);
+on an attire record it means an NPC chose to undress or dress (the Undress and Dress actions), and the game
+queues it the moment they do, with witnesses.
 
 A ``purchase`` record is an NPC (``actor``) buying a round from a bartender (``target``) with the
 Living World OrderDrinks action: ``gold`` paid in total, ``payer`` is ``player`` or ``npc`` (the buyer),
@@ -92,7 +94,7 @@ class PerceptionRecord:
     item: str | None = None
     item_form: int | None = None
     is_food: bool = False
-    via: str | None = None          # 'higgs_mouth' | 'equip' | 'action'
+    via: str | None = None          # consume: 'higgs_mouth' | 'equip' | 'action'; attire: 'action' (own choice)
     quantity: int = 1
     target_rank: int | None = None  # the target's relationship rank towards the actor
     body: str | None = None         # attire: the item worn in the body slot

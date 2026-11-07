@@ -106,9 +106,10 @@ undressing or intimacy, they still refuse.
 | Attire memory | `perception/attire.py` | Stores only changes, as `attire` world events on the active timeline. Someone seen with nothing in the body slot gives each NPC who could see them (line of sight, within 20 m) a memory, and the NPC themself one too. NPCs who arrive later while it lasts get the same event once. Dressing again closes it |
 | Drink action | `data/actions/livingworld_drink.json` | "Drink": the NPC drinks ale, mead, wine and the like from their own inventory. Only loaded with `MANTELLA_LIVING_WORLD=1` (actions marked `living_world`) |
 | Intoxication | `perception/intoxication.py` | Counts the NPC's own drinks (skooma does not count); about 0.35 drinks wear off per game hour. Stages merry, tipsy, drunk, very drunk change speech, mood and social behaviour: louder, looser lips with gossip and secrets, singing and dancing, affection or quarrels by temperament. Memories formed while drunk are marked hazy and less certain |
-| What an NPC notices | `perception/awareness.py` | Adds to each NPC's own prompt: who present has no clothes or armor on (including themself), their own drink stage, and how many drinks they saw others present have |
+| What an NPC notices | `perception/awareness.py` | Adds to each NPC's own prompt: who present has no clothes or armor on (including themself), their own drink stage, how many drinks they saw others present have, and which other adults are nearby but not in the conversation (so they can judge privacy) |
+| Chosen undress | `perception/attire.py` | An attire record with `via=action` (the Undress action) is remembered as the NPC's own choice: "I chose to take off my clothes" for them, "I saw Gerdur take off their clothes" for witnesses within sight |
 
-## Actions: sit, stand up, go there, order drinks
+## Actions: sit, stand up, go there, order drinks, undress, dress
 
 Extra actions the LLM can use, offered only with `MANTELLA_LIVING_WORLD=1`. They are ordinary
 action files (`actions/*.json`, same format as `data/actions/`), loaded by `FunctionManager.load_all_actions`.
@@ -122,6 +123,14 @@ Drinking is the `Drink` action above.
 | `StandUp` | Ends a sit or stay order and gets the NPC out of the furniture |
 | `GoThere` | Walks to the last non-person thing the player pointed at and stays near it for up to 3 minutes (a pointed seat means Sit). People: use upstream `MoveTo` |
 | `OrderDrinks` (bartender, drink: mead/ale/wine, payer: player/npc) | Walks to the bartender (named, else the person the player last pointed at), buys two of the drink at its base value each, walks back and hands one to the player. The drink is the bartender's own, else the kind of a bottle standing in the cell. If the payer cannot afford it, the NPC comes back empty-handed. Queues a `purchase` perception record: the buyer, the bartender and witnesses remember the round (world event type `trade`, so it never counts as drinking) |
+
+| `Undress` | The NPC's own choice, never an order. The game unequips every worn armor and clothing item (weapons stay, nothing leaves their inventory) and remembers what it took off. If their AI puts something back on, it is taken off again, for up to 10 minutes, until `Dress`, combat or a new undress. Queues an attire record with `via=action` and witnesses. Children are refused in game and ignored by the server |
+| `Dress` | Puts back on what `Undress` took off (else the NPC's AI picks their outfit) and queues an attire record with `via=action` |
+
+Undress consent: the description and basic-mode prompt tell the NPC to decide in character from their
+personality, relationships and memories, mood, and the situation (privacy, who else is nearby, safety).
+Being asked, flattered, given gifts or offered gold is only weighed, never an obligation, and drink never
+makes them more willing. Nothing in code makes them agree; refusing is not calling the action.
 
 When there is nothing to sit on or nowhere pointed at, the game adds an in-game event line so the NPC can say so.
 

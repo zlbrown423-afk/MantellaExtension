@@ -1,4 +1,5 @@
-"""Living World actions: sit, stand up, go there, order drinks from the bar (drinking is data/actions/livingworld_drink.json).
+"""Living World actions: sit, stand up, go there, order drinks from the bar, undress and dress (drinking is
+data/actions/livingworld_drink.json).
 
 The JSON files in this folder use the same format as ``data/actions/``. ``FunctionManager.load_all_actions``
 loads them too when ``MANTELLA_LIVING_WORLD=1`` (see the ``LIVINGWORLD PATCH`` there); otherwise the LLM is
@@ -20,7 +21,9 @@ STAND_UP = "mantella_lw_npc_standup"
 GO_THERE = "mantella_lw_npc_gothere"
 DRINK = "mantella_npc_lw_drink"   # data/actions/livingworld_drink.json
 ORDER_DRINKS = "mantella_lw_npc_orderdrinks"
-ALL = (SIT, STAND_UP, GO_THERE, ORDER_DRINKS)
+UNDRESS = "mantella_lw_npc_undress"
+DRESS = "mantella_lw_npc_dress"
+ALL = (SIT, STAND_UP, GO_THERE, ORDER_DRINKS, UNDRESS, DRESS)
 
 
 def enabled() -> bool:
