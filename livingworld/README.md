@@ -149,6 +149,20 @@ are still recorded). No AI call is made for any of it except one more field in t
 | Prompt | `memory/recall.py` | Up to 3 things the NPC was told, with who told them and how sure they are ("I'm not sure I believe it. I did not see it myself."), and a line on how they feel about the player from their own relationship values (`v_relationship`, now with respect, admiration and suspicion) |
 | Children | `store/minors.py`, `npc.is_child` | Child NPCs are left out of everything Living World works out: no grabs, clothing, drinking, witnesses, memories, seed, gossip or reputation. Recognised by Mantella's character list (child voices), a child race or voice type, and on the game side by `Actor.IsChild()` |
 
+## Romance between NPCs (R1: off screen)
+
+Off unless you set `MANTELLA_LW_ROMANCE=1` (on top of `MANTELLA_LIVING_WORLD=1`). No AI call and no animation:
+everything is decided on the server and recorded as having happened off screen (`encounter.mode = 'offscreen'`).
+
+| Part | Where | What it does |
+| --- | --- | --- |
+| Tables | `store/migrations/005_romance.sql` | `romance_bond_change` + `v_romance_bond` (what a pair agreed: courting, dating, partners, betrothed, married, affair, ended), `place`, `encounter`, `consent_decision`; `v_relationship` gains intimacy, commitment, satisfaction and jealousy. All on the save timeline, so loading an older save rolls romance back |
+| Seed | `social/data/riverwood.json` (`romance`, `places`) | Romance traits per person (romantic, drive, monogamy, jealous, flirtatious, shy, modesty, attracted_to, intimacy_boundary) and the places people can be alone. Hod is curious and flirts; Gerdur keeps to him less firmly and his flirting hurts her, so she is the likeliest to stray. Seeded spouses start out married |
+| Simulation | `social/romance.py` | Caught up with gossip in quarter-day steps. Attraction drifts toward a fixed per-pair "spark" (most pairs have none); people with strong private interest ask to court, rarely ask for an affair; a no gets a cooldown and two nos end the asking; bonded pairs spend evenings and, at night, private time in the most private free place; taken people may flirt where others see; jealousy and unhappiness can end a bond; exes with closeness left may reconcile. Paced slowly: at most one new courtship or affair a week in a village, one bond change per person every 3 days, one night together per pair per day |
+| Consent | `social/consent.py` | Each person's own yes, asked separately at invite, arrival and start, logged with its reasons. Hard limits first (child, the person's own boundary for the bond stage, fear, anger, grief, very low mood, heavily drunk, not private enough), then their own wish against their own threshold. Never reads gifts, gold, debts, rank, the other's wish or the player. Drink never raises a yes. Saying no costs the person who says it nothing |
+| Consequences | `social/claims.py`, `romance.on_learned` | Romance events become claims (flirted with, spent the night with, broke up with, married...). Inn staff and housemates may notice; private claims spread mostly between close people. A partner who sees or hears of a flirt or a night elsewhere gets jealous, less satisfied and (for a night) trusts less. Encounters never raise attraction or trust |
+| Prompt | `memory/recall.py` | The NPC's own love life in their words ("Hod is my spouse, but I've been jealous lately", "I've been secretly seeing Faendal...") |
+
 Everything is on the save timeline: loading an older save takes back the gossip that happened after it.
 
 ## Mood meter and quiet vanilla chatter

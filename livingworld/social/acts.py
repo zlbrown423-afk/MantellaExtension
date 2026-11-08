@@ -19,6 +19,17 @@ ACTS: dict[str, Act] = {
     "held": Act("grabbed and held", 0.7, {"trust": -0.25, "suspicion": 0.3, "fear": 0.06}, harms_object=True),
     "drank": Act("was drinking", 0.15),
     "bought_round": Act("bought a round of drinks for", 0.3, {"affinity": 0.05, "respect": 0.02}),
+    # romance (social/romance.py); a partner's own reaction is in romance.on_learned
+    "flirted": Act("flirted with", 0.45),
+    "spent_night": Act("spent the night with", 0.8),
+    "caught_with": Act("was caught in bed with", 0.9),
+    "is_courting": Act("is courting", 0.5),
+    "is_seeing": Act("is seeing", 0.45),
+    "together": Act("is now with", 0.45),
+    "betrothed": Act("is betrothed to", 0.6),
+    "married": Act("married", 0.7),
+    "broke_up": Act("broke up with", 0.6),
+    "reconciled": Act("got back together with", 0.5),
     "reported": Act("", 0.3),     # said in conversation; meaning comes from the claim's valence
 }
 
