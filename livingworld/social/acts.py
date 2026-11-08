@@ -38,12 +38,14 @@ ACTS: dict[str, Act] = {
     "demoted": Act("was demoted by", 0.45, {"respect": -0.04}),
     "dismissed": Act("was dismissed by", 0.6, {"respect": -0.06, "trust": -0.03}),
     "reinstated": Act("was taken back by", 0.35),
+    "commended": Act("was commended by", 0.35, {"respect": 0.04, "trust": 0.02}),
+    "reprimanded": Act("was reprimanded by", 0.4, {"respect": -0.03}),
     "reported": Act("", 0.3),     # said in conversation; meaning comes from the claim's valence
 }
 
 # the verb when nobody is named as having done it ("Torvar was promoted to Sergeant in the Whiterun Guard")
 NO_OBJECT = {"enlisted": "joined", "promoted": "was promoted", "demoted": "was demoted", "dismissed": "was dismissed",
-             "reinstated": "was taken back"}
+             "reinstated": "was taken back", "commended": "was commended", "reprimanded": "was reprimanded"}
 
 SECONDHAND = 0.6        # hearing about something moves an opinion less than seeing it
 CLOSE_TO_OBJECT = 1.5   # ...unless it was done to someone you are close to

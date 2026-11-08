@@ -11,6 +11,7 @@ Run on the PC with the game's database, while the Mantella server is NOT running
     python -m livingworld.guard.dev --db ... dismiss | reinstate whiterun
     python -m livingworld.guard.dev --db ... thane whiterun
     python -m livingworld.guard.dev --db ... reset whiterun --yes
+    python -m livingworld.guard.dev --db ... duty | seen | report | pay | record | probation | upkeep
 
 "Now" is the latest game time in the database unless ``--now`` is given. Everything written here is on the
 active save timeline and marked as coming from the developer (``source = 'admin'`` events, reasons starting
@@ -22,7 +23,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from livingworld.guard import debug as D, orgs as O, profiles, recruit as R, store as S
+from livingworld.guard import debug as D, duty as DU, orgs as O, profiles, recruit as R, store as S
 from livingworld.guard.service import run as run_command
 from livingworld.social import claims, processor
 from livingworld.store.world_store import WorldStore
@@ -69,10 +70,12 @@ def run(argv: list[str], out=print) -> int:
     sub.add_parser("dismiss")
     sub.add_parser("reinstate").add_argument("org", nargs="?")
     sub.add_parser("thane").add_argument("org", nargs="?")
+    for verb in ("duty", "seen", "report", "pay", "record", "probation", "upkeep"):
+        sub.add_parser(verb)
     r = sub.add_parser("reset"); r.add_argument("org", nargs="?"); r.add_argument("--yes", action="store_true")
     args = p.parse_args(argv)
 
-    writes = args.cmd not in ("orgs", "status", "roster", "explain-recruit")
+    writes = args.cmd not in ("orgs", "status", "roster", "explain-recruit", "pay", "record")
     if writes and not args.force and server_running():
         out("The Mantella server seems to be running (port 4999). Stop it first, or pass --force.")
         return 2
@@ -150,6 +153,9 @@ def _dispatch(db, args, now: float, out) -> int:
         for svc in rows:
             S.change(db, svc, "reset by developer", now, source="admin")
         out(f"reset {len(rows)} service record(s)")
+        return 0
+    if cmd == "upkeep":
+        out(f"upkeep: {DU.upkeep(db, now)}")
         return 0
     svc = S.current(db, player)
     if cmd in ("promote", "demote"):

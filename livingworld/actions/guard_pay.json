@@ -1,0 +1,27 @@
+{
+    "identifier": "mantella_lw_guard_pay",
+    "name": "PayWages",
+    "description": "Use only when the NPC is the player's superior in the guard, the NPC owes the player wages, and the player has asked to be paid. The server works out the amount and the game hands over the gold. If nothing is owed, do not use it.",
+    "note": "Living World guard duties (MANTELLA_LIVING_WORLD=1). Handled by the Living World server (livingworld/guard/duty.py), which applies the guard's own rules; the game only hands over the gold the server names.",
+    "key": "PayWages",
+    "parameters": {
+        "source": {
+            "type": "string",
+            "description": "The superior paying the wages.",
+            "scope": "conversation"
+        }
+    },
+    "required": [
+        "source"
+    ],
+    "prompt": "If the player asks for the wages you owe them and you pay them, begin your response with '{key}:'",
+    "allowed_games": [
+        "skyrim"
+    ],
+    "requires_response": false,
+    "is-interrupting": false,
+    "allow_repeat": true,
+    "one-on-one": true,
+    "multi-npc": true,
+    "radiant": false
+}

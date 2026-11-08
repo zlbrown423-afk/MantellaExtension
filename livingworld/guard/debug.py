@@ -5,6 +5,11 @@
 * "debug guard dismiss" / "debug guard reinstate"
 * "debug guard thane" / "debug guard thane whiterun"    - count the player as thane of that hold from now on
 * "debug guard status"                                  - write the player's record to the server log
+* "debug guard duty"                                    - have your superior give you a duty now (any hour)
+* "debug guard seen"                                    - count you as seen at the post of the duty in hand
+* "debug guard report"                                  - report back on the duty in hand (the rules judge it)
+* "debug guard pay" / "debug guard record"              - show wages owed / the service record
+* "debug guard probation"                               - settle probation now as if it had run its course
 
 "debug" (or "test") and "guard" must both be in the line, so normal speech never triggers it. The hold
 defaults to the hold of a guard leader or guard in the conversation, else the first configured hold.
@@ -17,7 +22,8 @@ from dataclasses import dataclass
 
 from livingworld.guard import orgs as O
 
-COMMANDS = ("enlist", "rank", "dismiss", "reinstate", "thane", "status")
+COMMANDS = ("enlist", "rank", "dismiss", "reinstate", "thane", "status", "duty", "seen", "report", "pay", "record",
+            "probation")
 
 
 @dataclass(frozen=True)

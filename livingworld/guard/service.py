@@ -5,14 +5,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from livingworld.guard import debug as D, orgs as O, prompts as P, profiles, recruit as R, store as S
+from livingworld.guard import debug as D, duty as DU, orgs as O, prompts as P, profiles, recruit as R, store as S
 from livingworld.guard.profiles import GuardFacts
 from livingworld.social import claims, processor
 from livingworld.store.minors import is_child
 from livingworld.store.world_store import WorldStore
 
 ENLIST = "mantella_lw_guard_enlist"
-ACTIONS = (ENLIST,)
+REPORT = "mantella_lw_guard_report"
+PAY = "mantella_lw_guard_pay"
+ACTIONS = (ENLIST, REPORT, PAY)
 INVITE_GAP_DAYS = 7.0
 
 
@@ -25,26 +27,36 @@ class Scene:
     location: str | None = None
     facts: dict[int, GuardFacts] = field(default_factory=dict)   # npc_id -> what the game reported
     thane_of: tuple[str, ...] = ()                                # holds the game reports the player is thane of
+    said: str | None = None                                       # the player's last line in this conversation
 
 
 @dataclass
 class Issue:
     """Items for the game to hand the player (reply key mantella_lw_guard_issue)."""
     items: list[O.Item]
+    counts: list[int] | None = None       # how many of each (default 1)
+
+    def _pairs(self) -> list[tuple[O.Item, int]]:
+        counts = self.counts or [1] * len(self.items)
+        return [(i, c) for i, c in zip(self.items, counts) if i.form_id and c > 0]
 
     def key_value(self) -> str:
-        return ";".join(f"{i.name}|{i.plugin}|{i.form_id}" for i in self.items if i.form_id)
+        return ";".join(f"{i.name}|{i.plugin}|{i.form_id}" + (f"|{c}" if c != 1 else "") for i, c in self._pairs())
 
     def form_ids(self) -> list[int]:
-        return [int(i.form_id, 16) for i in self.items if i.form_id]
+        return [int(i.form_id, 16) for i, _ in self._pairs()]
 
     def plugins(self) -> list[str]:
-        return [i.plugin for i in self.items if i.form_id]
+        return [i.plugin for i, _ in self._pairs()]
+
+    def item_counts(self) -> list[int]:
+        return [c for _, c in self._pairs()]
 
 
 class Guard:
     def __init__(self, store: WorldStore) -> None:
         self.store = store
+        self._assigned: set[int] = set()     # duties given in the conversation now running
 
     # ---- who is who ----
     def note(self, npc_id: int, facts: GuardFacts | None, gt: float) -> profiles.Profile | None:
@@ -99,6 +111,7 @@ class Guard:
         if svc is not None and svc.org_key == org.key:
             out.append(P.service_line(name, player, org, svc, scene.now, self._name(db, svc.recruiter_id)))
             out.append(P.rank_line(name, player, org, svc, p))
+            out += self._duty_lines(db, npc_id, name, org, svc, scene)
             return out
         if svc is not None:
             other = O.by_key(svc.org_key)
@@ -115,6 +128,51 @@ class Guard:
                         scene.location, witnesses=[])
         return out
 
+    def _duty_lines(self, db, npc_id: int, name: str, org: O.Org, svc: S.Service, scene: Scene) -> list[str]:
+        """Duties, reports, pay and the record: from the member's superior; quarters and duty from anyone."""
+        player = scene.player_name
+        out = [P.quarters_line(name, player, org)] if org.quarters else []
+        boss = DU.superior_id(db, org, svc)
+        task = DU.in_hand(db, svc.member_id)
+        if npc_id != boss:
+            if task is not None:
+                out.append(P.on_duty_line(name, player, task))
+            return out
+        if task is None and all(c.ok for c in DU.checks(db, org, svc, scene.now)):
+            prev = DU.last(db, svc.member_id)
+            d = DU.pick(org, svc, prev.template if prev else None, scene.now)
+            if d is not None:
+                task = DU.assign(db, org, svc, npc_id, d, scene.now,
+                                 witnesses=[i for i in scene.present if i != svc.member_id])
+                self._assigned.add(task.task_id)
+        if task is not None:
+            d = DU.rules(org.key).duty(task.template)
+            if d is not None:
+                out.append(P.duty_line(name, player, task, d, DU.shift_end(db, task, d), scene.now,
+                                       new=task.task_id in self._assigned, seen=DU.seen_count(db, task) > 0))
+        out.append(P.record_line(name, player, DU.record(db, svc)))
+        if org.pay:
+            out.append(P.pay_line(name, player, DU.pay(db, org, svc, scene.now)))
+        return out
+
+    # ---- upkeep, once per conversation ----
+    def refresh(self, scene: Scene) -> dict[str, list[int]]:
+        """Missed duties, probation, and whether the player is at their post right now."""
+        self._assigned = set()
+        with self.store.transaction() as db:
+            result = DU.upkeep(db, scene.now)
+            svc = S.current(db, scene.player_id) if scene.player_id is not None else None
+            org = O.by_key(svc.org_key) if svc else None
+            boss = DU.superior_id(db, org, svc) if org else None
+            # reporting to the superior is not standing the post: only other conversations count as sightings
+            if svc is not None and (boss is None or boss not in scene.present):
+                seen = DU.mark_seen(db, scene.player_id, scene.location, scene.now,
+                                    witnesses=[i for i in scene.present if i != scene.player_id])
+                if seen is not None:
+                    result.setdefault("seen", []).append(seen.task_id)
+            processor.process(db, {"appraisal": claims.appraise})
+        return result
+
     def leader_for(self, npc_id: int, scene: Scene) -> int:
         """``npc_id`` if they can take people on; else the only leader present who can (the action means them)."""
         with self.store.transaction() as db:
@@ -125,8 +183,20 @@ class Guard:
             return able[0] if len(able) == 1 else npc_id
 
     # ---- actions ----
+    def superior_for(self, npc_id: int, scene: Scene) -> int:
+        """``npc_id`` if they are the player's superior; else the superior, if present (the action means them)."""
+        if scene.player_id is None:
+            return npc_id
+        with self.store.transaction() as db:
+            svc = S.current(db, scene.player_id)
+            org = O.by_key(svc.org_key) if svc else None
+            boss = DU.superior_id(db, org, svc) if org else None
+        return boss if boss is not None and (boss == npc_id or boss in scene.present) else npc_id
+
     def action(self, identifier: str, npc_id: int, scene: Scene) -> tuple[str, Issue | None]:
-        """Handle a guard action by ``npc_id`` (the leader). Returns (what happened, items to hand out)."""
+        """Handle a guard action by ``npc_id``. Returns (what happened, items to hand out)."""
+        if identifier in (REPORT, PAY) and scene.player_id is not None:
+            return self._duty_action(identifier, npc_id, scene)
         if identifier != ENLIST or scene.player_id is None:
             return "not a guard action", None
         with self.store.transaction() as db:
@@ -144,6 +214,27 @@ class Guard:
             processor.process(db, {"appraisal": claims.appraise})   # news at once
             return f"service {svc.service_id}: {org.name}, {org.title(first)} ({d.path})", Issue(list(O.uniform_for(org, first)))
 
+    def _duty_action(self, identifier: str, npc_id: int, scene: Scene) -> tuple[str, Issue | None]:
+        with self.store.transaction() as db:
+            svc = S.current(db, scene.player_id)
+            org = O.by_key(svc.org_key) if svc else None
+            if org is None:
+                return "the player does not serve", None
+            if DU.superior_id(db, org, svc) != npc_id:
+                return "this NPC is not the player's superior", None
+            witnesses = [i for i in scene.present if i != scene.player_id]
+            if identifier == REPORT:
+                r = DU.report(db, org, svc, npc_id, scene.now, scene.said, location=scene.location,
+                              witnesses=witnesses)
+                processor.process(db, {"appraisal": claims.appraise})
+                if r.task is None:
+                    return "no duty to report on", None
+                return f"duty {r.task.task_id} report: {r.outcome}" + (" (commended)" if r.commended else ""), None
+            amount = DU.pay_out(db, org, svc, npc_id, scene.now, witnesses=witnesses)
+            if amount <= 0 or org.gold is None:
+                return "nothing owed", None
+            return f"paid {amount} gold", Issue([org.gold], [amount])
+
     # ---- the game's approach step ----
     def wants_a_word(self, scene: Scene) -> list[int]:
         """Leaders met before (not in this conversation) who would invite the player to join, and have not
@@ -152,8 +243,14 @@ class Guard:
             return []
         out = []
         with self.store.transaction() as db:
-            if S.current(db, scene.player_id) is not None:
-                return []
+            svc = S.current(db, scene.player_id)
+            if svc is not None:
+                org = O.by_key(svc.org_key)
+                boss = DU.superior_id(db, org, svc) if org else None
+                if boss is None or boss in scene.present or not all(c.ok for c in DU.checks(db, org, svc, scene.now)):
+                    return []
+                prev = DU.last(db, svc.member_id)
+                return [boss] if DU.pick(org, svc, prev.template if prev else None, scene.now) else []
             leaders = [r[0] for r in db.execute("SELECT npc_id FROM guard_profile ORDER BY npc_id")]
             for npc_id in leaders:
                 p = profiles.get(db, npc_id)
@@ -227,4 +324,40 @@ def run(db, cmd: D.Command, org: O.Org, player_id: int, now: float, location: st
         S.change(db, svc, "developer: dismissed", now, status="dismissed", kind="dismissed", location=location,
                  source="admin")
         return f"dismissed from {o.name}"
-    return "nothing done"
+    return _run_duty(db, cmd, o, svc, now, location)
+
+
+def _run_duty(db, cmd: D.Command, org: O.Org, svc: S.Service, now: float, location: str | None) -> str:
+    boss = DU.superior_id(db, org, svc)
+    person = org.superior(svc.rank_key)
+    if cmd.verb == "record":
+        rec = DU.record(db, svc)
+        return f"record: {rec.words()}, merit {rec.merit:g}"
+    if cmd.verb == "pay":
+        p = DU.pay(db, org, svc, now)
+        return f"pay: {p.weeks} weeks, earned {p.earned}, docked {p.docked}, paid {p.paid}, owed {p.owed}"
+    if cmd.verb == "probation":
+        if svc.status != "probation":
+            return f"not on probation ({svc.status})"
+        result = DU.settle_probation(db, org, svc, max(now, svc.joined_gt + org.probation_days))
+        return f"probation: {result or 'still running'}"
+    if boss is None:
+        who = person.name if person else "a superior"
+        return f"{who} is not known to the world yet; talk to them once first"
+    held = DU.in_hand(db, svc.member_id)
+    if cmd.verb == "duty":
+        if held is not None:
+            return f"already on duty: {held.title}"
+        prev = DU.last(db, svc.member_id)
+        d = DU.pick(org, svc, prev.template if prev else None, now, any_hour=True)
+        if d is None:
+            return "no duty fits this rank"
+        task = DU.assign(db, org, svc, boss, d, now, source="admin")
+        return f"duty {task.task_id}: {d.title} ({d.shift_hours:g} h, report to {person.name if person else 'superior'})"
+    if held is None:
+        return "no duty in hand"
+    if cmd.verb == "seen":
+        DU.mark_seen(db, svc.member_id, location, now, force=True)
+        return f"seen at the post of: {held.title}"
+    r = DU.report(db, org, svc, boss, now, "(developer report)", location=location, source="admin")
+    return f"report: {r.outcome}" + (" (commended)" if r.commended else "")

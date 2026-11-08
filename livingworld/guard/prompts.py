@@ -69,3 +69,60 @@ def recruit_lines(name: str, player: str, d: R.Decision, recruiters: list[str], 
 def other_org_line(name: str, player: str, org: O.Org, svc: S.Service) -> str:
     return (f"{player} serves in {org.name} as {org.a_title(svc.rank_key)}. That rank carries no authority with "
             f"{name}'s own guard.")
+
+
+# ---- G2: duties, reports, record, pay, quarters ----
+
+REPORT_KEY = "ReportDuty"
+PAY_KEY = "PayWages"
+
+
+def _hours(days: float) -> str:
+    h = max(0.0, days * 24)
+    if h < 1:
+        return "less than an hour"
+    return f"about {round(h)} hour{'s' if round(h) != 1 else ''}"
+
+
+def quarters_line(name: str, player: str, org: O.Org) -> str:
+    return f"As a member of {org.name}, {player} has {org.quarters}."
+
+
+def on_duty_line(name: str, player: str, task) -> str:
+    return f"{player} is on duty right now: they were told to {task.title}."
+
+
+def duty_line(name: str, player: str, task, d, shift_end: float, now: float, *, new: bool, seen: bool) -> str:
+    if new:
+        head = (f"{name} is {player}'s superior and has a duty for {player} right now: {d.title}. "
+                f"Why: {d.why}. What to do: {d.instructions} The shift lasts {_hours(d.shift_hours / 24)}. "
+                f"{name} gives the order in their own words.")
+    else:
+        left = shift_end - now
+        when = f"with {_hours(left)} of the shift left" if left > 0 else "and the shift is over"
+        head = f"{name} gave {player} a duty: {d.title}, {when}."
+        if seen:
+            head += f" Others have seen {player} at the post."
+    return (head + f" When {player} comes back to report on this duty, {name} hears them out and asks what happened; "
+            f"then begin the reply with '{REPORT_KEY}:'. {name} does not decide whether the report is true; "
+            f"the guard's own record will show that.")
+
+
+def record_line(name: str, player: str, rec) -> str:
+    return (f"{name} knows {player}'s service record: {rec.words()}, merit {rec.merit:g}. {name} may bring it up "
+            f"when it matters.")
+
+
+def pay_line(name: str, player: str, pay) -> str:
+    if pay.weeks == 0:
+        return f"{player} has not yet served a full week, so no wages are due."
+    out = f"{player} has earned {pay.earned} gold in wages so far"
+    if pay.docked:
+        out += f", with {pay.docked} docked for reprimands"
+    out += f", and has been paid {pay.paid}."
+    if pay.owed > 0:
+        out += (f" {name} owes {player} {pay.owed} gold. If {player} asks for their wages, {name} pays them: "
+                f"begin the reply with '{PAY_KEY}:'.")
+    else:
+        out += f" Nothing more is owed right now. Do not use {PAY_KEY}."
+    return out

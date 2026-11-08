@@ -50,6 +50,14 @@
       "generic_rank": "guardsman",
       "rank_note": "The Whiterun Guard is the Jarl's own force; the Imperial Legion's garrison only assists it, and guard ranks carry no rank in the Legion.",
       "probation_days": 7,
+      "duties": "whiterun_duties.json",
+      "pay": {
+        "_about": "Weekly wage in gold by rank, owed for every full week served (not while suspended), paid by the member's superior when asked. Each reprimand docks dock_per_reprimand from what is owed. The Lex Imperii pay scale is monthly; these are the weekly shares.",
+        "per_week": {"recruit": 60, "guardsman": 90, "sergeant": 110, "lieutenant": 150, "captain": 175, "commander": 250},
+        "dock_per_reprimand": 25,
+        "gold": {"name": "Gold", "plugin": "Skyrim.esm", "id": "0x0000000F"}
+      },
+      "quarters": "a bunk in the Whiterun barracks by the main gate, with a footlocker at its foot",
       "recruit": {
         "min_standing": -0.1,
         "sponsor_bonus": 0.25,
