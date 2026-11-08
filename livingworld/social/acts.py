@@ -32,8 +32,18 @@ ACTS: dict[str, Act] = {
     "married": Act("married", 0.7),
     "broke_up": Act("broke up with", 0.6),
     "reconciled": Act("got back together with", 0.5),
+    # guard careers (livingworld/guard): "<member> was taken on by <leader> as a Recruit in the Whiterun Guard"
+    "enlisted": Act("was taken on by", 0.45, {"respect": 0.03}),
+    "promoted": Act("was promoted by", 0.4, {"respect": 0.04}),
+    "demoted": Act("was demoted by", 0.45, {"respect": -0.04}),
+    "dismissed": Act("was dismissed by", 0.6, {"respect": -0.06, "trust": -0.03}),
+    "reinstated": Act("was taken back by", 0.35),
     "reported": Act("", 0.3),     # said in conversation; meaning comes from the claim's valence
 }
+
+# the verb when nobody is named as having done it ("Torvar was promoted to Sergeant in the Whiterun Guard")
+NO_OBJECT = {"enlisted": "joined", "promoted": "was promoted", "demoted": "was demoted", "dismissed": "was dismissed",
+             "reinstated": "was taken back"}
 
 SECONDHAND = 0.6        # hearing about something moves an opinion less than seeing it
 CLOSE_TO_OBJECT = 1.5   # ...unless it was done to someone you are close to
