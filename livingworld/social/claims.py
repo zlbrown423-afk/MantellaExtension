@@ -101,6 +101,11 @@ def appraise(db, event) -> int | None:
         else:
             act_name, detail, valence = "let_down", f", who needed help to {title}", -0.4
         magnitude, sensitivity = 0.3, "public"
+    elif etype in GUARD_ACTS:
+        guarded = _guard_claim(etype, payload)
+        if guarded is None:
+            return None
+        act_name, detail, magnitude, sensitivity, valence = guarded
     elif etype.startswith("romance."):
         romantic = _romance_claim(etype, payload)
         if romantic is None:
@@ -135,6 +140,25 @@ def appraise(db, event) -> int | None:
                                {"act": act_name, "subject_id": subject, "object_id": obj}, believed,
                                event["game_time"], event["event_id"])
     return claim_id
+
+
+GUARD_ACTS = {"guard.enlisted": "enlisted", "guard.promoted": "promoted", "guard.demoted": "demoted",
+              "guard.dismissed": "dismissed", "guard.reinstated": "reinstated"}
+
+
+def _guard_claim(etype: str, payload: dict) -> tuple[str, str, float, str, float] | None:
+    """(act, detail, magnitude, sensitivity, valence) for a change in someone's guard service."""
+    from livingworld.guard import orgs
+    org = orgs.by_key(payload.get("org"))
+    if org is None:
+        return None
+    act_name = GUARD_ACTS[etype]
+    rank = org.title(payload.get("rank"))
+    detail = {"enlisted": f" as a {rank} in {org.name}", "promoted": f" to {rank} in {org.name}",
+              "demoted": f" to {rank} in {org.name}", "dismissed": f" from {org.name}",
+              "reinstated": f" into {org.name} as a {rank}"}[act_name]
+    valence = {"enlisted": 0.2, "promoted": 0.3, "demoted": -0.3, "dismissed": -0.5, "reinstated": 0.1}[act_name]
+    return act_name, detail, {"dismissed": 0.6, "enlisted": 0.4}.get(act_name, 0.4), "public", valence
 
 
 BOND_ACTS = {"courting": "is_courting", "dating": "is_seeing", "partners": "together", "betrothed": "betrothed",
@@ -228,4 +252,5 @@ def sentence(db, claim: dict, viewer: int) -> str:
     if claim["act"] == "drank":
         return f"{subject} was drinking{claim['detail']}{place}"
     obj = f" {name(claim['object_id'])}" if claim["object_id"] is not None else ""
-    return f"{subject} {acts.act(claim['act']).verb}{obj}{claim['detail']}{place}"
+    verb = acts.act(claim["act"]).verb if obj else acts.NO_OBJECT.get(claim["act"], acts.act(claim["act"]).verb)
+    return f"{subject} {verb}{obj}{claim['detail']}{place}"

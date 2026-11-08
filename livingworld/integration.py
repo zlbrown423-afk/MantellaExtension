@@ -25,6 +25,9 @@ from livingworld.perception.intoxication import drink_state
 from livingworld.perception.pipeline import PerceptionPipeline
 from livingworld.social.world import SocialWorld
 from livingworld.work import tasks_enabled
+from livingworld.guard import guard_debug_enabled, guard_enabled
+from livingworld.guard.profiles import GuardFacts
+from livingworld.guard.service import ACTIONS as GUARD_ACTIONS, Guard, Scene as GuardScene
 from livingworld.work.service import ACTIONS as TASK_ACTIONS, Scene as WorkScene, Work
 from livingworld.perception.records import KEY_ATTIRE, BadRecord, parse_record, records_from_context
 from livingworld.perf.game_records import split_perf_records
@@ -56,6 +59,15 @@ HYGIENE_DEBUG_ENV = "MANTELLA_LW_HYGIENE_DEBUG"
 KEY_MOOD = "mantella_lw_mood"                    # sent with an NPC line: the meter text to show
 KEY_QUIET_CHATTER = "mantella_lw_quiet_chatter"  # sent with the start reply: mute vanilla chatter until the end
 KEY_WANTS_A_WORD = "mantella_lw_wants_a_word"    # sent with the start reply: people with work to offer (game side: W2)
+KEY_GUARD_ISSUE = "mantella_lw_guard_issue"      # sent with an NPC line: items handed to the player ('Name|plugin|0xID;...', for logs)
+KEY_GUARD_ISSUE_IDS = "mantella_lw_guard_issue_ids"          # ...the same items as plugin-relative form IDs (the game reads these)
+KEY_GUARD_ISSUE_PLUGINS = "mantella_lw_guard_issue_plugins"  # ...and the plugin each one comes from
+# Sent by the Living World build of Mantella-Spell (guard careers): per actor, and in the context
+KEY_IS_GUARD = "mantella_lw_is_guard"            # actor: Actor.IsGuard()
+KEY_CRIME_FACTION = "mantella_lw_crime_faction"  # actor: form ID of Actor.GetCrimeFaction()
+KEY_CRIME_PLUGIN = "mantella_lw_crime_plugin"    # actor: the plugin that faction comes from
+KEY_PLAYER_BOUNTY = "mantella_lw_player_bounty"  # actor: the player's crime gold in that faction
+KEY_THANE_OF = "mantella_lw_thane_of"            # context: holds the player is thane of
 
 
 def _never_raises(func: Callable) -> Callable:
@@ -105,6 +117,12 @@ class LivingWorld:
         self.tasks = enabled and tasks_enabled()    # NPC tasks and shared work (livingworld/work)
         self._work: dict[int, Work] = {}            # id(store) -> tasks for that world
         self._work_refreshed: int | None = None     # conv_id tasks were last brought up to date for
+        self.guard = enabled and guard_enabled()    # guard careers (livingworld/guard)
+        self.guard_debug = enabled and guard_debug_enabled()
+        self._guard: dict[int, Guard] = {}          # id(store) -> guard careers for that world
+        self._guard_facts: dict[str, GuardFacts] = {}   # Mantella's 6-digit ref id -> what the game said
+        self._thane_of: tuple[str, ...] = ()        # holds the game says the player is thane of
+        self._guard_sent: set[int] = set()          # id(sentence) whose guard actions were handled
         self.perf_monitor: PerfMonitor | None = None  # MANTELLA_LW_PERF=1 (see livingworld/perf)
         LivingWorld.latest = self
 
@@ -154,12 +172,21 @@ class LivingWorld:
         for actor_json in actor_jsons or []:
             identity = ActorIdentity.from_actor_json(actor_json)
             self._identities[identity.ref.mantella_id] = identity
+            if self.guard and KEY_IS_GUARD in actor_json:
+                faction = actor_json.get(KEY_CRIME_FACTION)
+                bounty = actor_json.get(KEY_PLAYER_BOUNTY)
+                self._guard_facts[identity.ref.mantella_id] = GuardFacts(
+                    bool(actor_json.get(KEY_IS_GUARD)), actor_json.get(KEY_CRIME_PLUGIN) or None,
+                    f"0x{int(faction) & 0xFFFFFF:08X}" if faction else None,
+                    int(bounty) if bounty is not None else None)
 
     @_never_raises
     def perceived(self, context_json: dict[str, Any] | None) -> int:
         """Store the perception records the game queued since its last request (see ``perception/``).
         Runs before Mantella reads the rest of the request, so the first prompt already holds the new memories."""
         started = time.perf_counter()
+        if self.guard and isinstance(context_json, dict) and KEY_THANE_OF in context_json:
+            self._thane_of = tuple(str(h) for h in (context_json.get(KEY_THANE_OF) or []) if h)
         raw, perf_markers = split_perf_records(records_from_context(context_json), context_json)
         for marker in perf_markers:   # the game's own timing summaries go to the performance monitor only
             PERF.add_marker(marker)
@@ -227,6 +254,7 @@ class LivingWorld:
         self._attire_now = {}
         self._moods_shown = {}
         self._moods_to_send = {}
+        self._guard_sent = set()
 
     @_never_raises
     def conversation_started(self, world_id: str, context: Any) -> None:
@@ -282,6 +310,11 @@ class LivingWorld:
         ConversationLog(self.store).append(self.conv_id, npc_id, text.strip(), None, context.game_days)
         if self.hygiene_debug:
             self._hygiene_debug(text, npc_id, context)
+        if self.guard_debug:
+            scene = self._guard_scene()
+            result = self._guard_for(self.store).debug(text, scene) if scene else None
+            if result:
+                logger.log(23, f"Living World guard test command: {result}")
 
     def _hygiene_debug(self, text: str, player_id: int, context: Any) -> None:
         from livingworld.hygiene import debug
@@ -339,6 +372,9 @@ class LivingWorld:
             work = self._work_lines(npc_id, character.name, scene)
             if work:
                 blocks.append(f"Work on {character.name}'s mind:\n" + "\n".join(f"- {line}" for line in work))
+            guard = self._guard_lines(npc_id, character.name)
+            if guard:
+                blocks.append(f"The guard, and {character.name}:\n" + "\n".join(f"- {line}" for line in guard))
         return "\n\n".join(blocks)
 
     def _social_for(self, store: WorldStore) -> SocialWorld:
@@ -425,6 +461,66 @@ class LivingWorld:
             result = self._work_for(self.store).action(action["identifier"], npc_id, scene)
             logger.log(23, f"Living World work: {who.name} {action['identifier']}: {result}")
 
+    # ---- guard careers (livingworld/guard) ----
+    def _guard_for(self, store: WorldStore) -> Guard:
+        if id(store) not in self._guard:
+            self._guard[id(store)] = Guard(store)
+        return self._guard[id(store)]
+
+    def _guard_scene(self) -> GuardScene | None:
+        scene = self._player_scene()
+        if scene is None:
+            return None
+        facts = {}
+        for c in self._context.npcs_in_conversation.get_all_characters():
+            f = self._guard_facts.get(c.ref_id)
+            if f is not None:
+                facts[self._npc_ids.get(c.ref_id) or self._register(c, scene.now)] = f
+        return GuardScene(scene.now, scene.player_id, scene.player_name, scene.present,
+                          getattr(self._context, "location", None), facts, self._thane_of)
+
+    def _guard_lines(self, npc_id: int, name: str) -> list[str]:
+        if not self.guard:
+            return []
+        try:
+            scene = self._guard_scene()
+            return self._guard_for(self.store).lines_for(npc_id, name, scene) if scene else []
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not add guard lines; leaving them out")
+            return []
+
+    def _guard_actions(self, sentence: Any) -> dict[str, Any]:
+        """Handle EnlistRecruit on this line (once) and return the reply keys it needs."""
+        if not self.guard or self._context is None or id(sentence) in self._guard_sent:
+            return {}
+        wanted = [a for a in (getattr(sentence, "actions", None) or [])
+                  if isinstance(a, dict) and a.get("identifier") in GUARD_ACTIONS]
+        if not wanted:
+            return {}
+        self._guard_sent.add(id(sentence))
+        scene = self._guard_scene()
+        speaker = sentence.speaker
+        if scene is None or speaker is None or speaker.is_player_character:
+            return {}
+        keys: dict[str, Any] = {}
+        guard = self._guard_for(self.store)
+        for action in wanted:
+            # the leader: the NPC named in the call (advanced actions), else the speaker, else the one leader present
+            source = (action.get("arguments") or {}).get("source")
+            name = source[0] if isinstance(source, list) and source else source
+            who = next((c for c in self._context.npcs_in_conversation.get_all_characters()
+                        if name and not c.is_player_character and c.name.lower() == str(name).lower()), speaker)
+            npc_id = self._npc_ids.get(who.ref_id) or self._register(who, scene.now)
+            npc_id = guard.leader_for(npc_id, scene)
+            result, issue = guard.action(action["identifier"], npc_id, scene)
+            logger.log(23, f"Living World guard: {who.name} {action['identifier']}: {result}")
+            if issue is not None and issue.key_value():
+                keys[KEY_GUARD_ISSUE] = issue.key_value()
+                keys[KEY_GUARD_ISSUE_IDS] = issue.form_ids()
+                keys[KEY_GUARD_ISSUE_PLUGINS] = issue.plugins()
+        return keys
+
     def _carried_mood(self, npc_id: int, now: float) -> "moods.Mood | None":
         try:
             with self.store.transaction() as db:
@@ -465,8 +561,16 @@ class LivingWorld:
         speaker = getattr(sentence, "speaker", None)
         if speaker is None or sentence.is_narration:
             return {}
+        keys = {}
+        try:
+            keys.update(self._guard_actions(sentence))
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: a guard action failed; carrying on without it")
         text = self._moods_to_send.pop(speaker.ref_id, None)
-        return {KEY_MOOD: text} if text else {}
+        if text:
+            keys[KEY_MOOD] = text
+        return keys
 
     def start_reply_keys(self) -> dict[str, Any]:
         """Extra keys for the conversation start reply."""
@@ -478,11 +582,15 @@ class LivingWorld:
 
     def _wants_a_word(self) -> str:
         """'Gerdur|Skyrim.esm|0x0001347C;...': people with work they would offer the player now."""
-        if not self.tasks or self.store is None or self._context is None:
+        if not (self.tasks or self.guard) or self.store is None or self._context is None:
             return ""
         try:
             scene = self._player_scene()
-            ids = self._work_for(self.store).wants_a_word(scene) if scene else []
+            ids = self._work_for(self.store).wants_a_word(scene) if scene and self.tasks else []
+            if self.guard:
+                guard_scene = self._guard_scene()
+                ids += [i for i in (self._guard_for(self.store).wants_a_word(guard_scene) if guard_scene else [])
+                        if i not in ids]
             rows = [self.store.query("SELECT display_name, plugin, base_form_id FROM npc WHERE npc_id = ?", (i,))
                     for i in ids]
             return ";".join(f"{r[0][0]}|{r[0][1]}|{r[0][2]}" for r in rows if r)
@@ -647,6 +755,12 @@ class LivingWorld:
                 self.errors += 1
                 logger.error(f"Living World: {character.name}: {e}")
         self._npc_ids[character.ref_id] = npc_id
+        if self.guard and not character.is_player_character:
+            try:
+                self._guard_for(self.store).note(npc_id, self._guard_facts.get(character.ref_id), game_time)
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not note a guard; carrying on")
         return npc_id
 
     @staticmethod

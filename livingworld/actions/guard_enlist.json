@@ -1,0 +1,23 @@
+{
+    "identifier": "mantella_lw_guard_enlist",
+    "name": "EnlistRecruit",
+    "description": "Use only when the NPC is a guard leader who has just agreed to take the player into the hold's guard, and the player has clearly said they want to join. Records the enlistment and hands the player the guard's armour. If the NPC refuses, hesitates, or the player changes their mind, do not use it.",
+    "note": "Living World guard careers (MANTELLA_LIVING_WORLD=1). Handled by the Living World server (livingworld/guard), which refuses it unless the guard's own rules allow the enlistment; the game only hands over the uniform items the server names.",
+    "key": "EnlistRecruit",
+    "parameters": {
+        "source": {
+            "type": "string",
+            "description": "The guard leader taking the player on.",
+            "scope": "conversation"
+        }
+    },
+    "required": ["source"],
+    "prompt": "If you have agreed to take the player into the guard and they have clearly said yes, begin your response with '{key}:'",
+    "allowed_games": ["skyrim"],
+    "requires_response": false,
+    "is-interrupting": false,
+    "allow_repeat": false,
+    "one-on-one": true,
+    "multi-npc": true,
+    "radiant": false
+}

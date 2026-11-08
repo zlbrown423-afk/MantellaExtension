@@ -1,5 +1,5 @@
 """Living World actions: sit, stand up, go there, order drinks from the bar, undress and dress, and the
-AgreeTask / CheckTask / ReleaseTask task actions, which only the server handles (drinking is
+AgreeTask / CheckTask / ReleaseTask task actions and the EnlistRecruit guard action, which only the server handles (drinking is
 data/actions/livingworld_drink.json).
 
 The JSON files in this folder use the same format as ``data/actions/``. ``FunctionManager.load_all_actions``
@@ -27,7 +27,8 @@ DRESS = "mantella_lw_npc_dress"
 TASK_AGREE = "mantella_lw_task_agree"       # tasks: handled on the server only (livingworld/work)
 TASK_CHECK = "mantella_lw_task_check"
 TASK_RELEASE = "mantella_lw_task_release"
-ALL = (SIT, STAND_UP, GO_THERE, ORDER_DRINKS, UNDRESS, DRESS, TASK_AGREE, TASK_CHECK, TASK_RELEASE)
+GUARD_ENLIST = "mantella_lw_guard_enlist"   # guard careers: handled on the server (livingworld/guard); the game hands over the uniform
+ALL = (SIT, STAND_UP, GO_THERE, ORDER_DRINKS, UNDRESS, DRESS, TASK_AGREE, TASK_CHECK, TASK_RELEASE, GUARD_ENLIST)
 
 
 def enabled() -> bool:
