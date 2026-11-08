@@ -151,6 +151,32 @@ are still recorded). No AI call is made for any of it except one more field in t
 
 Everything is on the save timeline: loading an older save takes back the gossip that happened after it.
 
+## Hygiene (H1: who is clean, who is grimy, who notices)
+
+On with `MANTELLA_LIVING_WORLD=1`. Switch it off with `set MANTELLA_LW_HYGIENE=0`. Plan:
+`hygiene/` and the "NPC Bathing & Hygiene" plan doc.
+
+- Cleanliness is replayed from `hygiene_change` (migration 006) on the save timeline: dirt builds up at a
+  daily rate from each person's work, fights add dirt and blood, swimming washes some off, a bath clears it.
+- Each NPC has their own habits (`hygiene/profile.py`): how clean they want to be, how often they bathe,
+  when in the day. Defaults come from their work and a per-person draw seeded with their form id; sex is
+  never an input. Set any of `hygiene_standard`, `bath_interval_days`, `work_dirt_rate`, `bath_window` in
+  `persona_version.traits_json` to override.
+- NPCs bathe off screen for now: when someone comes up in conversation, the baths they would have taken
+  since are written in at their usual times. Visible bathing near the player is milestone H2.
+- The game sends a `fight` record for the player and each adult ally once a fight ends (lowest health
+  share), and a `swim` record when the player stops swimming. No other game work.
+- Prompt lines: the NPC's own state (grimy, bloodied, freshly bathed), and what they notice about the
+  people in the conversation, once per state (`hygiene_notice`), coloured by their own standards.
+  No LLM calls.
+
+What someone with no clothes on looks like depends on the body mods: `set MANTELLA_LW_UNDRESSED_LOOK=`
+`underwear` (vanilla bodies), `female_nude` (CBBE / BHUNP; the default) or `nude` (also SOS / TNG). The game
+now sends each person's sex on attire records.
+
+Migrations are now applied by version number present, not by "above the highest", so feature branches
+(005 romance, 006 hygiene) can merge in either order.
+
 ## Mood meter and quiet vanilla chatter
 
 Both are on with `MANTELLA_LIVING_WORLD=1`. Switch either off with `set MANTELLA_LW_MOOD_METER=0` or

@@ -45,6 +45,7 @@ _OFF = {"0", "false", "no", "off"}
 # Mood meter and quiet vanilla chatter: on with the Living World unless switched off
 MOOD_ENV = "MANTELLA_LW_MOOD_METER"
 QUIET_ENV = "MANTELLA_LW_QUIET_CHATTER"
+HYGIENE_ENV = "MANTELLA_LW_HYGIENE"
 KEY_MOOD = "mantella_lw_mood"                    # sent with an NPC line: the meter text to show
 KEY_QUIET_CHATTER = "mantella_lw_quiet_chatter"  # sent with the start reply: mute vanilla chatter until the end
 
@@ -87,6 +88,7 @@ class LivingWorld:
         self._attire_now: dict[int, awareness.AttireNow] = {}   # latest attire snapshot from the game, by npc_id
         self.mood_meter = enabled and os.environ.get(MOOD_ENV, "").strip().lower() not in _OFF
         self.quiet_chatter = enabled and os.environ.get(QUIET_ENV, "").strip().lower() not in _OFF
+        self.hygiene = enabled and os.environ.get(HYGIENE_ENV, "").strip().lower() not in _OFF
         self._moods_shown: dict[int, str] = {}      # npc_id -> meter text the game last showed
         self._moods_to_send: dict[str, str] = {}    # speaker ref id -> meter text to send with their next line
         self._social: dict[int, SocialWorld] = {}   # id(store) -> reputation and gossip for that world
@@ -348,7 +350,7 @@ class LivingWorld:
     def _noticed(self, npc_id: int, name: str, now: float, present: dict[int, str]) -> list[str]:
         try:
             with self.store.transaction() as db:
-                return awareness.lines_for(db, npc_id, name, now, present, self._attire_now)
+                return awareness.lines_for(db, npc_id, name, now, present, self._attire_now, hygiene=self.hygiene)
         except Exception:
             self.errors += 1
             logger.exception("Living World: could not work out what an NPC notices; leaving it out")

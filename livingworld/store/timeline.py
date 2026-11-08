@@ -30,7 +30,8 @@ def latest_game_time(db, timeline_id: int) -> float | None:
         " SELECT MAX(COALESCE(ended_gt, started_gt)) t FROM conversation WHERE timeline_id = :t"
         " UNION ALL SELECT MAX(game_time) FROM utterance WHERE timeline_id = :t"
         " UNION ALL SELECT MAX(learned_gt) FROM knowledge WHERE timeline_id = :t"
-        " UNION ALL SELECT MAX(occurred_gt) FROM memory WHERE timeline_id = :t)",
+        " UNION ALL SELECT MAX(occurred_gt) FROM memory WHERE timeline_id = :t"
+        " UNION ALL SELECT MAX(game_time) FROM hygiene_change WHERE timeline_id = :t AND cause IN ('fight','swim','bath'))",
         {"t": timeline_id}).fetchone()[0]
 
 

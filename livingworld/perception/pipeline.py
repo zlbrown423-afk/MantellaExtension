@@ -53,6 +53,8 @@ class PerceptionPipeline:
         if record.type == "attire":
             from livingworld.perception.attire import AttireTracker
             return AttireTracker(self).record(record)
+        if record.type in ("fight", "swim"):
+            return self._hygiene(record)
         timeline = self.store.active_timeline_id()
         existing = self.store.scalar("SELECT event_id FROM world_event WHERE timeline_id = ? AND game_key = ?",
                                      (timeline, record.key))
@@ -132,6 +134,19 @@ class PerceptionPipeline:
         logger.log(23, f"Living World: stored {record.type} event {event_id} ({record.key}); memories for "
                        f"{len(outcome.memories)} NPC(s); did not perceive it: {', '.join(unseen) or 'nobody'}")
         return outcome
+
+    def _hygiene(self, record: PerceptionRecord) -> Outcome:
+        """Fights and swims only change how clean someone is: no event, no memories."""
+        from livingworld.hygiene import model as hygiene
+        actor_id = self.identities.ensure_npc(record.actor.identity(), record.game_time)
+        if self._child(actor_id):
+            return Outcome(None)
+        with self.store.transaction() as db:
+            if record.type == "fight":
+                added = hygiene.record_fight(db, actor_id, record.game_time, record.hp, record.key)
+            else:
+                added = hygiene.record_swim(db, actor_id, record.game_time, record.duration_s, record.key)
+        return Outcome(None, duplicate=not added)
 
     # ---- internals ----
     def _child(self, npc_id: int | None) -> bool:
