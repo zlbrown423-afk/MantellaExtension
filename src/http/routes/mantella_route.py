@@ -62,7 +62,7 @@ class mantella_route(routeable):
 
         summary_client: SummaryLLMClient | None = None
         if self._config.summary_llm_enabled:
-            summary_client = SummaryLLMClient(self._config)
+            summary_client = SummaryLLMClient(self._config, fallback=llm_client)  # LIVINGWORLD PATCH: paid fallback
 
         chat_manager = ChatManager(self._config, tts, llm_client, game)
         self.__game = GameStateManager(game, chat_manager, self._config, self.__language_info, llm_client, summary_client)

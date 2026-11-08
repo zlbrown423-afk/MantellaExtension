@@ -36,6 +36,10 @@ class Summaries(Remembering):
         self.__game: Gameable = game
         self.__summary_limit_pct: float = summary_limit_pct
         self.__client: ClientBase = summary_client if summary_client else client
+        # LIVINGWORLD PATCH: the saved summaries go into the conversation model's prompt, so size them by
+        # that model's context. A cheap or free background model with an unknown limit (4096 by default)
+        # would otherwise squash an NPC's memories into a much shorter re-summary.
+        self.__prompt_client: ClientBase = client
         self.__language_name: str = language_name
         self.__memory_prompt: str = config.memory_prompt
         self.__resummarize_prompt: str = config.resummarize_prompt
@@ -337,7 +341,7 @@ class Summaries(Remembering):
         else:
             conversation_summaries = previous_conversation_summaries
 
-        summary_limit = int(self.__client.token_limit * self.__summary_limit_pct)
+        summary_limit = int(self.__prompt_client.token_limit * self.__summary_limit_pct)  # LIVINGWORLD PATCH
 
         count_tokens_summaries = self.__client.get_count_tokens(conversation_summaries)
         # if summaries token limit is reached, summarize the summaries
