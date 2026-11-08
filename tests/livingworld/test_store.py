@@ -58,7 +58,7 @@ def test_store_creates_schema_once(tmp_path):
     assert store.active_timeline_id() == 1
     store.close()
     again = WorldStore(path)  # reopening does not re-run the migration
-    assert again.scalar("SELECT COUNT(*) FROM schema_version") == 5
+    assert again.scalar("SELECT COUNT(*) FROM schema_version") == 6
     assert again.scalar("PRAGMA integrity_check") == "ok"
     again.close()
 
