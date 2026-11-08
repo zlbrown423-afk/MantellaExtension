@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
-from livingworld.social import gossip, processor, romance
+from livingworld.social import gossip, hints, processor, reputation, romance
 from livingworld.social.seed import Seeder
 from livingworld.store.minors import mark_children
 from livingworld.store.world_store import WorldStore
@@ -32,6 +32,7 @@ class Refresh:
     appraised: dict = field(default_factory=dict)
     catch_ups: list = field(default_factory=list)
     romance: list = field(default_factory=list)
+    hints: list = field(default_factory=list)        # lines for the player to overhear (social/hints.py)
 
 
 class SocialWorld:
@@ -44,11 +45,14 @@ class SocialWorld:
             mark_children(db)
             return processor.process(db)
 
-    def refresh(self, now_gt: float, present_npc_ids: list[int], budget_ms: float | None = CATCH_UP_BUDGET_MS) -> Refresh:
+    def refresh(self, now_gt: float, present_npc_ids: list[int], budget_ms: float | None = CATCH_UP_BUDGET_MS,
+                player_id: int | None = None, after_load: bool = False) -> Refresh:
         result = Refresh()
         with self.store.transaction() as db:
             result.children_flagged = mark_children(db)
             result.seeded = self.seeder.apply(db, now_gt)
+            if reputation.enabled():
+                reputation.sync_guard_factions(db)
             result.appraised = processor.process(db)
             if gossip_enabled():
                 for key in self._communities(db, present_npc_ids):
@@ -58,6 +62,10 @@ class SocialWorld:
                     result.romance.append(romance.catch_up(db, key, now_gt, budget_ms))
                 # what romance just recorded becomes claims people can pass on
                 result.appraised = {k: result.appraised.get(k, 0) + v for k, v in processor.process(db).items()}
+            if player_id is not None:
+                timeline = db.execute("SELECT timeline_id FROM timeline WHERE is_active = 1").fetchone()[0]
+                result.hints = hints.pick(db, timeline, player_id, self._communities(db, present_npc_ids), now_gt,
+                                          after_load)
         told = sum(c.tellings for c in result.catch_ups)
         if result.seeded or told or result.appraised:
             logger.log(23, f"Living World social: seeded {result.seeded}, appraised {result.appraised}, "

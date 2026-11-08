@@ -23,6 +23,7 @@ from livingworld import mood as moods
 from livingworld.perception import awareness
 from livingworld.perception.intoxication import drink_state
 from livingworld.perception.pipeline import PerceptionPipeline
+from livingworld.social.traits import seed_traits_from_bio
 from livingworld.social.world import SocialWorld
 from livingworld.work import tasks_enabled
 from livingworld.guard import guard_debug_enabled, guard_enabled
@@ -59,6 +60,7 @@ HYGIENE_DEBUG_ENV = "MANTELLA_LW_HYGIENE_DEBUG"
 KEY_MOOD = "mantella_lw_mood"                    # sent with an NPC line: the meter text to show
 KEY_QUIET_CHATTER = "mantella_lw_quiet_chatter"  # sent with the start reply: mute vanilla chatter until the end
 KEY_WANTS_A_WORD = "mantella_lw_wants_a_word"    # sent with the start reply: people with work to offer (game side: W2)
+KEY_HINTS = "mantella_lw_hints"                  # sent with the first NPC line: what the player overhears (S2)
 KEY_GUARD_ISSUE = "mantella_lw_guard_issue"      # sent with an NPC line: items handed to the player ('Name|plugin|0xID;...', for logs)
 KEY_GUARD_ISSUE_IDS = "mantella_lw_guard_issue_ids"          # ...the same items as plugin-relative form IDs (the game reads these)
 KEY_GUARD_ISSUE_PLUGINS = "mantella_lw_guard_issue_plugins"  # ...and the plugin each one comes from
@@ -115,6 +117,8 @@ class LivingWorld:
         self._moods_to_send: dict[str, str] = {}    # speaker ref id -> meter text to send with their next line
         self._social: dict[int, SocialWorld] = {}   # id(store) -> reputation and gossip for that world
         self._social_refreshed: int | None = None   # conv_id the social world was last brought up to date for
+        self._hints_to_send: list[str] = []         # overheard hints for the next NPC line (social/hints.py)
+        self._after_load = False                     # the first conversation since a game load is still to come
         self.tasks = enabled and tasks_enabled()    # NPC tasks and shared work (livingworld/work)
         self._work: dict[int, Work] = {}            # id(store) -> tasks for that world
         self._work_refreshed: int | None = None     # conv_id tasks were last brought up to date for
@@ -238,6 +242,7 @@ class LivingWorld:
         result = resolve_load(store, int(nonce), int(save_timeline) if save_timeline else None,
                               float(request[KEY_LOADED_GAME_DAYS]))
         if not result.repeated:
+            self._after_load = True
             if result.branched:
                 logger.log(23, f"Living World: an older save was loaded (game day {request[KEY_LOADED_GAME_DAYS]:.2f}); "
                                f"NPCs now forget everything after it (timeline {result.timeline_id}).")
@@ -259,6 +264,7 @@ class LivingWorld:
         self._moods_to_send = {}
         self._guard_sent = set()
         self._player_said = None
+        self._hints_to_send = []
 
     @_never_raises
     def conversation_started(self, world_id: str, context: Any) -> None:
@@ -354,7 +360,7 @@ class LivingWorld:
         present = {}
         for c in self._context.npcs_in_conversation.get_all_characters():
             present[self._npc_ids.get(c.ref_id) or self._register(c, now)] = c.name
-        self._refresh_social(now, list(present))
+        self._refresh_social(now, list(present), player_id)
         self._refresh_guard()   # before work upkeep, which would expire duties without the reprimand
         self._refresh_work(now)
         scene = self._scene(player_id, player.name if player else "the player", list(present))
@@ -364,7 +370,8 @@ class LivingWorld:
                 continue
             npc_id = self._npc_ids.get(character.ref_id) or self._register(character, now)
             key = (self.conv_id, npc_id)
-            recall = recall_for(store, npc_id, now, player_id, mark_rehearsed=key not in self._rehearsed)
+            recall = recall_for(store, npc_id, now, player_id, mark_rehearsed=key not in self._rehearsed,
+                                about_ids=list(present))
             self._rehearsed.add(key)
             self._last_recall[npc_id] = (recall.know_ids, recall.mem_ids)
             text = recall.text()
@@ -388,13 +395,18 @@ class LivingWorld:
             self._social[id(store)] = SocialWorld(store)
         return self._social[id(store)]
 
-    def _refresh_social(self, now: float, present: list[int]) -> None:
+    def _refresh_social(self, now: float, present: list[int], player_id: int | None = None) -> None:
         """Once per conversation, before the first prompt: seed, appraise and catch gossip up."""
         if self._social_refreshed == self.conv_id:
             return
         self._social_refreshed = self.conv_id
         try:
-            self._social_for(self.store).refresh(now, present)
+            result = self._social_for(self.store).refresh(now, present, player_id=player_id,
+                                                          after_load=self._after_load)
+            self._after_load = False
+            self._hints_to_send = list(result.hints)
+            if result.hints:
+                logger.log(23, f"Living World hints: {' | '.join(result.hints)}")
         except Exception:
             self.errors += 1
             logger.exception("Living World: could not bring gossip up to date; carrying on without it")
@@ -592,6 +604,9 @@ class LivingWorld:
         text = self._moods_to_send.pop(speaker.ref_id, None)
         if text:
             keys[KEY_MOOD] = text
+        if self._hints_to_send:
+            keys[KEY_HINTS] = self._hints_to_send
+            self._hints_to_send = []
         return keys
 
     def start_reply_keys(self) -> dict[str, Any]:
@@ -777,6 +792,13 @@ class LivingWorld:
                 self.errors += 1
                 logger.error(f"Living World: {character.name}: {e}")
         self._npc_ids[character.ref_id] = npc_id
+        if not character.is_player_character and getattr(character, "bio", None):
+            try:
+                with self.store.transaction() as db:
+                    seed_traits_from_bio(db, npc_id, character.bio, game_time)
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not read traits from a bio; carrying on")
         if self.guard and not character.is_player_character:
             try:
                 self._guard_for(self.store).note(npc_id, self._guard_facts.get(character.ref_id), game_time)

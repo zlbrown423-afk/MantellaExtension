@@ -226,3 +226,84 @@ def purchase_for_witness(record: PerceptionRecord, seen: Perception) -> MemoryDr
                                f"{_place(record)}.",
                        interpretation=None, importance=0.15, valence=0.0, intensity=0.05, confidence=seen.confidence,
                        source_kind="witnessed", deltas_to_actor={})
+
+
+# ---- reputation (S2): gifts, thefts and blows from the player ------------------------------------
+
+def _qty_item(record: PerceptionRecord) -> str:
+    return f"{record.quantity} {record.item}" if record.quantity > 1 else (record.item or "something")
+
+
+def _hedge(seen: Perception) -> str:
+    return "I saw" if seen.confidence >= 0.8 else "I think I saw"
+
+
+def gift_for_target(record: PerceptionRecord) -> MemoryDraft:
+    """The person the player gave something to."""
+    generous = (record.gold or 0) >= 100
+    interpretation = "A generous gift. That means something." if generous else "A kind gesture."
+    deltas = {"affinity": 0.1 if generous else 0.06, "trust": 0.03}
+    return MemoryDraft(content=f"{record.actor.name} gave me {_qty_item(record)}{_place(record)}.",
+                       interpretation=interpretation, importance=0.5 if generous else 0.35, valence=0.4,
+                       intensity=0.3, confidence=1.0, source_kind="experienced", deltas_to_actor=deltas)
+
+
+def gift_for_witness(record: PerceptionRecord, seen: Perception) -> MemoryDraft:
+    target = record.target.name if record.target else "someone"
+    return MemoryDraft(content=f"{_hedge(seen)} {record.actor.name} give {target} {_qty_item(record)}{_place(record)}.",
+                       interpretation=None, importance=0.25, valence=0.1, intensity=0.1, confidence=seen.confidence,
+                       source_kind="witnessed", deltas_to_actor={"affinity": 0.02})
+
+
+def theft_for_witness(record: PerceptionRecord, seen: Perception, is_owner: bool, to_owner: Bond) -> MemoryDraft:
+    """Someone who saw the player take what was not theirs. The owner, if they saw it, takes it worst."""
+    actor = record.actor.name
+    how = "pick the pocket of" if record.via == "pickpocket" else "steal"
+    if is_owner:
+        content = f"{_hedge(seen)} {actor} steal my {_qty_item(record)}{_place(record)}."
+        interpretation = f"{actor} is a thief, and it was my things they took."
+        valence, deltas = -0.7, {"trust": -0.3, "affinity": -0.15, "suspicion": 0.3}
+    else:
+        owner = record.target.name if record.target else record.owner
+        if record.via == "pickpocket" and owner:
+            content = f"{_hedge(seen)} {actor} {how} {owner}{_place(record)}."
+        else:
+            whose = f" from {owner}" if owner else ""
+            content = f"{_hedge(seen)} {actor} {how} {_qty_item(record)}{whose}{_place(record)}."
+        if to_owner.close:
+            interpretation = f"{actor} stole from someone I care about. I won't forget it."
+            valence, deltas = -0.6, {"trust": -0.2, "suspicion": 0.25, "affinity": -0.08}
+        else:
+            interpretation = f"{actor} has light fingers. I'll keep an eye on my things."
+            valence, deltas = -0.4, {"trust": -0.12, "suspicion": 0.2}
+    return MemoryDraft(content=content, interpretation=interpretation, importance=_clamp(0.55 + (0.15 if is_owner else 0)),
+                       valence=valence, intensity=_clamp(abs(valence)), confidence=seen.confidence,
+                       source_kind="witnessed", deltas_to_actor=deltas)
+
+
+def _with(record: PerceptionRecord) -> str:
+    return f" with {record.item}" if record.item and record.item.lower() not in ("none", "unarmed") else ""
+
+
+def hit_for_target(record: PerceptionRecord, to_actor: Bond) -> MemoryDraft:
+    actor = record.actor.name
+    verb = "hit me" if _with(record) else "struck me"
+    interpretation = (f"{actor} turned on me. I thought better of them." if to_actor.close
+                      else f"{actor} attacked me. They are dangerous.")
+    return MemoryDraft(content=f"{actor} {verb}{_with(record)}{_place(record)}.", interpretation=interpretation,
+                       importance=0.75, valence=-0.7, intensity=0.8, confidence=1.0, source_kind="experienced",
+                       deltas_to_actor={"trust": -0.2, "affinity": -0.15, "fear": 0.15})
+
+
+def hit_for_witness(record: PerceptionRecord, seen: Perception, to_actor: Bond, to_target: Bond) -> MemoryDraft:
+    actor, target = record.actor.name, record.target.name if record.target else "someone"
+    if to_target.close:
+        interpretation = f"{actor} attacked {target}. I won't stand for that."
+        valence, deltas = -0.7, {"trust": -0.15, "affinity": -0.1, "fear": 0.06}
+    else:
+        interpretation = f"{actor} is quick to violence."
+        valence, deltas = -0.45, {"trust": -0.08, "fear": 0.05}
+    return MemoryDraft(content=f"{_hedge(seen)} {actor} hit {target}{_with(record)}{_place(record)}.",
+                       interpretation=interpretation, importance=_clamp(0.55 + (0.15 if to_target.close else 0)),
+                       valence=valence, intensity=_clamp(abs(valence)), confidence=seen.confidence,
+                       source_kind="witnessed", deltas_to_actor=deltas)
