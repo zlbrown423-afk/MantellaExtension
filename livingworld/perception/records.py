@@ -28,6 +28,11 @@ clothing. ``via=action`` on a consume record means an NPC chose to drink (the Li
 on an attire record it means an NPC chose to undress or dress (the Undress and Dress actions), and the game
 queues it the moment they do, with witnesses.
 
+A ``fight`` record is sent for the player and each adult ally who fought beside them, once the player's
+fight ends: ``hp`` is the lowest share of health they fell to (0..1). A ``swim`` record is sent when the player
+stops swimming: ``dur`` is how long, in seconds. Both only change how clean someone is (see ``hygiene/``).
+An ``attire`` record also carries ``sex`` (``m`` or ``f``), the actor's sex in game.
+
 A ``purchase`` record is an NPC (``actor``) buying a round from a bartender (``target``) with the
 Living World OrderDrinks action: ``gold`` paid in total, ``payer`` is ``player`` or ``npc`` (the buyer),
 and ``party`` is who the round is shared with (the player). Buying is not drinking: it never counts
@@ -102,6 +107,8 @@ class PerceptionRecord:
     gold: int | None = None         # purchase: total paid
     payer: str | None = None        # purchase: 'player' | 'npc' (the buyer)
     party: GameActor | None = None  # purchase: who the round is shared with
+    hp: float | None = None         # fight: the lowest share of health the actor fell to
+    sex: str | None = None          # attire: 'male' | 'female', the actor's sex in game
     witnesses: list[Witness] = field(default_factory=list)
     raw: str = ""
 
@@ -156,7 +163,7 @@ def parse_record(text: str) -> PerceptionRecord:
         fields["cover"] = fields["cover"].strip().lower()
     if fields.get("payer"):
         fields["payer"] = fields["payer"].strip().lower()
-    if kind not in ("grab", "consume", "attire", "purchase"):
+    if kind not in ("grab", "consume", "attire", "purchase", "fight", "swim"):
         raise BadRecord(f"unknown event type {kind!r}")
     record = PerceptionRecord(
         key=fields["key"], type=kind, game_time=float(fields["gt"]), location=fields.get("loc") or None,
@@ -168,7 +175,8 @@ def parse_record(text: str) -> PerceptionRecord:
         quantity=int(fields.get("qty") or 1), target_rank=_rank(fields.get("trank", "")),
         body=fields.get("body") or None, cover=fields.get("cover") or None,
         gold=int(fields["gold"]) if fields.get("gold") else None, payer=fields.get("payer") or None,
-        party=_actor(fields["party"]) if fields.get("party") else None, witnesses=witnesses, raw=text)
+        party=_actor(fields["party"]) if fields.get("party") else None,
+        hp=_fraction(fields.get("hp")), sex=_sex(fields.get("sex")), witnesses=witnesses, raw=text)
     if kind == "grab" and record.target is None:
         raise BadRecord("a grab needs a target")
     if kind == "consume" and not record.item:
@@ -181,6 +189,16 @@ def parse_record(text: str) -> PerceptionRecord:
         if record.payer not in ("player", "npc"):
             raise BadRecord(f"a purchase needs payer=player or npc, not {record.payer!r}")
     return record
+
+
+def _fraction(text: str | None) -> float | None:
+    if not text:
+        return None
+    return max(0.0, min(1.0, float(text)))
+
+
+def _sex(text: str | None) -> str | None:
+    return {"f": "female", "m": "male", "female": "female", "male": "male"}.get((text or "").strip().lower())
 
 
 def records_from_context(context: dict[str, Any] | None, key: str = KEY_EVENTS) -> list[str]:

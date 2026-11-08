@@ -17,6 +17,7 @@ relationship, and nothing here changes what anyone is willing to do.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -25,6 +26,38 @@ from livingworld.perception.formation import Bond, MemoryDraft, Perception
 from livingworld.perception.records import PerceptionRecord
 
 EVENT_TYPE = "attire"
+
+# What is left once the clothes are off depends on the body mods installed: vanilla bodies keep their
+# underwear, CBBE / BHUNP leave women naked, SOS / TNG leave men naked too. One setting says which.
+UNDRESSED_LOOK_ENV = "MANTELLA_LW_UNDRESSED_LOOK"
+UNDRESSED_LOOKS = ("underwear", "female_nude", "nude")
+DEFAULT_UNDRESSED_LOOK = "female_nude"   # the user's setup: BHUNP women, vanilla men
+
+
+def undressed_look() -> str:
+    value = os.environ.get(UNDRESSED_LOOK_ENV, "").strip().lower()
+    return value if value in UNDRESSED_LOOKS else DEFAULT_UNDRESSED_LOOK
+
+
+def sex_of(db, npc_id: int, hint: str | None = None) -> str | None:
+    """'male' / 'female': the game's word on the record if it sent one, else what Mantella told us."""
+    if hint in ("male", "female"):
+        return hint
+    row = db.execute("SELECT sex FROM npc WHERE npc_id = ?", (npc_id,)).fetchone()
+    return row[0] if row else None
+
+
+def is_nude(sex: str | None) -> bool:
+    """Whether someone with nothing in the body slot is naked rather than in underwear."""
+    look = undressed_look()
+    if look == "nude":
+        return True
+    return look == "female_nude" and sex == "female"
+
+
+def bare_words(nude: bool) -> str:
+    """How someone with no clothes or armor on looks: 'naked' or 'only underclothes'."""
+    return "naked" if nude else "only underclothes"
 UNCOVERED_IMPORTANCE = 0.45   # just above recall's threshold, so an NPC may bring it up unprompted
 CHOSEN_IMPORTANCE = 0.55      # undressing by choice is more memorable
 
@@ -58,12 +91,13 @@ def chosen(record: PerceptionRecord) -> bool:
     return record.via == "action"
 
 
-def uncovered_for_witness(record: PerceptionRecord, seen: Perception, to_actor: Bond) -> MemoryDraft:
+def uncovered_for_witness(record: PerceptionRecord, seen: Perception, to_actor: Bond, nude: bool = False) -> MemoryDraft:
     actor = record.actor.name
+    left = "leaving them naked" if nude else "down to their underclothes"
     hedge = "I saw" if seen.confidence >= 0.8 else "I think I saw"
     if chosen(record):
         return MemoryDraft(
-            content=f"{hedge} {actor} take off their clothes, down to their underclothes{_place(record)}.",
+            content=f"{hedge} {actor} take off their clothes{_place(record)}, {left}.",
             interpretation=None, importance=formation._clamp(CHOSEN_IMPORTANCE * (0.7 + 0.3 * seen.confidence)),
             valence=0.0, intensity=0.4, confidence=seen.confidence, source_kind="witnessed", deltas_to_actor={})
     if to_actor.close:
@@ -73,22 +107,24 @@ def uncovered_for_witness(record: PerceptionRecord, seen: Perception, to_actor: 
         interpretation = f"I don't know why {actor} was going about like that. Odd."
         valence = -0.15
     return MemoryDraft(
-        content=f"{hedge} {actor} with no clothes or armor on, only underclothes{_place(record)}.",
+        content=f"{hedge} {actor} with no clothes or armor on, {bare_words(nude)}{_place(record)}.",
         interpretation=interpretation, importance=formation._clamp(UNCOVERED_IMPORTANCE * (0.7 + 0.3 * seen.confidence)),
         valence=valence, intensity=0.3, confidence=seen.confidence, source_kind="witnessed", deltas_to_actor={})
 
 
-def uncovered_for_self(record: PerceptionRecord, seen_by: list[str]) -> MemoryDraft:
+def uncovered_for_self(record: PerceptionRecord, seen_by: list[str], nude: bool = False) -> MemoryDraft:
     if seen_by:
         names = seen_by[0] if len(seen_by) == 1 else ", ".join(seen_by[:-1]) + " and " + seen_by[-1]
         who = f" {names} saw me."
     else:
         who = ""
     if chosen(record):
-        return MemoryDraft(content=f"I chose to take off my clothes, down to my underclothes{_place(record)}.{who}",
+        left = "all of them" if nude else "down to my underclothes"
+        return MemoryDraft(content=f"I chose to take off my clothes{_place(record)}, {left}.{who}",
                            interpretation=None, importance=CHOSEN_IMPORTANCE, valence=0.0, intensity=0.4,
                            confidence=1.0, source_kind="experienced", deltas_to_actor={})
-    return MemoryDraft(content=f"I had no clothes or armor on, only underclothes{_place(record)}.{who}",
+    state = "nothing at all" if nude else "only underclothes"
+    return MemoryDraft(content=f"I had no clothes or armor on, {state}{_place(record)}.{who}",
                        interpretation=None, importance=0.4, valence=-0.1, intensity=0.3, confidence=1.0,
                        source_kind="experienced", deltas_to_actor={})
 
@@ -155,11 +191,13 @@ class AttireTracker:
                 outcome.witnesses[npc_id] = seen.how
 
             drafts: dict[int, MemoryDraft] = {}
+            nude = is_nude(sex_of(db, actor_id, record.sex))
             if new_state and not self.pipeline._is_player(db, actor_id):
-                drafts[actor_id] = uncovered_for_self(record, [name for name, _ in seers.values()])
+                drafts[actor_id] = uncovered_for_self(record, [name for name, _ in seers.values()], nude)
             for npc_id, (_, seen) in new_seers.items():
                 if not self.pipeline._is_player(db, npc_id):
-                    drafts[npc_id] = uncovered_for_witness(record, seen, self.pipeline._bond(db, npc_id, actor_id))
+                    drafts[npc_id] = uncovered_for_witness(record, seen, self.pipeline._bond(db, npc_id, actor_id),
+                                                           nude)
             for npc_id, draft in drafts.items():
                 intoxication.hazy(draft, intoxication.drink_state(db, npc_id, gt).stage)
                 about = [] if npc_id == actor_id else [actor_id]
