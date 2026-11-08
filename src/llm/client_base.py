@@ -17,6 +17,7 @@ import src.utils as utils
 from src.telemetry.telemetry import create_span_from_thread
 from src.actions.function_manager import FunctionManager
 from src.llm.claude_cache_connector import ClaudeCacheConnector
+from livingworld.perf.stats import STATS as PERF  # LIVINGWORLD PATCH: performance counters
 
 logger = utils.get_logger()
 
@@ -176,7 +177,7 @@ class ClientBase(AIClient):
         Returns:
             The full chat completion object or None if the request failed
         """
-        with self._generation_lock:
+        with PERF.llm_call("request"), self._generation_lock:  # LIVINGWORLD PATCH: count pending LLM calls
             sync_client = self.generate_sync_client()        
             chat_completion: ChatCompletion = None
             logger.log(28, 'Getting LLM response...')
@@ -240,7 +241,7 @@ class ClientBase(AIClient):
     
     @utils.time_it
     async def streaming_call(self, messages: Message | message_thread, is_multi_npc: bool, tools: list[dict] = None) -> AsyncGenerator[tuple[str, str | list] | None, None]:
-        with create_span_from_thread("llm_streaming_call") as span:
+        with create_span_from_thread("llm_streaming_call") as span, PERF.llm_call("dialogue"):  # LIVINGWORLD PATCH: count pending LLM calls
             with self._generation_lock:
                 logger.log(28, 'Getting LLM response...')
 

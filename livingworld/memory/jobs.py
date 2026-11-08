@@ -11,6 +11,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
+from livingworld.perf.stats import STATS as PERF
 from livingworld.store.world_store import WorldStore
 from src import utils
 
@@ -102,6 +103,7 @@ class JobWorker:
                     break
                 job_id, kind, payload = job
                 ran += 1
+                PERF.job_started()
                 try:
                     self.handler(kind, payload)
                 except Exception as e:  # any failure is retried later
@@ -109,6 +111,8 @@ class JobWorker:
                     logger.warning(f"Living World: job {job_id} ({kind}) failed, now {status}: {e}")
                 else:
                     self.queue.done(job_id)
+                finally:
+                    PERF.job_finished()
         return ran
 
     def notify(self) -> None:

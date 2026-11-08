@@ -20,6 +20,7 @@ from src.config.definitions.tts_definitions import TTSEnum
 from src.actions.function_manager import FunctionManager
 import time
 from livingworld.harness.recorder import TrafficRecorder  # LIVINGWORLD PATCH: optional traffic recording
+from livingworld.perf.stats import STATS as PERF  # LIVINGWORLD PATCH: request timing
 
 logger = utils.get_logger()
 
@@ -106,6 +107,8 @@ class mantella_route(routeable):
 
             if self._config.show_http_debug_messages:
                 logger.log(self._log_level_http_out, json.dumps(reply, indent=4))
+            if received_json:  # LIVINGWORLD PATCH: request timing for the performance monitor
+                PERF.request_done(str(received_json.get(comm_consts.KEY_REQUESTTYPE, "?")), (time.perf_counter() - request_start) * 1000)
             if self.__recorder:  # LIVINGWORLD PATCH
                 try:
                     self.__recorder.record(received_json, reply, (time.perf_counter() - request_start) * 1000)
