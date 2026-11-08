@@ -227,11 +227,34 @@ tables or attraction. No AI call is made for it.
 | Who wants a word | `mantella_lw_wants_a_word` on the start reply | `Name|plugin|base id;...` of people with work they would offer the player now (read by the game's approach step in W2) |
 | Developer tool | `python -m livingworld.work.dev --db <world>.sqlite <command>` | `list`, `templates`, `show`, `explain Gerdur`, `create`, `offer` (forced, next conversation), `give`, `complete`, `fail`, `deadline --in`, `advance --days`, `reset`. Refuses to write while the Mantella server runs |
 
+## VR performance monitor (diagnostics)
+
+Off unless you set `MANTELLA_LW_PERF=1` (works with or without `MANTELLA_LIVING_WORLD=1`). It only watches:
+it runs in the server, outside the game, and changes nothing the server or the game does. Every half second
+(`MANTELLA_LW_PERF_INTERVAL` to change) it writes one JSON line to
+`<save folder>/data/livingworld/perf/perf-<date>-<time>.jsonl`.
+
+| Measured | Where it comes from |
+| --- | --- |
+| CPU frame interval, GPU time per frame, reprojected and dropped frames | SteamVR's own frame timings, read as a background OpenVR app. Needs `pip install openvr` in the server's Python |
+| Main-thread responsiveness | A harmless `WM_NULL` sent to the game window and timed, plus Windows' own "not responding" check. A frozen main thread never answers |
+| Game memory, page faults, CPU; free memory | `psutil` (optional) |
+| Pending LLM calls (waiting or in flight), background jobs running | Counters in the LLM client and the job worker (`perf/stats.py`) |
+| Game requests and the slowest one; perception records by type | Counters in the `/mantella` route and `perceived()` |
+| Each NPC hold: HIGGS grab/drop events, repeats ignored, how late script ticks ran | `type=perf` records from the game (Mantella-Spell performance probe, see `perf/game_records.py`); they never reach memories |
+
+When the main thread stops answering it logs one warning when the stall starts and one when it ends.
+`python -m livingworld.perf.report <file.jsonl>` compares 30 s before each hold, the hold and 30 s after,
+lists every stall, and names the likely source: rendering, main thread (engine, physics), scripting, AI
+processing, memory, or a mix. The game sends its hold markers with its next request, so talk to someone
+after a test hold.
+
 ### Upstream patches
 
 | File | Change |
 | --- | --- |
-| `src/http/routes/mantella_route.py` | Optional traffic recording (does nothing unless `MANTELLA_RECORD_TRAFFIC` is set) |
+| `src/http/routes/mantella_route.py` | Optional traffic recording (does nothing unless `MANTELLA_RECORD_TRAFFIC` is set); request timing for the performance monitor |
+| `src/llm/client_base.py` | Counts LLM calls waiting or in flight for the performance monitor |
 | `src/actions/function_manager.py` | Also loads `livingworld/actions/*.json` (does nothing unless `MANTELLA_LIVING_WORLD` is set) |
 | `tests/conftest.py` | Registers the `baseline_behaviour` test marker |
 | `src/output_manager.py` | Hands each turn to the Living World when it is on (group turns), refuses synthesis in the wrong voice, keeps the "generating" flag up across a multi-speaker turn, and cuts mood tags out of the streamed reply |

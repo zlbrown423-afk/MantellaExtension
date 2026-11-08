@@ -13,6 +13,7 @@ from __future__ import annotations
 import functools
 import os
 import sqlite3
+import time
 from typing import Any, Callable
 
 from livingworld.memory.extraction import Extractor
@@ -26,6 +27,9 @@ from livingworld.social.world import SocialWorld
 from livingworld.work import tasks_enabled
 from livingworld.work.service import ACTIONS as TASK_ACTIONS, Scene as WorkScene, Work
 from livingworld.perception.records import KEY_ATTIRE, BadRecord, parse_record, records_from_context
+from livingworld.perf.game_records import split_perf_records
+from livingworld.perf.monitor import PerfMonitor
+from livingworld.perf.stats import STATS as PERF
 from livingworld.store.conversation_log import ConversationLog
 from livingworld.store.timeline import resolve_load
 from livingworld.store.identity import ActorIdentity, FormId, IdentityRegistry, VoiceBindingConflict
@@ -101,6 +105,7 @@ class LivingWorld:
         self.tasks = enabled and tasks_enabled()    # NPC tasks and shared work (livingworld/work)
         self._work: dict[int, Work] = {}            # id(store) -> tasks for that world
         self._work_refreshed: int | None = None     # conv_id tasks were last brought up to date for
+        self.perf_monitor: PerfMonitor | None = None  # MANTELLA_LW_PERF=1 (see livingworld/perf)
         LivingWorld.latest = self
 
     @classmethod
@@ -109,7 +114,15 @@ class LivingWorld:
         if enabled:
             logger.log(23, f"Living World store is on ({ENV_VAR}).")
         tts = getattr(config, "tts_service", None)
-        return cls(config.save_folder, enabled, str(getattr(tts, "value", tts) or "unknown"))
+        world = cls(config.save_folder, enabled, str(getattr(tts, "value", tts) or "unknown"))
+        try:   # VR performance monitor (MANTELLA_LW_PERF=1): watches only, works with the store on or off
+            world.perf_monitor = PerfMonitor.from_environment(config.save_folder)
+            if world.perf_monitor and cls.start_workers:
+                world.perf_monitor.start()
+        except Exception:
+            logger.exception("Living World: the performance monitor could not start; carrying on without it")
+            world.perf_monitor = None
+        return world
 
     def attach_llm(self, client: Any, config: Any) -> None:
         """Use Mantella's summary client (or main client) for background extraction calls."""
@@ -146,16 +159,27 @@ class LivingWorld:
     def perceived(self, context_json: dict[str, Any] | None) -> int:
         """Store the perception records the game queued since its last request (see ``perception/``).
         Runs before Mantella reads the rest of the request, so the first prompt already holds the new memories."""
-        raw = records_from_context(context_json)
+        started = time.perf_counter()
+        raw, perf_markers = split_perf_records(records_from_context(context_json), context_json)
+        for marker in perf_markers:   # the game's own timing summaries go to the performance monitor only
+            PERF.add_marker(marker)
         attire_raw = records_from_context(context_json, KEY_ATTIRE)
         if not (raw or attire_raw) or self.store is None:
             return 0
         pipeline = PerceptionPipeline(self.store)
-        stored = len([o for o in pipeline.ingest(raw + attire_raw) if not o.duplicate])
+        outcomes = pipeline.ingest(raw + attire_raw)
+        stored = len([o for o in outcomes if not o.duplicate])
         if stored:
             self._social_for(self.store).appraise_new()   # what was seen becomes something people can pass on
         if attire_raw:
             self._attire_now = self._attire_snapshot(attire_raw, pipeline)
+        kinds: dict[str, int] = {}
+        for rec in raw:
+            kind = rec.lower().split("|type=", 1)[-1].split("|", 1)[0] if "|type=" in rec.lower() else "?"
+            kinds[kind] = kinds.get(kind, 0) + 1
+        if attire_raw:
+            kinds["attire_snapshot"] = len(attire_raw)
+        PERF.records_ingested(kinds, (time.perf_counter() - started) * 1000)
         return stored
 
     def _attire_snapshot(self, attire_raw: list[str], pipeline: PerceptionPipeline) -> dict[int, awareness.AttireNow]:
@@ -554,6 +578,8 @@ class LivingWorld:
     def stop(self) -> None:
         for worker in self._workers.values():
             worker.stop()
+        if self.perf_monitor:
+            self.perf_monitor.stop()
 
     # ---- internals ----
     def _store_for(self, world_id: str) -> WorldStore:
