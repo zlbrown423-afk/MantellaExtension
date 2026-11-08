@@ -1,0 +1,27 @@
+{
+    "identifier": "mantella_lw_guard_report",
+    "name": "ReportDuty",
+    "description": "Use only when the NPC is the player's superior in the guard and the player has just come back to report on the duty they were given. Records the report; the server checks it against whether anyone saw the player at their post. Do not use it for small talk about the duty.",
+    "note": "Living World guard duties (MANTELLA_LIVING_WORLD=1). Handled by the Living World server (livingworld/guard/duty.py), which applies the guard's own rules; nothing happens in the game.",
+    "key": "ReportDuty",
+    "parameters": {
+        "source": {
+            "type": "string",
+            "description": "The superior hearing the report.",
+            "scope": "conversation"
+        }
+    },
+    "required": [
+        "source"
+    ],
+    "prompt": "If the player is reporting back to you on the guard duty you gave them, begin your response with '{key}:'",
+    "allowed_games": [
+        "skyrim"
+    ],
+    "requires_response": false,
+    "is-interrupting": false,
+    "allow_repeat": true,
+    "one-on-one": true,
+    "multi-npc": true,
+    "radiant": false
+}

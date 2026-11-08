@@ -61,6 +61,9 @@ class Org:
     uniform: dict[str, tuple[Item, ...]] = field(default_factory=dict, compare=False, hash=False)
     generic_rank_key: str | None = None   # the rank an ordinary guard of this hold holds (default: the second rank)
     rank_note: str = ""                   # one sentence for prompts about what the rank titles mean
+    duty_file: str | None = None          # guard/data/<file> with this guard's duties
+    pay: dict[str, Any] = field(default_factory=dict, compare=False, hash=False)
+    quarters: str = ""                    # where a member sleeps and keeps their things
 
     @property
     def generic_rank(self) -> str:
@@ -90,6 +93,24 @@ class Org:
     def leader(self, key: str) -> Person | None:
         return next((p for p in self.leaders if p.key == key), None)
 
+    def wage(self, rank_key: str | None) -> int:
+        return int((self.pay.get("per_week") or {}).get(rank_key or "", 0))
+
+    @property
+    def dock(self) -> int:
+        return int(self.pay.get("dock_per_reprimand", 0))
+
+    @property
+    def gold(self) -> Item | None:
+        g = self.pay.get("gold")
+        return Item(g.get("name", "Gold"), g.get("plugin", "Skyrim.esm"), local_id(g.get("id"))) if g else None
+
+    def superior(self, rank_key: str | None) -> Person | None:
+        """The leader who gives a member of this rank their orders: the lowest-ranked leader above them."""
+        mine = self.rank_index(rank_key)
+        above = sorted((p for p in self.leaders if self.rank_index(p.rank) > mine), key=lambda p: self.rank_index(p.rank))
+        return above[0] if above else None
+
     def setting(self, name: str, default: float) -> float:
         return float(self.recruit.get(name, default))
 
@@ -113,7 +134,8 @@ def _org(raw: dict[str, Any]) -> Org:
                ranks=tuple(Rank(r["key"], r["title"], r.get("seats"), float(r.get("min_days", 0)))
                            for r in raw["ranks"]),
                probation_days=float(raw.get("probation_days", 7)), recruit=dict(raw.get("recruit") or {}),
-               uniform=uniform, generic_rank_key=raw.get("generic_rank"), rank_note=raw.get("rank_note", ""))
+               uniform=uniform, generic_rank_key=raw.get("generic_rank"), rank_note=raw.get("rank_note", ""),
+               duty_file=raw.get("duties"), pay=dict(raw.get("pay") or {}), quarters=raw.get("quarters", ""))
 
 
 @functools.lru_cache(maxsize=1)

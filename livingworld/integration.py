@@ -28,7 +28,7 @@ from livingworld.social.world import SocialWorld
 from livingworld.work import tasks_enabled
 from livingworld.guard import guard_debug_enabled, guard_enabled
 from livingworld.guard.profiles import GuardFacts
-from livingworld.guard.service import ACTIONS as GUARD_ACTIONS, Guard, Scene as GuardScene
+from livingworld.guard.service import ACTIONS as GUARD_ACTIONS, ENLIST as GUARD_ENLIST, Guard, Scene as GuardScene
 from livingworld.work.service import ACTIONS as TASK_ACTIONS, Scene as WorkScene, Work
 from livingworld.perception.records import KEY_ATTIRE, BadRecord, parse_record, records_from_context
 from livingworld.perf.game_records import split_perf_records
@@ -64,6 +64,7 @@ KEY_HINTS = "mantella_lw_hints"                  # sent with the first NPC line:
 KEY_GUARD_ISSUE = "mantella_lw_guard_issue"      # sent with an NPC line: items handed to the player ('Name|plugin|0xID;...', for logs)
 KEY_GUARD_ISSUE_IDS = "mantella_lw_guard_issue_ids"          # ...the same items as plugin-relative form IDs (the game reads these)
 KEY_GUARD_ISSUE_PLUGINS = "mantella_lw_guard_issue_plugins"  # ...and the plugin each one comes from
+KEY_GUARD_ISSUE_COUNTS = "mantella_lw_guard_issue_counts"    # ...and how many of each (wages: the gold)
 # Sent by the Living World build of Mantella-Spell (guard careers): per actor, and in the context
 KEY_IS_GUARD = "mantella_lw_is_guard"            # actor: Actor.IsGuard()
 KEY_CRIME_FACTION = "mantella_lw_crime_faction"  # actor: form ID of Actor.GetCrimeFaction()
@@ -127,6 +128,8 @@ class LivingWorld:
         self._guard_facts: dict[str, GuardFacts] = {}   # Mantella's 6-digit ref id -> what the game said
         self._thane_of: tuple[str, ...] = ()        # holds the game says the player is thane of
         self._guard_sent: set[int] = set()          # id(sentence) whose guard actions were handled
+        self._guard_refreshed: int | None = None    # conv_id whose duties/probation were brought up to date
+        self._player_said: str | None = None        # the player's last line (kept with a duty report)
         self.perf_monitor: PerfMonitor | None = None  # MANTELLA_LW_PERF=1 (see livingworld/perf)
         LivingWorld.latest = self
 
@@ -260,6 +263,7 @@ class LivingWorld:
         self._moods_shown = {}
         self._moods_to_send = {}
         self._guard_sent = set()
+        self._player_said = None
         self._hints_to_send = []
 
     @_never_raises
@@ -314,6 +318,7 @@ class LivingWorld:
             return
         npc_id = self._npc_ids.get(player.ref_id) or self._register(player, context.game_days)
         ConversationLog(self.store).append(self.conv_id, npc_id, text.strip(), None, context.game_days)
+        self._player_said = text.strip()
         if self.hygiene_debug:
             self._hygiene_debug(text, npc_id, context)
         if self.guard_debug:
@@ -356,6 +361,7 @@ class LivingWorld:
         for c in self._context.npcs_in_conversation.get_all_characters():
             present[self._npc_ids.get(c.ref_id) or self._register(c, now)] = c.name
         self._refresh_social(now, list(present), player_id)
+        self._refresh_guard()   # before work upkeep, which would expire duties without the reprimand
         self._refresh_work(now)
         scene = self._scene(player_id, player.name if player else "the player", list(present))
         blocks = []
@@ -489,7 +495,21 @@ class LivingWorld:
             if f is not None:
                 facts[self._npc_ids.get(c.ref_id) or self._register(c, scene.now)] = f
         return GuardScene(scene.now, scene.player_id, scene.player_name, scene.present,
-                          getattr(self._context, "location", None), facts, self._thane_of)
+                          getattr(self._context, "location", None), facts, self._thane_of, self._player_said)
+
+    def _refresh_guard(self) -> None:
+        """Once per conversation: missed duties, probation, and whether the player is at their post."""
+        if not self.guard or self._guard_refreshed == self.conv_id:
+            return
+        self._guard_refreshed = self.conv_id
+        try:
+            scene = self._guard_scene()
+            result = self._guard_for(self.store).refresh(scene) if scene else {}
+            if any(result.values()):
+                logger.log(23, f"Living World guard upkeep: {result}")
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: guard upkeep failed; carrying on")
 
     def _guard_lines(self, npc_id: int, name: str) -> list[str]:
         if not self.guard:
@@ -503,7 +523,7 @@ class LivingWorld:
             return []
 
     def _guard_actions(self, sentence: Any) -> dict[str, Any]:
-        """Handle EnlistRecruit on this line (once) and return the reply keys it needs."""
+        """Handle EnlistRecruit / ReportDuty / PayWages on this line (once) and return the reply keys it needs."""
         if not self.guard or self._context is None or id(sentence) in self._guard_sent:
             return {}
         wanted = [a for a in (getattr(sentence, "actions", None) or [])
@@ -524,13 +544,15 @@ class LivingWorld:
             who = next((c for c in self._context.npcs_in_conversation.get_all_characters()
                         if name and not c.is_player_character and c.name.lower() == str(name).lower()), speaker)
             npc_id = self._npc_ids.get(who.ref_id) or self._register(who, scene.now)
-            npc_id = guard.leader_for(npc_id, scene)
+            npc_id = (guard.leader_for(npc_id, scene) if action["identifier"] == GUARD_ENLIST
+                      else guard.superior_for(npc_id, scene))
             result, issue = guard.action(action["identifier"], npc_id, scene)
             logger.log(23, f"Living World guard: {who.name} {action['identifier']}: {result}")
             if issue is not None and issue.key_value():
                 keys[KEY_GUARD_ISSUE] = issue.key_value()
                 keys[KEY_GUARD_ISSUE_IDS] = issue.form_ids()
                 keys[KEY_GUARD_ISSUE_PLUGINS] = issue.plugins()
+                keys[KEY_GUARD_ISSUE_COUNTS] = issue.item_counts()
         return keys
 
     def _carried_mood(self, npc_id: int, now: float) -> "moods.Mood | None":
