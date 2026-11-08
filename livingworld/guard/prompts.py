@@ -7,7 +7,6 @@ from livingworld.guard.profiles import Profile
 from livingworld.memory.recall import time_ago
 
 ENLIST_KEY = "EnlistRecruit"
-GENERIC_RANK = "guard"     # a generic guard's rank, for comparing with the player's
 
 
 def given_name(name: str, org: O.Org, p: Profile) -> str:
@@ -24,22 +23,22 @@ def service_line(name: str, player: str, org: O.Org, svc: S.Service, now: float,
     elif svc.status == "suspended":
         probation = ", but currently suspended from duty"
     by = f", taken on by {leader_name}" if leader_name else ""
-    return (f"{player} serves in {org.name} as a {org.title(svc.rank_key)}{probation}. {player} joined "
-            f"{time_ago(now - svc.joined_gt)}{by}.")
+    return (f"{player} serves in {org.name} as {org.a_title(svc.rank_key)}{probation}. {player} joined "
+            f"{time_ago(now - svc.joined_gt)}{by}." + (f" {org.rank_note}" if org.rank_note else ""))
 
 
 def rank_line(name: str, player: str, org: O.Org, svc: S.Service, p: Profile) -> str:
-    theirs = p.leader_rank if p.is_leader else GENERIC_RANK
+    theirs = p.leader_rank if p.is_leader else org.generic_rank
     mine, other = org.rank_index(svc.rank_key), org.rank_index(theirs)
     if other < 0:
         return (f"{name} treats {player} as one of the guard, though {player}'s rank gives them no say over {name}; "
                 f"how {name} feels about {player} is still {name}'s own.")
     if mine < other:
-        return (f"As a {org.title(theirs)}, {name} outranks {player} and may give {player} orders or advice. "
+        return (f"As {org.a_title(theirs)}, {name} outranks {player} and may give {player} orders or advice. "
                 f"How {name} feels about {player} personally is still {name}'s own.")
     if mine == other:
         return f"{name} and {player} hold the same rank; {name} treats {player} as a comrade, or not, as they see fit."
-    return (f"{player} outranks {name}, who owes {player} the courtesy due to a {org.title(svc.rank_key)} but is no "
+    return (f"{player} outranks {name}, who owes {player} the courtesy due to {org.a_title(svc.rank_key)} but is no "
             f"servant and keeps their own judgement and feelings.")
 
 
@@ -68,5 +67,5 @@ def recruit_lines(name: str, player: str, d: R.Decision, recruiters: list[str], 
 
 
 def other_org_line(name: str, player: str, org: O.Org, svc: S.Service) -> str:
-    return (f"{player} serves in {org.name} as a {org.title(svc.rank_key)}. That rank carries no authority with "
+    return (f"{player} serves in {org.name} as {org.a_title(svc.rank_key)}. That rank carries no authority with "
             f"{name}'s own guard.")

@@ -214,7 +214,7 @@ def test_in_game_test_commands(tmp_path):
     assert service(db)["path"] == "admin" and service(db)["rank_key"] == "recruit"
     talk(tmp_path, DAY + 0.1, say="debug guard rank sergeant")
     _, prompt = talk(tmp_path, DAY + 0.2, npcs=[whiterun_guard()])
-    assert "as a Sergeant" in prompt and "Torvar outranks Whiterun Guard" in prompt
+    assert "as a Sergeant" in prompt and "no rank in the Legion" in prompt and "Torvar outranks Whiterun Guard" in prompt
     db = open_db(tmp_path)
     assert db.execute("SELECT COUNT(*) FROM claim WHERE act = 'promoted'").fetchone()[0] == 1
     talk(tmp_path, DAY + 0.3, say="debug guard dismiss")
@@ -238,8 +238,8 @@ def test_loading_an_older_save_rolls_the_service_back(tmp_path):
     talk(tmp_path, DAY, extra=load(0, 201, DAY - 0.1))
     timeline = talk.reply[KEY_TIMELINE_ID]
     talk(tmp_path, DAY + 0.1, say="I want to join the guard.", extra=load(timeline, 201, DAY - 0.1))
-    talk(tmp_path, DAY + 0.2, say="debug guard rank guard", extra=load(timeline, 201, DAY - 0.1))
-    assert service(open_db(tmp_path))["rank_key"] == "guard"
+    talk(tmp_path, DAY + 0.2, say="debug guard rank guardsman", extra=load(timeline, 201, DAY - 0.1))
+    assert service(open_db(tmp_path))["rank_key"] == "guardsman"
     talk(tmp_path, DAY + 0.16, extra=load(timeline, 202, DAY + 0.15))     # saved as a recruit
     assert service(open_db(tmp_path))["rank_key"] == "recruit"
     _, prompt = talk(tmp_path, DAY + 0.06, extra=load(timeline, 203, DAY + 0.05))   # saved before joining
@@ -283,7 +283,7 @@ def test_developer_tool(tmp_path, monkeypatch):
     assert any("NO  bounty: has a bounty of 40 gold in Whiterun" in l for l in lines)
     code, lines = run_dev(tmp_path, "enlist", "whiterun")
     assert code == 0 and "Recruit" in lines[-1]
-    assert run_dev(tmp_path, "promote")[1][-1] == "rank now Guard"
+    assert run_dev(tmp_path, "promote")[1][-1] == "rank now Guardsman"
     assert run_dev(tmp_path, "set-rank", "lieutenant")[1][-1] == "rank now Lieutenant"
     code, lines = run_dev(tmp_path, "status")
     assert "Lieutenant, active" in lines[0]
