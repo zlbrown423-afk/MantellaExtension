@@ -98,3 +98,37 @@ def purchase(buyer_json: dict[str, Any], seller_json: dict[str, Any], item: str,
         parts.append(f"party={actor_field(party_json)}")
     parts += [f"w={w}" for w in witnesses or []]
     return "|".join(parts)
+
+
+# ---- reputation (S2): MantellaRepository.LwFlushGift / LwRecordTheft / LwRecordHit ----
+
+def gift(giver_json: dict[str, Any], receiver_json: dict[str, Any], item: str, game_days: float, quantity: int = 1,
+         gold: int = 0, via: str = "gift_menu", location: str = "Riverwood", witnesses: list[str] | None = None,
+         key: str | None = None) -> str:
+    parts = ["v=1", f"key={key or _key('gift')}", "type=gift", f"gt={game_days}", f"loc={location}",
+             f"actor={actor_field(giver_json)}", f"target={actor_field(receiver_json)}", f"item={item}",
+             f"qty={quantity}", f"gold={gold}", f"via={via}", "trank=0"]
+    parts += [f"w={w}" for w in witnesses or []]
+    return "|".join(parts)
+
+
+def theft(thief_json: dict[str, Any], item: str, game_days: float, owner: str = "", victim_json: dict[str, Any] | None = None,
+          quantity: int = 1, gold: int = 0, via: str = "take", location: str = "Riverwood",
+          witnesses: list[str] | None = None, key: str | None = None) -> str:
+    parts = ["v=1", f"key={key or _key('theft')}", "type=theft", f"gt={game_days}", f"loc={location}",
+             f"actor={actor_field(thief_json)}"]
+    if victim_json:
+        parts.append(f"target={actor_field(victim_json)}")
+    parts += [f"item={item}", f"qty={quantity}", f"gold={gold}", f"via={via}", f"owner={owner}"]
+    parts += [f"w={w}" for w in witnesses or []]
+    return "|".join(parts)
+
+
+def hit(attacker_json: dict[str, Any], victim_json: dict[str, Any], game_days: float, weapon: str = "",
+        via: str = "assault", location: str = "Riverwood", witnesses: list[str] | None = None,
+        key: str | None = None) -> str:
+    parts = ["v=1", f"key={key or _key('hit')}", "type=hit", f"gt={game_days}", f"loc={location}",
+             f"actor={actor_field(attacker_json)}", f"target={actor_field(victim_json)}", f"item={weapon}",
+             f"via={via}", "trank=0"]
+    parts += [f"w={w}" for w in witnesses or []]
+    return "|".join(parts)

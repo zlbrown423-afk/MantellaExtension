@@ -99,10 +99,15 @@ class Seeder:
                            " ON CONFLICT(npc_id, community_id) DO UPDATE SET role = excluded.role,"
                            " influence = excluded.influence",
                            (npc_id, community_ids[key], m.get("role"), float(m.get("influence", 0.3))))
+            seeded_traits = {"gossipy": float(p.get("gossipy", 0.5)), **(p.get("traits") or {})}
             if not db.execute("SELECT 1 FROM persona_version WHERE npc_id = ?", (npc_id,)).fetchone():
                 db.execute("INSERT INTO persona_version (npc_id, version, bio, traits_json, source, created_gt)"
-                           " VALUES (?, 1, '', ?, 'author', ?)",
-                           (npc_id, json.dumps({"gossipy": float(p.get("gossipy", 0.5))}), gt))
+                           " VALUES (?, 1, '', ?, 'author', ?)", (npc_id, json.dumps(seeded_traits), gt))
+            else:
+                # traits from the bio may have been written first (social/traits.py): the seed file wins
+                for trait, value in seeded_traits.items():
+                    db.execute("UPDATE persona_version SET traits_json = json_set(traits_json, ?, ?) WHERE npc_id = ?",
+                               (f"$.{trait}", float(value), npc_id))
         for r in seed["relationships"]:
             a, b = ids.get(r["a"]), ids.get(r["b"])
             if a is None or b is None:

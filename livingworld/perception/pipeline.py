@@ -65,14 +65,17 @@ class PerceptionPipeline:
         actor_id = self.identities.ensure_npc(record.actor.identity(), gt)
         target_id = self.identities.ensure_npc(record.target.identity(), gt) if record.target else None
         party_id = self.identities.ensure_npc(record.party.identity(), gt) if record.party else None
+        if record.type == "theft" and target_id is None and record.owner:
+            target_id = self._owner_id(record.owner, actor_id)
         if any(self._child(i) for i in (actor_id, target_id, party_id)):
             # children are left out of every Living World system: no event, no memories, no claims
             logger.log(23, f"Living World: {record.type} record {record.key} involves a child; not stored")
             return Outcome(None)
         people: dict[int, tuple[str, Perception]] = {}   # npc_id -> (role, perception)
         people[actor_id] = ("actor", Perception("participated", "experienced", 1.0))
-        if target_id is not None:
+        if target_id is not None and record.type != "theft":
             people[target_id] = ("target", Perception("participated", "experienced", 1.0))
+        # a theft victim only knows if they saw it (they are then a witness); a picked pocket goes unnoticed
         unseen = []
         witness_ids = []
         for witness in record.witnesses:
@@ -83,6 +86,9 @@ class PerceptionPipeline:
             if npc_id in people:
                 continue
             seen = formation.perceives(witness)
+            if seen is not None and record.type == "theft" and record.via == "pickpocket" \
+                    and (npc_id == target_id or (seen.distance_m or 0.0) > formation.CLEAR_VIEW_M):
+                seen = None   # picking a pocket is quiet work: only someone close by and watching sees it
             if seen is None:
                 unseen.append(witness.actor.name)
                 continue
@@ -91,7 +97,7 @@ class PerceptionPipeline:
         outcome = Outcome(None, unseen=unseen)
         with self.store.transaction() as db:
             # the game's own relationship ranks seed relationship rows that do not exist yet
-            if target_id is not None:
+            if target_id is not None and target_id in people:
                 self._seed_bond(db, target_id, actor_id, record.target_rank, gt)
             for npc_id, witness in witness_ids:
                 if people.get(npc_id, ("",))[0] == "witness":
@@ -158,7 +164,8 @@ class PerceptionPipeline:
     @staticmethod
     def _event_type(record: PerceptionRecord) -> str:
         # a purchase is 'trade', never 'consumption': buying a round does not count as drinking it
-        return {"grab": "physical_interaction", "purchase": "trade"}.get(record.type, "consumption")
+        return {"grab": "physical_interaction", "purchase": "trade", "gift": "gift", "theft": "theft",
+                "hit": "violence"}.get(record.type, "consumption")
 
     @staticmethod
     def _payload(record: PerceptionRecord, unseen: list[str]) -> dict:
@@ -171,6 +178,13 @@ class PerceptionPipeline:
             payload = {"item": record.item, "item_form": record.item_form, "quantity": record.quantity,
                        "gold": record.gold, "payer": record.payer, "party": record.party.name if record.party else None,
                        "via": "action"}
+        elif record.type in ("gift", "theft"):
+            payload = {"item": record.item, "item_form": record.item_form, "quantity": record.quantity,
+                       "gold": record.gold, "via": record.via}
+            if record.type == "theft":
+                payload["owner"] = record.owner
+        elif record.type == "hit":
+            payload = {"weapon": record.item, "via": record.via}
         else:
             payload = {"item": record.item, "item_form": record.item_form,
                        "category": item_category(record.item or "", record.is_food), "quantity": record.quantity,
@@ -199,6 +213,18 @@ class PerceptionPipeline:
                 return formation.grab_for_actor(record)
             return formation.grab_for_witness(record, seen, self._bond(db, npc_id, actor_id),
                                               self._bond(db, npc_id, target_id))
+        if record.type in ("gift", "theft", "hit"):
+            if role == "actor":
+                return None   # only the player does these, and the player keeps their own memories
+            if record.type == "gift":
+                return formation.gift_for_target(record) if role == "target" else formation.gift_for_witness(record, seen)
+            if record.type == "theft":
+                return formation.theft_for_witness(record, seen, is_owner=npc_id == target_id,
+                                                   to_owner=self._bond(db, npc_id, target_id))
+            if role == "target":
+                return formation.hit_for_target(record, self._bond(db, npc_id, actor_id))
+            return formation.hit_for_witness(record, seen, self._bond(db, npc_id, actor_id),
+                                             self._bond(db, npc_id, target_id))
         if record.type == "purchase":
             if role == "actor":
                 return formation.purchase_for_actor(record)
@@ -208,6 +234,11 @@ class PerceptionPipeline:
         if role == "actor":
             return formation.consume_for_actor(record)
         return formation.consume_for_witness(record, seen, self._bond(db, npc_id, actor_id))
+
+    def _owner_id(self, name: str, actor_id: int) -> int | None:
+        """The NPC the game named as a stolen item's owner, when we know them by that name."""
+        return self.store.scalar("SELECT npc_id FROM npc WHERE display_name = ? AND npc_id <> ? AND is_player = 0"
+                                 " ORDER BY npc_id LIMIT 1", (name, actor_id))
 
     @staticmethod
     def _seed_bond(db, from_id: int, to_id: int, rank: int | None, gt: float) -> None:

@@ -149,6 +149,23 @@ are still recorded). No AI call is made for any of it except one more field in t
 | Prompt | `memory/recall.py` | Up to 3 things the NPC was told, with who told them and how sure they are ("I'm not sure I believe it. I did not see it myself."), and a line on how they feel about the player from their own relationship values (`v_relationship`, now with respect, admiration and suspicion) |
 | Children | `store/minors.py`, `npc.is_child` | Child NPCs are left out of everything Living World works out: no grabs, clothing, drinking, witnesses, memories, seed, gossip or reputation. Recognised by Mantella's character list (child voices), a child race or voice type, and on the game side by `Actor.IsChild()` |
 
+## Reputation layers and player knowledge (S2)
+
+On with `MANTELLA_LIVING_WORLD=1`. Switch it off with `set MANTELLA_LW_REPUTATION=0` (S1 gossip keeps
+working). Hints for the player: `set MANTELLA_LW_INFO_LEVEL=minimal|balanced|informative` (default balanced).
+No AI call. Migration `009_reputation.sql`.
+
+| Part | Where | What it does |
+| --- | --- | --- |
+| New game events | `perception/records.py` (`gift`, `theft`, `hit`), `perception/formation.py` | The player handing an NPC something outside trading, a theft or picked pocket the game itself counted, and the player hitting an NPC who was not an enemy. Each gives the receiver/victim and onlookers a memory and a change of view, and becomes a claim (`gifted`, `stole`, `pickpocketed`, `hit`). A picked pocket goes unnoticed by the victim and is only seen from close by. A theft victim only knows if they saw it |
+| Standing by domain | `social/reputation.py`, `standing_change` / `v_standing` | One person's view of another in generosity, honesty, reliability, gentleness, decency, lawfulness and standing (positive = the good end; `trade` is kept for the civic systems). Moved by what they saw (`claims.appraise`) and, less, by what they heard and believed (`claims.hear`), scaled by how much they care about that area (traits) and how close they are to the victim |
+| Opinions | `belief` / `v_belief` | Formed when a standing passes 0.2 ("Torvar is generous"; "Torvar is a thief" past 0.5), dropped when it falls back under 0.1. NPC prompts show up to 3 about the player and the people present: "What I've come to think: Torvar is generous (I've seen it myself)." |
+| Community and faction views | `v_community_reputation`, `v_faction_reputation`, `community_stance` | Computed when read, never stored: the influence-weighted average of members' own views per domain, plus `regard` from `v_relationship`, and `reach` (the share of the place that has any view). Each guard org in `guard/data/orgs.json` becomes a faction whose members are the guards met in play; guards weigh lawfulness 2.5x and generosity 0.5x. Skyrim's own bounty stays the game's business |
+| Retelling | `social/gossip.py` | Each retelling may grow (likelier from dishonest or drunk tellers) or, from honest people, shrink a little (`gossip_exchange` payload `distorted`). A witness who meets someone holding a blown-up version sets it straight (`gossip_correction`): the listener's copy goes back to the true size and the extra they made of it is taken back |
+| Traits | `social/traits.py` | Seeded once per person from their Mantella bio by word rules (gossipy, honest, trusting, loyal, bold, greedy, temper, law, family, wealth, honor, modesty, warmth, reserve). A seed file entry always wins. Read: gossipy, honest, trusting, loyal and the values |
+| Player hints | `social/hints.py`, `player_notice` | Balanced: at most one hint per conversation start, only about the player or someone they have talked to 3+ times, as hearsay ("You catch Riverwood folk murmuring about you."). Informative: up to 3 with names ("Hod has heard that you helped Gerdur."), plus what the place makes of you in the first conversation after a load. Never about something the player saw; each claim once; shown as notifications with the first NPC line (`mantella_lw_hints`). What the player overhears is stored as their own `knowledge` (`overheard`), which no NPC reads |
+| Game side | Mantella-Spell `MantellaRepository.psc` (LIVINGWORLD PATCH: reputation) | Gift (`OnItemRemoved` to an actor, not in barter or container menus, merged per person for 10 s), theft (`OnTrackedStatsEvent` "Items Stolen"/"Pockets Picked" paired with the last `OnItemAdded`), hit ("Assaults" count, or a conversation NPC's `OnHit`; once per person per 15 s) |
+
 ## Romance between NPCs (R1: off screen)
 
 Off unless you set `MANTELLA_LW_ROMANCE=1` (on top of `MANTELLA_LIVING_WORLD=1`). No AI call and no animation:

@@ -44,10 +44,12 @@ class Recall:
     opinion: str | None = None                       # how they feel about the player right now
     heard: list[str] = field(default_factory=list)  # news other people told them
     romance: list[str] = field(default_factory=list)  # their own love life (social/romance.py)
+    beliefs: list[str] = field(default_factory=list)  # opinions they have formed (social/reputation.py)
     fresh_perceptions: int = 0   # things they saw or went through recently and have not had a chance to raise
 
     def text(self) -> str:
-        if not (self.facts or self.memories or self.last_spoke or self.opinion or self.heard or self.romance):
+        if not (self.facts or self.memories or self.last_spoke or self.opinion or self.heard or self.romance
+                or self.beliefs):
             return ""
         parts = [f"What {self.name} knows and remembers (only {self.name} knows this; "
                  f"anything not listed here, {self.name} does not know):"]
@@ -57,6 +59,7 @@ class Recall:
         parts += [f"- {line}" for line in self.memories]
         parts += [f"- {line}" for line in self.heard]
         parts += [f"- {line}" for line in self.romance]
+        parts += [f"- {line}" for line in self.beliefs]
         if self.opinion:
             parts.append(f"- {self.opinion}")
         if self.fresh_perceptions:
@@ -66,7 +69,7 @@ class Recall:
 
 
 def recall_for(store: WorldStore, npc_id: int, now_gt: float, player_id: int | None = None,
-               mark_rehearsed: bool = True) -> Recall:
+               mark_rehearsed: bool = True, about_ids: list[int] | None = None) -> Recall:
     name = store.scalar("SELECT display_name FROM npc WHERE npc_id = ?", (npc_id,))
     recall = Recall(npc_id, name)
 
@@ -110,6 +113,11 @@ def recall_for(store: WorldStore, npc_id: int, now_gt: float, player_id: int | N
             recall.romance = romance.recall_lines(db, npc_id, now_gt)
     if player_id is not None:
         recall.opinion = opinion_line(store, npc_id, player_id)
+    about = ([player_id] if player_id is not None else []) + [i for i in (about_ids or []) if i not in (npc_id, player_id)]
+    if about:
+        from livingworld.social import reputation
+        with store.reading() as db:
+            recall.beliefs = reputation.belief_lines(db, npc_id, about)
 
     if mark_rehearsed and recall.mem_ids:
         with store.transaction() as db:
