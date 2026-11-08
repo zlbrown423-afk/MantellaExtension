@@ -169,14 +169,16 @@ def report(rows: list[dict[str, Any]], hz: float = 90.0, margin: float = 30.0) -
     if not have_window:
         lines.append("No main-thread probe (the game window was not found, or this is not Windows).")
 
-    holds = [m for m in markers(rows, "grab") if "t0" in m and "t1" in m]
+    # t1 before t0: a hold from the first probe build, whose drop and grab events overlapped; not usable
+    holds = [m for m in markers(rows, "grab") if "t0" in m and "t1" in m and m["t1"] >= m["t0"]]
     for m in holds:
         lines += ["", f"## Hold of {m.get('target', '?')} ({m.get('hand', '?')} hand), "
                       f"{m['t1'] - m['t0']:.0f} s",
                   f"Game side: {int(m.get('grabs', 0))} grab and {int(m.get('drops', 0))} drop events, "
                   f"{int(m.get('dups', 0))} repeats ignored; script ticks {int(m.get('ticks', 0))}, "
                   f"latest {_f(m.get('lag_max'), 2)} s, average {_f(m.get('lag_avg'), 3)} s, "
-                  f"{int(m.get('stalls', 0))} over 1 s; grab handler {_f(m.get('grab_ms'), 0)} ms.",
+                  f"{int(m.get('stalls', 0))} over 1 s; body area took {_f(m.get('grab_ms'), 0)} ms"
+                  f"{', skipped ' + str(int(m['noarea'])) + ' times while busy' if m.get('noarea') else ''}.",
                   "", "| | CPU interval avg/max ms | GPU avg/max ms | reprojected | stall s | main thread max ms "
                   "| LLM pending | jobs | grab records | free MB | page faults max | likely source |",
                   "|---|---|---|---|---|---|---|---|---|---|---|---|"]
