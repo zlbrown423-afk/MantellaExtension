@@ -17,7 +17,8 @@ import random
 import time
 from dataclasses import dataclass
 
-from livingworld.social import acts, claims
+from livingworld.social import acts, claims, reputation
+from livingworld.social.traits import traits_of
 
 STEP_DAYS = 0.25          # one step per quarter day (morning, afternoon, evening, night)
 MAX_STEPS = 60            # a long absence is covered in at most this many (longer) steps
@@ -25,6 +26,13 @@ MAX_TELLINGS_PER_STEP = 2 # per teller
 FADE_DAYS = 7.0           # older news is less interesting...
 FORGET_DAYS = 30.0        # ...and stops spreading
 MIN_BELIEVED = 0.3        # people do not pass on what they hardly believe
+
+# reputation (S2): retelling and setting things straight
+EXAGGERATE_BASE = 0.15    # chance per telling that an average (honest 0.5) teller makes it bigger
+EXAGGERATE_PER_DRINK = 0.07  # extra chance per drink still in them (up to 3)
+PLAY_DOWN = 0.15          # chance an honest teller (0.65+) plays it down a little
+CORRECT_OVER = 0.15       # a copy this much bigger than what a witness saw gets corrected...
+CORRECT_RATE = 0.5        # ...at this share of the usual chance they talk
 
 # chance per day that a teller mentions a claim of interest 1.0 to a listener, by how they know each other
 CONTACT_HOUSEHOLD = 0.9
@@ -173,21 +181,114 @@ def _step(db, timeline: int, community: str, location: str | None, members: list
                 chance = 1 - (1 - min(0.95, per_day)) ** step
                 if rng.random() >= chance:
                     continue
-                _tell(db, timeline, location, teller, listener, claim, t)
+                _tell(db, timeline, location, teller, listener, claim, t, rng)
                 knowers.add(listener)
                 told += 1
                 tellings += 1
                 if told >= MAX_TELLINGS_PER_STEP:
                     break
+        if reputation.enabled():
+            tellings += _corrections(db, timeline, location, teller, members, households, t, step, rng)
     return tellings
 
 
-def _tell(db, timeline: int, location: str | None, teller: int, listener: int, claim, t: float) -> None:
+def distort(db, teller: int, magnitude: float, rng: random.Random, now_gt: float) -> float:
+    """How big the teller makes it sound. Honest people keep to what they know or play it down a little;
+    others may make it bigger, more so when they have been drinking. Returns the retold magnitude."""
+    if not reputation.enabled():
+        return magnitude
+    honest = traits_of(db, teller)["honest"]
+    drinks = 0.0
+    try:
+        from livingworld.perception.intoxication import drink_state
+        drinks = min(3.0, float(drink_state(db, teller, now_gt).level or 0.0))
+    except Exception:
+        drinks = 0.0
+    exaggerate = EXAGGERATE_BASE * (1.0 - honest) * 2 + EXAGGERATE_PER_DRINK * drinks
+    roll = rng.random()
+    if roll < exaggerate:
+        magnitude += rng.uniform(0.1, 0.25)
+    elif honest >= 0.65 and roll > 1.0 - PLAY_DOWN:
+        magnitude -= rng.uniform(0.03, 0.08)
+    return round(max(0.05, min(1.0, magnitude)), 3)
+
+
+def _tell(db, timeline: int, location: str | None, teller: int, listener: int, claim, t: float,
+          rng: random.Random | None = None) -> None:
+    heard = claim["heard_magnitude"]
+    told = distort(db, teller, heard, rng, t) if rng is not None else heard
+    payload = {"claim_id": claim["claim_id"]}
+    if abs(told - heard) >= 0.005:
+        payload["distorted"] = round(told - heard, 3)
     event_id = db.execute(
         "INSERT INTO world_event (timeline_id, type, location, actors_json, payload_json, source, game_time)"
         " VALUES (?, 'gossip_exchange', ?, ?, ?, 'sim', ?)",
-        (timeline, location, json.dumps([teller, listener]), json.dumps({"claim_id": claim["claim_id"]}), t)).lastrowid
+        (timeline, location, json.dumps([teller, listener]), json.dumps(payload), t)).lastrowid
     db.execute("INSERT INTO event_witness (event_id, npc_id, how) VALUES (?,?, 'participated'), (?,?, 'participated')",
                (event_id, teller, event_id, listener))
-    claims.hear(db, timeline, listener, teller, dict(claim), claim["know_id"], claim["believed"],
-                claim["heard_magnitude"], t, event_id=event_id)
+    claims.hear(db, timeline, listener, teller, dict(claim), claim["know_id"], claim["believed"], told, t,
+                event_id=event_id)
+
+
+def _corrections(db, timeline: int, location: str | None, witness: int, members: list[int],
+                 households: dict[int, set[int]], t: float, step: float, rng: random.Random) -> int:
+    """A witness who hears a blown-up version of what they saw sets the teller's listener straight:
+    the listener's copy is replaced by the true size, and the extra they made of it is taken back."""
+    done = 0
+    seen = db.execute("SELECT * FROM v_claim_knowledge WHERE holder_id = ? AND origin = 'witnessed'"
+                      " AND learned_gt <= ? AND sensitivity <> 'secret' ORDER BY claim_id", (witness, t)).fetchall()
+    member_set = set(members)
+    for truth in seen:
+        if t - truth["claim_gt"] > FORGET_DAYS:
+            continue
+        wrong = db.execute(
+            "SELECT * FROM v_claim_knowledge WHERE claim_id = ? AND origin = 'told' AND learned_gt <= ?"
+            " AND heard_magnitude - ? >= ? ORDER BY know_id",
+            (truth["claim_id"], t, truth["magnitude"], CORRECT_OVER)).fetchall()
+        for copy in wrong:
+            listener = copy["holder_id"]
+            if listener == witness or listener not in member_set or listener == truth["subject_id"]:
+                continue
+            contact, _ = _contact(db, witness, listener, households)
+            chance = 1 - (1 - min(0.95, contact * CORRECT_RATE)) ** step
+            if rng.random() >= chance:
+                continue
+            _correct(db, timeline, location, witness, truth["know_id"], listener, dict(copy), truth["magnitude"], t)
+            done += 1
+            if done >= MAX_TELLINGS_PER_STEP:
+                return done
+    return done
+
+
+def _correct(db, timeline: int, location: str | None, witness: int, witness_know_id: int, listener: int, copy: dict,
+             true_mag: float, t: float) -> None:
+    event_id = db.execute(
+        "INSERT INTO world_event (timeline_id, type, location, actors_json, payload_json, source, game_time)"
+        " VALUES (?, 'gossip_correction', ?, ?, ?, 'sim', ?)",
+        (timeline, location, json.dumps([witness, listener]),
+         json.dumps({"claim_id": copy["claim_id"], "from": copy["heard_magnitude"], "to": true_mag}), t)).lastrowid
+    db.execute("INSERT INTO event_witness (event_id, npc_id, how) VALUES (?,?, 'participated'), (?,?, 'participated')",
+               (event_id, witness, event_id, listener))
+    believed = copy["believed"] or 0.0
+    new_id = claims._hold(db, timeline, listener, copy["claim_id"], copy["subject_id"], "told", witness,
+                          witness_know_id, event_id, None, true_mag, max(believed, claims.credibility(db, listener, witness)),
+                          copy["will_share"] or "yes", t)
+    db.execute("UPDATE knowledge SET superseded_by = ? WHERE know_id = ?", (new_id, copy["know_id"]))
+    # take back the part of the listener's reaction that came from the exaggeration
+    close = copy["object_id"] is not None and claims.is_close(claims.bond(db, listener, copy["object_id"]))
+    if copy["subject_id"] == listener:
+        return
+    too_much = acts.listener_deltas(copy["act"], copy["valence"], copy["heard_magnitude"], believed, close)
+    right = acts.listener_deltas(copy["act"], copy["valence"], true_mag, believed, close)
+    back = {k: round(right.get(k, 0.0) - v, 4) for k, v in too_much.items() if abs(right.get(k, 0.0) - v) >= 0.001}
+    if back:
+        name = db.execute("SELECT display_name FROM npc WHERE npc_id = ?", (witness,)).fetchone()[0]
+        db.execute("INSERT INTO relationship_change (timeline_id, from_id, to_id, deltas_json, cause_event_id, reason,"
+                   " game_time) VALUES (?,?,?,?,?,?,?)",
+                   (timeline, listener, copy["subject_id"], json.dumps(back), event_id,
+                    f"{name} set the story straight: claim {copy['claim_id']}", t))
+    rep_too_much = reputation.deltas(db, listener, copy, copy["heard_magnitude"], believed, False, close)
+    rep_right = reputation.deltas(db, listener, copy, true_mag, believed, False, close)
+    rep_back = {k: rep_right.get(k, 0.0) - v for k, v in rep_too_much.items()}
+    reputation.adjust(db, timeline, listener, copy["subject_id"], rep_back, t, copy["claim_id"], event_id,
+                      "set straight by a witness")

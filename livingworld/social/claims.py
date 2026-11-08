@@ -12,7 +12,8 @@ from __future__ import annotations
 import json
 
 from livingworld.perception.records import SENSITIVE_PARTS
-from livingworld.social import acts
+from livingworld.social import acts, reputation
+from livingworld.social.traits import traits_of
 from livingworld.store.minors import is_child
 
 CLOSE_STATUSES = {"friend", "close_friend", "courting", "partner", "spouse"}
@@ -101,6 +102,18 @@ def appraise(db, event) -> int | None:
         else:
             act_name, detail, valence = "let_down", f", who needed help to {title}", -0.4
         magnitude, sensitivity = 0.3, "public"
+    elif etype == "gift" and obj is not None:
+        act_name, sensitivity, valence = "gifted", "public", 0.4
+        magnitude = 0.2 + min(0.5, (payload.get("gold") or 0) / 400.0)
+        detail = f" ({_qty_item(payload)})"
+    elif etype == "theft":
+        act_name = "pickpocketed" if payload.get("via") == "pickpocket" else "stole"
+        magnitude, sensitivity, valence = 0.45 + min(0.4, (payload.get("gold") or 0) / 300.0), "public", -0.7
+        detail = "" if act_name == "pickpocketed" else f" (took {_qty_item(payload)})"
+    elif etype == "violence" and obj is not None:
+        act_name, magnitude, sensitivity, valence = "hit", 0.6, "public", -0.7
+        weapon = payload.get("weapon")
+        detail = f" with {weapon}" if weapon and str(weapon).lower() not in ("none", "unarmed") else ""
     elif etype in GUARD_ACTS:
         guarded = _guard_claim(etype, payload)
         if guarded is None:
@@ -134,6 +147,11 @@ def appraise(db, event) -> int | None:
         believed = min(WITNESS_CAP, confidence if confidence is not None else 0.9)
         _hold(db, event["timeline_id"], npc_id, claim_id, subject, "witnessed", None, None, event["event_id"], None,
               magnitude, believed, share, event["game_time"])
+        claim_row = {"claim_id": claim_id, "subject_id": subject, "object_id": obj, "act": act_name,
+                     "valence": valence, "sensitivity": sensitivity}
+        close = obj is not None and npc_id != obj and is_close(bond(db, npc_id, obj))
+        reputation.record(db, event["timeline_id"], npc_id, claim_row, magnitude, believed, True, close,
+                          event["game_time"], event["event_id"])
         if etype.startswith("romance."):
             from livingworld.social import romance
             romance.on_learned(db, event["timeline_id"], npc_id,
@@ -183,6 +201,12 @@ def _romance_claim(etype: str, payload: dict) -> tuple[str, str, float, str, flo
     return None
 
 
+def _qty_item(payload: dict) -> str:
+    qty = payload.get("quantity") or 1
+    item = payload.get("item") or "something"
+    return f"{qty} {item}" if qty > 1 else item
+
+
 def _party_id(db, event_id: int, buyer: int) -> int | None:
     """The person the round was for: the other participant in the trade who is not the seller."""
     payload = json.loads(db.execute("SELECT payload_json FROM world_event WHERE event_id = ?", (event_id,)).fetchone()[0])
@@ -215,6 +239,9 @@ def hear(db, timeline: int, listener: int, teller: int, claim: dict, teller_know
     if is_child(db, listener) or is_child(db, teller):
         return None
     believed = min(HEARSAY_CAP, teller_believed * credibility(db, listener, teller))
+    if reputation.enabled():
+        believed *= 0.8 + 0.4 * traits_of(db, listener)["trusting"]   # some take hearsay at its word, some don't
+        believed = min(HEARSAY_CAP, believed)
     prior = bond(db, listener, claim["subject_id"])
     if (claim["valence"] < 0 and prior["affinity"] >= 0.5) or (claim["valence"] > 0 and prior["affinity"] <= -0.5):
         believed *= 0.7   # people discount news that goes against what they already think of someone
@@ -231,6 +258,8 @@ def hear(db, timeline: int, listener: int, teller: int, claim: dict, teller_know
                        " reason, game_time) VALUES (?,?,?,?,?,?,?)",
                        (timeline, listener, claim["subject_id"], json.dumps(deltas), event_id,
                         f"heard from {teller_name}: claim {claim['claim_id']}", gt))
+        reputation.record(db, timeline, listener, claim, magnitude, believed, False, close, gt, event_id,
+                          reason="heard it")
         if claim["act"] in ("flirted", "spent_night", "caught_with"):
             from livingworld.social import romance
             romance.on_learned(db, timeline, listener, claim, believed, gt, event_id)
@@ -239,18 +268,22 @@ def hear(db, timeline: int, listener: int, teller: int, claim: dict, teller_know
 
 # ---- words ----
 
-def sentence(db, claim: dict, viewer: int) -> str:
-    """'Torvar grabbed Sven by the left forearm in Riverwood', with the viewer as 'me'."""
+def sentence(db, claim: dict, viewer: int, second_person: bool = False) -> str:
+    """'Torvar grabbed Sven by the left forearm in Riverwood', with the viewer as 'me' (or 'you')."""
     def name(npc_id):
         if npc_id == viewer:
-            return "me"
+            return "you" if second_person else "me"
         return db.execute("SELECT display_name FROM npc WHERE npc_id = ?", (npc_id,)).fetchone()[0]
-    subject = "I" if claim["subject_id"] == viewer else name(claim["subject_id"])
+    if claim["subject_id"] == viewer:
+        subject = "you" if second_person else "I"
+    else:
+        subject = name(claim["subject_id"])
     place = f" in {claim['location']}" if claim.get("location") else ""
     if claim["act"] == "reported":
         return f"{subject} {claim['detail'].strip()}"
     if claim["act"] == "drank":
-        return f"{subject} was drinking{claim['detail']}{place}"
+        return f"{subject} {'were' if subject == 'you' else 'was'} drinking{claim['detail']}{place}"
     obj = f" {name(claim['object_id'])}" if claim["object_id"] is not None else ""
     verb = acts.act(claim["act"]).verb if obj else acts.NO_OBJECT.get(claim["act"], acts.act(claim["act"]).verb)
-    return f"{subject} {verb}{obj}{claim['detail']}{place}"
+    text = f"{subject} {verb}{obj}{claim['detail']}{place}"
+    return "you were " + text[len("you was "):] if text.startswith("you was ") else text

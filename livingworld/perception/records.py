@@ -38,6 +38,25 @@ Living World OrderDrinks action: ``gold`` paid in total, ``payer`` is ``player``
 and ``party`` is who the round is shared with (the player). Buying is not drinking: it never counts
 towards being tipsy.
 
+Reputation (S2) adds three records, each about something the player did, with witnesses:
+
+    v=1|key=812345-7|type=gift|gt=3.9|loc=Riverwood|actor=<player>|target=<actor>|item=Sweetroll|qty=2|gold=16
+      |via=gift_menu|w=<witness>
+
+    v=1|key=812345-8|type=theft|gt=4.0|loc=Riverwood Trader|actor=<player>|item=Silver Goblet|qty=1|gold=30
+      |via=take|owner=Lucan Valerius|w=<witness>
+
+    v=1|key=812345-9|type=hit|gt=4.1|loc=Riverwood|actor=<player>|target=<actor>|item=Iron Sword|via=assault
+      |w=<witness>
+
+A ``gift`` is items the player handed to an NPC outside trading (``gold`` is their total value; the game
+folds several items given to one person within a few seconds into one record). A ``theft`` is sent when
+the game counts a theft or a picked pocket (``via=take`` or ``pickpocket``); ``owner`` is the owner's name
+when the game knows it, and on a pickpocket the victim is the ``target`` and never notices. A ``hit`` is the
+player striking an NPC who was not an enemy (``item`` is the weapon or spell, empty for a punch;
+``via`` is ``assault`` when the game counted it as a crime, ``conversation`` when the NPC was talking
+with the player).
+
 ``<actor>`` is ``ref^base^ref_plugin^base_plugin^is_player^name`` and ``<witness>`` is
 ``distance_m^had_los^rank_to_actor^rank_to_target^`` followed by an actor. Ranks are the game's own
 ``GetRelationshipRank`` (4 lover .. 0 acquaintance .. -4 archnemesis); ``trank`` is the target's rank
@@ -109,6 +128,7 @@ class PerceptionRecord:
     party: GameActor | None = None  # purchase: who the round is shared with
     hp: float | None = None         # fight: the lowest share of health the actor fell to
     sex: str | None = None          # attire: 'male' | 'female', the actor's sex in game
+    owner: str | None = None        # theft: the owner's name, when the game knows it
     witnesses: list[Witness] = field(default_factory=list)
     raw: str = ""
 
@@ -163,7 +183,7 @@ def parse_record(text: str) -> PerceptionRecord:
         fields["cover"] = fields["cover"].strip().lower()
     if fields.get("payer"):
         fields["payer"] = fields["payer"].strip().lower()
-    if kind not in ("grab", "consume", "attire", "purchase", "fight", "swim"):
+    if kind not in ("grab", "consume", "attire", "purchase", "fight", "swim", "gift", "theft", "hit"):
         raise BadRecord(f"unknown event type {kind!r}")
     record = PerceptionRecord(
         key=fields["key"], type=kind, game_time=float(fields["gt"]), location=fields.get("loc") or None,
@@ -176,7 +196,8 @@ def parse_record(text: str) -> PerceptionRecord:
         body=fields.get("body") or None, cover=fields.get("cover") or None,
         gold=int(fields["gold"]) if fields.get("gold") else None, payer=fields.get("payer") or None,
         party=_actor(fields["party"]) if fields.get("party") else None,
-        hp=_fraction(fields.get("hp")), sex=_sex(fields.get("sex")), witnesses=witnesses, raw=text)
+        hp=_fraction(fields.get("hp")), sex=_sex(fields.get("sex")), owner=(fields.get("owner") or "").strip() or None,
+        witnesses=witnesses, raw=text)
     if kind == "grab" and record.target is None:
         raise BadRecord("a grab needs a target")
     if kind == "consume" and not record.item:
@@ -188,6 +209,12 @@ def parse_record(text: str) -> PerceptionRecord:
             raise BadRecord("a purchase needs a seller (target) and an item")
         if record.payer not in ("player", "npc"):
             raise BadRecord(f"a purchase needs payer=player or npc, not {record.payer!r}")
+    if kind == "gift" and (record.target is None or not record.item):
+        raise BadRecord("a gift needs a receiver (target) and an item")
+    if kind == "theft" and not record.item:
+        raise BadRecord("a theft needs an item")
+    if kind == "hit" and record.target is None:
+        raise BadRecord("a hit needs a target")
     return record
 
 
