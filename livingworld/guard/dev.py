@@ -7,7 +7,7 @@ Run on the PC with the game's database, while the Mantella server is NOT running
     python -m livingworld.guard.dev --db ... roster whiterun
     python -m livingworld.guard.dev --db ... explain-recruit whiterun --leader "Commander Caius" [--bounty 40] [--thane]
     python -m livingworld.guard.dev --db ... enlist whiterun [--leader "Commander Caius"] [--force-rules]
-    python -m livingworld.guard.dev --db ... set-rank sergeant | promote | demote
+    python -m livingworld.guard.dev --db ... set-rank optio | promote | demote
     python -m livingworld.guard.dev --db ... dismiss | reinstate whiterun
     python -m livingworld.guard.dev --db ... thane whiterun
     python -m livingworld.guard.dev --db ... reset whiterun --yes

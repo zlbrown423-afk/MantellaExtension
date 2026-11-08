@@ -1,6 +1,6 @@
 {
   "_about": "Each hold's guard: who leads it, how its ranks are called, who it takes on and what it issues. Edit freely. People are matched by plugin and base form ID (names are only for reading). Guards the game reports as IsGuard() with this crime faction belong to this guard. A leader with \"recruits\": true can take someone on; other guards send them to one who can. The player is never added to any vanilla faction: all of this lives in the Living World database.",
-  "_ranks_about": "In order, lowest first. seats = how many people can hold the rank in this guard at once (null = no limit); vanilla leaders fill the top seats, so the player only reaches them when one opens. min_days = least days in the rank below before the promotion board will consider it (G3).",
+  "_ranks_about": "In order, lowest first. seats = how many people can hold the rank in this guard at once (null = no limit); vanilla leaders fill the top seats, so the player only reaches them when one opens. The titles follow a Roman-style ladder (as on some roleplay servers); they are only names for this hold guard's ranks and do not make anyone a member of the Imperial Legion. min_days = least days in the rank below before the promotion board will consider it (G3).",
   "_recruit_about": "Rules for taking someone on, read by guard/recruit.py. standing is the leader's view of the person: 0.5 x trust + 0.5 x respect from the leader's relationship row, plus what the leader has heard about them (claims), between -1 and 1. A plain request needs standing of at least min_standing; a sponsor (someone in the conversation the leader trusts, who trusts the person at least sponsor_trust) lowers the bar by sponsor_bonus. A thane of this hold is taken on at the Jarl's word (the bounty and serving-elsewhere bars still apply). A leader who thinks well enough of someone (invite_standing) may raise it themselves. redo_days = how long after a dismissal this guard will not take someone back.",
   "orgs": [
     {
@@ -25,7 +25,7 @@
           "name": "Commander Caius",
           "plugin": "Skyrim.esm",
           "base_id": "0x00038257",
-          "rank": "captain",
+          "rank": "prefect",
           "recruits": true,
           "role": "captain of the Whiterun city guard"
         },
@@ -34,55 +34,26 @@
           "name": "Irileth",
           "plugin": "Skyrim.esm",
           "base_id": "0x00013BB8",
-          "rank": "commander",
+          "rank": "legate",
           "recruits": true,
           "role": "the Jarl's housecarl, who commands the guard in battle"
         }
       ],
       "ranks": [
-        {
-          "key": "recruit",
-          "title": "Recruit",
-          "seats": null,
-          "min_days": 0
-        },
-        {
-          "key": "guard",
-          "title": "Guard",
-          "seats": null,
-          "min_days": 7
-        },
-        {
-          "key": "veteran",
-          "title": "Veteran Guard",
-          "seats": null,
-          "min_days": 30
-        },
-        {
-          "key": "sergeant",
-          "title": "Sergeant",
-          "seats": 4,
-          "min_days": 30
-        },
-        {
-          "key": "lieutenant",
-          "title": "Lieutenant",
-          "seats": 2,
-          "min_days": 45
-        },
-        {
-          "key": "captain",
-          "title": "Captain",
-          "seats": 1,
-          "min_days": 60
-        },
-        {
-          "key": "commander",
-          "title": "Commander",
-          "seats": 1,
-          "min_days": 90
-        }
+        {"key": "recruit", "title": "Recruit", "seats": null, "min_days": 0},
+        {"key": "legionnaire", "title": "Legionnaire", "seats": null, "min_days": 7},
+        {"key": "decanus", "title": "Decanus", "seats": 6, "min_days": 30},
+        {"key": "tesserarius", "title": "Tesserarius", "seats": 4, "min_days": 30},
+        {"key": "optio", "title": "Optio", "seats": 3, "min_days": 30},
+        {"key": "signifer", "title": "Signifer", "seats": 2, "min_days": 45},
+        {"key": "centurion", "title": "Centurion", "seats": 2, "min_days": 45},
+        {"key": "primus", "title": "Primus Pilus", "seats": 1, "min_days": 60},
+        {"key": "tribune", "title": "Tribune", "seats": 1, "min_days": 60},
+        {"key": "prefect", "title": "Prefect", "seats": 1, "min_days": 75},
+        {"key": "legate", "title": "Legate", "seats": 1, "min_days": 90}
       ],
+      "generic_rank": "legionnaire",
+      "rank_note": "The Whiterun Guard uses Roman-style rank titles (Legionnaire, Decanus, Optio, Centurion and so on), but it is the Jarl's hold guard, not the Imperial Legion.",
       "probation_days": 7,
       "recruit": {
         "min_standing": -0.1,

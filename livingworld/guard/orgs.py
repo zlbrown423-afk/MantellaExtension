@@ -59,6 +59,14 @@ class Org:
     probation_days: float
     recruit: dict[str, float]
     uniform: dict[str, tuple[Item, ...]] = field(default_factory=dict, compare=False, hash=False)
+    generic_rank_key: str | None = None   # the rank an ordinary guard of this hold holds (default: the second rank)
+    rank_note: str = ""                   # one sentence for prompts about what the rank titles mean
+
+    @property
+    def generic_rank(self) -> str:
+        if self.generic_rank_key and self.rank(self.generic_rank_key):
+            return self.generic_rank_key
+        return self.ranks[min(1, len(self.ranks) - 1)].key
 
     def rank(self, key: str | None) -> Rank | None:
         return next((r for r in self.ranks if r.key == key), None)
@@ -66,6 +74,11 @@ class Org:
     def title(self, key: str | None) -> str:
         r = self.rank(key)
         return r.title if r else (key or "member")
+
+    def a_title(self, key: str | None) -> str:
+        """The title with its article: "a Recruit", "an Optio"."""
+        t = self.title(key)
+        return ("an " if t[:1].lower() in "aeiou" else "a ") + t
 
     def rank_index(self, key: str | None) -> int:
         return next((i for i, r in enumerate(self.ranks) if r.key == key), -1)
@@ -100,7 +113,7 @@ def _org(raw: dict[str, Any]) -> Org:
                ranks=tuple(Rank(r["key"], r["title"], r.get("seats"), float(r.get("min_days", 0)))
                            for r in raw["ranks"]),
                probation_days=float(raw.get("probation_days", 7)), recruit=dict(raw.get("recruit") or {}),
-               uniform=uniform)
+               uniform=uniform, generic_rank_key=raw.get("generic_rank"), rank_note=raw.get("rank_note", ""))
 
 
 @functools.lru_cache(maxsize=1)

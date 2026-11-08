@@ -153,10 +153,10 @@ def _guard_claim(etype: str, payload: dict) -> tuple[str, str, float, str, float
     if org is None:
         return None
     act_name = GUARD_ACTS[etype]
-    rank = org.title(payload.get("rank"))
-    detail = {"enlisted": f" as a {rank} in {org.name}", "promoted": f" to {rank} in {org.name}",
+    rank, a_rank = org.title(payload.get("rank")), org.a_title(payload.get("rank"))
+    detail = {"enlisted": f" as {a_rank} in {org.name}", "promoted": f" to {rank} in {org.name}",
               "demoted": f" to {rank} in {org.name}", "dismissed": f" from {org.name}",
-              "reinstated": f" into {org.name} as a {rank}"}[act_name]
+              "reinstated": f" into {org.name} as {a_rank}"}[act_name]
     valence = {"enlisted": 0.2, "promoted": 0.3, "demoted": -0.3, "dismissed": -0.5, "reinstated": 0.1}[act_name]
     return act_name, detail, {"dismissed": 0.6, "enlisted": 0.4}.get(act_name, 0.4), "public", valence
 

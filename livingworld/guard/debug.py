@@ -1,7 +1,7 @@
 """Test commands for guard careers, said (or typed) to an NPC during a conversation.
 
 * "debug guard enlist" / "debug guard enlist whiterun" - join that hold's guard at once (as an admin change)
-* "debug guard rank sergeant"                           - set the player's rank in the guard they serve in
+* "debug guard rank optio"                              - set the player's rank in the guard they serve in
 * "debug guard dismiss" / "debug guard reinstate"
 * "debug guard thane" / "debug guard thane whiterun"    - count the player as thane of that hold from now on
 * "debug guard status"                                  - write the player's record to the server log
