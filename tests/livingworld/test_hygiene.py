@@ -227,3 +227,45 @@ def test_with_female_nude_bodies_women_are_naked_and_men_keep_underwear(tmp_path
         attire(actors.hod(), "none", 3.52, sex="m", witnesses=[seen(actors.gerdur(), 3.0)])])
     assert "Gerdur has no clothes or armor on right now, naked" in prompt
     assert "Hod has no clothes or armor on, only underclothes" in prompt
+
+
+# ---- test command --------------------------------------------------------------------------------------
+
+def test_debug_command_parsing():
+    from livingworld.hygiene import debug
+    assert debug.parse("Debug, max dirt.") == "dirty"
+    assert debug.parse("test filthy on Hod") == "dirty"
+    assert debug.parse("debug clean") == "clean"
+    assert debug.parse("I need a bath, I'm filthy") is None
+    assert debug.parse("max dirt") is None
+
+
+def test_debug_max_dirt_makes_the_player_filthy_and_noticed_again(tmp_path):
+    talk(tmp_path, [actors.gerdur()], 3.5)
+    llm = ScriptedLLM(replies=["Hm.", "By the gods."])
+    with HeadlessSession(str(tmp_path), llm) as s:
+        s.start([PLAYER, actors.gerdur()], game_days=3.6)
+        s.continue_until_player_turn()
+        s.say("Debug, max dirt.")
+        s.end(game_days=3.61)
+    db = open_db(tmp_path)
+    store = WorldStore(str(tmp_path / "data" / "livingworld" / "HeadlessTest.sqlite"))
+    with store.transaction() as conn:
+        state = model.state(conn, npc_id(conn, "Torvar"), 3.61)
+    assert state.label == "filthy" and state.bloodied
+    later = talk(tmp_path, [actors.gerdur()], 3.7)
+    assert "Gerdur notices that Torvar is filthy" in later
+    assert db.execute("SELECT COUNT(*) FROM hygiene_change WHERE cause = 'debug'").fetchone()[0] == 1
+
+
+def test_debug_clean_on_a_named_npc(tmp_path):
+    talk(tmp_path, [actors.hod()], 3.5, events=[fight(actors.hod(), 0.3, 3.45)])
+    llm = ScriptedLLM(replies=["Hm.", "Ah."])
+    with HeadlessSession(str(tmp_path), llm) as s:
+        s.start([PLAYER, actors.hod()], game_days=3.6)
+        s.continue_until_player_turn()
+        s.say("debug clean Hod")
+        s.end(game_days=3.61)
+    db = open_db(tmp_path)
+    assert db.execute("SELECT COUNT(*) FROM hygiene_change h JOIN npc n ON n.npc_id = h.npc_id"
+                      " WHERE n.display_name = 'Hod' AND h.cause = 'bath'").fetchone()[0] == 1

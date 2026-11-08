@@ -46,6 +46,7 @@ _OFF = {"0", "false", "no", "off"}
 MOOD_ENV = "MANTELLA_LW_MOOD_METER"
 QUIET_ENV = "MANTELLA_LW_QUIET_CHATTER"
 HYGIENE_ENV = "MANTELLA_LW_HYGIENE"
+HYGIENE_DEBUG_ENV = "MANTELLA_LW_HYGIENE_DEBUG"
 KEY_MOOD = "mantella_lw_mood"                    # sent with an NPC line: the meter text to show
 KEY_QUIET_CHATTER = "mantella_lw_quiet_chatter"  # sent with the start reply: mute vanilla chatter until the end
 
@@ -89,6 +90,7 @@ class LivingWorld:
         self.mood_meter = enabled and os.environ.get(MOOD_ENV, "").strip().lower() not in _OFF
         self.quiet_chatter = enabled and os.environ.get(QUIET_ENV, "").strip().lower() not in _OFF
         self.hygiene = enabled and os.environ.get(HYGIENE_ENV, "").strip().lower() not in _OFF
+        self.hygiene_debug = self.hygiene and os.environ.get(HYGIENE_DEBUG_ENV, "").strip().lower() not in _OFF
         self._moods_shown: dict[int, str] = {}      # npc_id -> meter text the game last showed
         self._moods_to_send: dict[str, str] = {}    # speaker ref id -> meter text to send with their next line
         self._social: dict[int, SocialWorld] = {}   # id(store) -> reputation and gossip for that world
@@ -246,6 +248,20 @@ class LivingWorld:
             return
         npc_id = self._npc_ids.get(player.ref_id) or self._register(player, context.game_days)
         ConversationLog(self.store).append(self.conv_id, npc_id, text.strip(), None, context.game_days)
+        if self.hygiene_debug:
+            self._hygiene_debug(text, npc_id, context)
+
+    def _hygiene_debug(self, text: str, player_id: int, context: Any) -> None:
+        from livingworld.hygiene import debug
+        command = debug.parse(text)
+        if command is None:
+            return
+        present = {self._npc_ids.get(c.ref_id) or self._register(c, context.game_days): c.name
+                   for c in context.npcs_in_conversation.get_all_characters()}
+        who = debug.target(text, present, player_id)
+        with self.store.transaction() as db:
+            debug.apply(db, command, who, context.game_days)
+        logger.log(23, f"Living World: hygiene test command '{command}' applied to {present.get(who, 'the player')}")
 
     @_never_raises
     def conversation_ended(self, game_days: float | None, context: Any | None = None) -> None:

@@ -25,7 +25,7 @@ CREATE TABLE hygiene_change (
   timeline_id INTEGER NOT NULL REFERENCES timeline(timeline_id),
   npc_id      INTEGER NOT NULL REFERENCES npc(npc_id),
   game_time   REAL NOT NULL,
-  cause       TEXT NOT NULL CHECK (cause IN ('seed','bath','offscreen_bath','swim','rain','fight','work','travel','groom')),
+  cause       TEXT NOT NULL CHECK (cause IN ('seed','bath','offscreen_bath','swim','rain','fight','work','travel','groom','debug')),
   dirt        REAL NOT NULL DEFAULT 0,
   blood       REAL NOT NULL DEFAULT 0,
   site_id     INTEGER REFERENCES bathing_site(site_id),

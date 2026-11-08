@@ -170,6 +170,10 @@ On with `MANTELLA_LIVING_WORLD=1`. Switch it off with `set MANTELLA_LW_HYGIENE=0
   people in the conversation, once per state (`hygiene_notice`), coloured by their own standards.
   No LLM calls.
 
+Test command: say or type "debug max dirt" to an NPC to make yourself filthy and bloodied ("debug max dirt
+on Hod" for an NPC in the conversation), and "debug clean" to bathe at once. Off with
+`MANTELLA_LW_HYGIENE_DEBUG=0`.
+
 What someone with no clothes on looks like depends on the body mods: `set MANTELLA_LW_UNDRESSED_LOOK=`
 `underwear` (vanilla bodies), `female_nude` (CBBE / BHUNP; the default) or `nude` (also SOS / TNG). The game
 now sends each person's sex on attire records.
