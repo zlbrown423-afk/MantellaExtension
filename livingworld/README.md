@@ -149,7 +149,51 @@ are still recorded). No AI call is made for any of it except one more field in t
 | Prompt | `memory/recall.py` | Up to 3 things the NPC was told, with who told them and how sure they are ("I'm not sure I believe it. I did not see it myself."), and a line on how they feel about the player from their own relationship values (`v_relationship`, now with respect, admiration and suspicion) |
 | Children | `store/minors.py`, `npc.is_child` | Child NPCs are left out of everything Living World works out: no grabs, clothing, drinking, witnesses, memories, seed, gossip or reputation. Recognised by Mantella's character list (child voices), a child race or voice type, and on the game side by `Actor.IsChild()` |
 
+## Romance between NPCs (R1: off screen)
+
+Off unless you set `MANTELLA_LW_ROMANCE=1` (on top of `MANTELLA_LIVING_WORLD=1`). No AI call and no animation:
+everything is decided on the server and recorded as having happened off screen (`encounter.mode = 'offscreen'`).
+
+| Part | Where | What it does |
+| --- | --- | --- |
+| Tables | `store/migrations/005_romance.sql` | `romance_bond_change` + `v_romance_bond` (what a pair agreed: courting, dating, partners, betrothed, married, affair, ended), `place`, `encounter`, `consent_decision`; `v_relationship` gains intimacy, commitment, satisfaction and jealousy. All on the save timeline, so loading an older save rolls romance back |
+| Seed | `social/data/riverwood.json` (`romance`, `places`) | Romance traits per person (romantic, drive, monogamy, jealous, flirtatious, shy, modesty, attracted_to, intimacy_boundary) and the places people can be alone. Hod is curious and flirts; Gerdur keeps to him less firmly and his flirting hurts her, so she is the likeliest to stray. Seeded spouses start out married |
+| Simulation | `social/romance.py` | Caught up with gossip in quarter-day steps. Attraction drifts toward a fixed per-pair "spark" (most pairs have none); people with strong private interest ask to court, rarely ask for an affair; a no gets a cooldown and two nos end the asking; bonded pairs spend evenings and, at night, private time in the most private free place; taken people may flirt where others see; jealousy and unhappiness can end a bond; exes with closeness left may reconcile. Paced slowly: at most one new courtship or affair a week in a village, one bond change per person every 3 days, one night together per pair per day |
+| Consent | `social/consent.py` | Each person's own yes, asked separately at invite, arrival and start, logged with its reasons. Hard limits first (child, the person's own boundary for the bond stage, fear, anger, grief, very low mood, heavily drunk, not private enough), then their own wish against their own threshold. Never reads gifts, gold, debts, rank, the other's wish or the player. Drink never raises a yes. Saying no costs the person who says it nothing |
+| Consequences | `social/claims.py`, `romance.on_learned` | Romance events become claims (flirted with, spent the night with, broke up with, married...). Inn staff and housemates may notice; private claims spread mostly between close people. A partner who sees or hears of a flirt or a night elsewhere gets jealous, less satisfied and (for a night) trusts less. Encounters never raise attraction or trust |
+| Prompt | `memory/recall.py` | The NPC's own love life in their words ("Hod is my spouse, but I've been jealous lately", "I've been secretly seeing Faendal...") |
+
 Everything is on the save timeline: loading an older save takes back the gossip that happened after it.
+
+## Hygiene (H1: who is clean, who is grimy, who notices)
+
+On with `MANTELLA_LIVING_WORLD=1`. Switch it off with `set MANTELLA_LW_HYGIENE=0`. Plan:
+`hygiene/` and the "NPC Bathing & Hygiene" plan doc.
+
+- Cleanliness is replayed from `hygiene_change` (migration 006) on the save timeline: dirt builds up at a
+  daily rate from each person's work, fights add dirt and blood, swimming washes some off, a bath clears it.
+- Each NPC has their own habits (`hygiene/profile.py`): how clean they want to be, how often they bathe,
+  when in the day. Defaults come from their work and a per-person draw seeded with their form id; sex is
+  never an input. Set any of `hygiene_standard`, `bath_interval_days`, `work_dirt_rate`, `bath_window` in
+  `persona_version.traits_json` to override.
+- NPCs bathe off screen for now: when someone comes up in conversation, the baths they would have taken
+  since are written in at their usual times. Visible bathing near the player is milestone H2.
+- The game sends a `fight` record for the player and each adult ally once a fight ends (lowest health
+  share), and a `swim` record when the player stops swimming. No other game work.
+- Prompt lines: the NPC's own state (grimy, bloodied, freshly bathed), and what they notice about the
+  people in the conversation, once per state (`hygiene_notice`), coloured by their own standards.
+  No LLM calls.
+
+Test command: say or type "debug max dirt" to an NPC to make yourself filthy and bloodied ("debug max dirt
+on Hod" for an NPC in the conversation), and "debug clean" to bathe at once. Off with
+`MANTELLA_LW_HYGIENE_DEBUG=0`.
+
+What someone with no clothes on looks like depends on the body mods: `set MANTELLA_LW_UNDRESSED_LOOK=`
+`underwear` (vanilla bodies), `female_nude` (CBBE / BHUNP; the default) or `nude` (also SOS / TNG). The game
+now sends each person's sex on attire records.
+
+Migrations are now applied by version number present, not by "above the highest", so feature branches
+(005 romance, 006 hygiene) can merge in either order.
 
 ## Mood meter and quiet vanilla chatter
 
@@ -174,7 +218,7 @@ tables or attraction. No AI call is made for it.
 | Part | Where | What it does |
 | --- | --- | --- |
 | Templates | `work/data/riverwood_work.json` | Real needs per person: Gerdur needs 10 pieces of firewood split and stacked for the mill from Last Seed to Sun's Dawn (Hod and Faendal cannot keep up). Months, working hours, outdoor weather, who she would ask, pay (50 gold), size, deadline (3 days from agreeing), cooldown. Edit freely |
-| Store | `work/tasks.py`, migration 006 (`task`, `task_change`, `v_task`) | States available, offered, accepted, in progress, paused, completed, failed, expired; every step is a `task.*` world event and a change row on the save timeline, so an older save rolls tasks back |
+| Store | `work/tasks.py`, migration 007 (`task`, `task_change`, `v_task`) | States available, offered, accepted, in progress, paused, completed, failed, expired; every step is a `task.*` world event and a change row on the save timeline, so an older save rolls tasks back |
 | Upkeep | `work/needs.py` | At conversation start: opens a need when the season fits and the giver is free, lapses needs nobody took, expires missed deadlines, pauses outdoor work at night or in rain and resumes it |
 | Prompt | `work/prompts.py` | "Work on Gerdur's mind": the need and why, the pay, that the player may say no; or how far the agreed work has got; or how it ended in the last 3 days. Asks only during working hours, in fit weather, someone she trusts enough, and not again within a day of a no |
 | Actions | `actions/task_*.json` | AgreeTask (player clearly agreed: records a `promise` and the deadline), CheckTask (she looks it over; only real progress counts), ReleaseTask (player backs out, or she calls it off). Server only; the game needs nothing |
@@ -182,9 +226,6 @@ tables or attraction. No AI call is made for it.
 | Consequences | `work/consequences.py` | Done: trust, affinity, respect, familiarity up for the giver toward the worker (more with admiration when on time, more than asked, in good moods; less after rough handling), a first-person memory, a `favor` obligation, and a `helped` claim that gossip spreads. Let down: trust and respect down, harder each time, half as much for backing out openly, a `let_down` claim. After 2+ let-downs with low reliability, nobody asks again and says why |
 | Who wants a word | `mantella_lw_wants_a_word` on the start reply | `Name|plugin|base id;...` of people with work they would offer the player now (read by the game's approach step in W2) |
 | Developer tool | `python -m livingworld.work.dev --db <world>.sqlite <command>` | `list`, `templates`, `show`, `explain Gerdur`, `create`, `offer` (forced, next conversation), `give`, `complete`, `fail`, `deadline --in`, `advance --days`, `reset`. Refuses to write while the Mantella server runs |
-
-Migrations are now applied by version number whether or not a higher one is already in the database,
-so features developed side by side (romance 005, work 006) can merge in either order.
 
 ### Upstream patches
 

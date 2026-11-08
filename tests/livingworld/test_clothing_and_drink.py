@@ -134,7 +134,7 @@ def test_npc_knows_their_own_state_and_who_saw(tmp_path):
         undressed(actors.gerdur(), 3.52, witnesses=[seen(actors.hod(), 3.0)]), dressed(PLAYER, 3.52)])
     db = open_db(tmp_path)
     (own,) = memories(db, "Gerdur")
-    assert own["content"] == "I had no clothes or armor on, only underclothes in Riverwood. Hod saw me."
+    assert own["content"] == "I had no clothes or armor on, nothing at all in Riverwood. Hod saw me."
     assert own["source_kind"] == "experienced"
     assert len(memories(db, "Hod")) == 1
     assert "Gerdur has no clothes or armor on right now" in prompt
@@ -251,9 +251,9 @@ def test_npc_who_chose_to_undress_and_witnesses_remember_it_as_her_choice(tmp_pa
     (event,) = db.execute("SELECT * FROM world_event WHERE type = 'attire'").fetchall()
     assert json.loads(event["payload_json"])["chosen"] is True
     (own,) = memories(db, "Gerdur")
-    assert own["content"] == "I chose to take off my clothes, down to my underclothes in Riverwood. Hod saw me."
+    assert own["content"] == "I chose to take off my clothes in Riverwood, all of them. Hod saw me."
     (h,) = memories(db, "Hod")
-    assert h["content"] == "I saw Gerdur take off their clothes, down to their underclothes in Riverwood."
+    assert h["content"] == "I saw Gerdur take off their clothes in Riverwood, leaving them naked."
     assert db.execute("SELECT COUNT(*) FROM relationship_change").fetchone()[0] == 0
 
 

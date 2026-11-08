@@ -60,4 +60,4 @@ SELECT t.*,
        EXISTS (SELECT 1 FROM v_task_change c WHERE c.task_id = t.task_id AND c.reason = 'reset by developer') AS is_reset
 FROM task t JOIN v_timeline_scope s ON s.timeline_id = t.timeline_id AND t.created_gt <= s.cutoff_gt;
 
-INSERT INTO schema_version(version, note) VALUES (6, 'work: NPC tasks and shared work');
+INSERT INTO schema_version(version, note) VALUES (7, 'work: NPC tasks and shared work');

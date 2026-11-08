@@ -43,10 +43,11 @@ class Recall:
     last_spoke: str | None = None
     opinion: str | None = None                       # how they feel about the player right now
     heard: list[str] = field(default_factory=list)  # news other people told them
+    romance: list[str] = field(default_factory=list)  # their own love life (social/romance.py)
     fresh_perceptions: int = 0   # things they saw or went through recently and have not had a chance to raise
 
     def text(self) -> str:
-        if not (self.facts or self.memories or self.last_spoke or self.opinion or self.heard):
+        if not (self.facts or self.memories or self.last_spoke or self.opinion or self.heard or self.romance):
             return ""
         parts = [f"What {self.name} knows and remembers (only {self.name} knows this; "
                  f"anything not listed here, {self.name} does not know):"]
@@ -55,6 +56,7 @@ class Recall:
         parts += [f"- {line}" for line in self.facts]
         parts += [f"- {line}" for line in self.memories]
         parts += [f"- {line}" for line in self.heard]
+        parts += [f"- {line}" for line in self.romance]
         if self.opinion:
             parts.append(f"- {self.opinion}")
         if self.fresh_perceptions:
@@ -102,6 +104,10 @@ def recall_for(store: WorldStore, npc_id: int, now_gt: float, player_id: int | N
             recall.last_spoke = f"I last spoke with {player} {time_ago(now_gt - last)}."
 
     _heard(store, recall, now_gt)
+    from livingworld.social import romance
+    if romance.romance_enabled():
+        with store.reading() as db:
+            recall.romance = romance.recall_lines(db, npc_id, now_gt)
     if player_id is not None:
         recall.opinion = opinion_line(store, npc_id, player_id)
 

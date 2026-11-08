@@ -59,15 +59,32 @@ def consume(actor_json: dict[str, Any], item: str, game_days: float, is_food: bo
 
 
 def attire(actor_json: dict[str, Any], cover: str, game_days: float, body: str = "", location: str = "Riverwood",
-           witnesses: list[str] | None = None, key: str | None = None, via: str | None = None) -> str:
+           witnesses: list[str] | None = None, key: str | None = None, via: str | None = None,
+           sex: str | None = None) -> str:
     """What ``actor_json`` wears in the body slot: cover is 'clothing', 'armor' or 'none'.
     The game lists witnesses only when cover is 'none'. ``via='action'``: the NPC chose it (Undress / Dress)."""
     parts = ["v=1", f"key={key or _key('attire')}", "type=attire", f"gt={game_days}", f"loc={location}",
              f"actor={actor_field(actor_json)}", f"body={body}", f"cover={cover}"]
     if via:
         parts.append(f"via={via}")
+    if sex:
+        parts.append(f"sex={sex}")
     parts += [f"w={w}" for w in witnesses or []]
     return "|".join(parts)
+
+
+def fight(actor_json: dict[str, Any], hp: float, game_days: float, location: str = "Riverwood",
+          key: str | None = None) -> str:
+    """Someone who fought beside the player, sent when the player's fight ends (``hp``: lowest health share)."""
+    return "|".join(["v=1", f"key={key or _key('fight')}", "type=fight", f"gt={game_days}", f"loc={location}",
+                     f"actor={actor_field(actor_json)}", f"hp={hp}"])
+
+
+def swim(actor_json: dict[str, Any], seconds: float, game_days: float, location: str = "Riverwood",
+         key: str | None = None) -> str:
+    """The player stopped swimming after ``seconds``."""
+    return "|".join(["v=1", f"key={key or _key('swim')}", "type=swim", f"gt={game_days}", f"loc={location}",
+                     f"actor={actor_field(actor_json)}", f"dur={seconds}"])
 
 
 def purchase(buyer_json: dict[str, Any], seller_json: dict[str, Any], item: str, quantity: int, gold: int,

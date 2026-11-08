@@ -37,6 +37,17 @@ def gossipiness() -> dict[tuple[str, str], float]:
     return out
 
 
+def romance_traits() -> dict[tuple[str, str], dict[str, Any]]:
+    """(plugin, base_form_id) -> the seed's romance traits for that person (see "_romance_about")."""
+    out = {}
+    for seed in seeds():
+        romance = seed.get("romance") or {}
+        for p in seed["people"]:
+            if p["key"] in romance:
+                out[(p["plugin"], _local_id(p["base_id"]))] = dict(romance[p["key"]])
+    return out
+
+
 def _person_ids(db, seed: dict[str, Any]) -> dict[str, int]:
     found = {}
     for p in seed["people"]:
@@ -98,18 +109,28 @@ class Seeder:
                 continue
             back = r.get("back") or {}
             values = (float(r.get("trust", 0)), float(r.get("affinity", 0)), float(r.get("respect", 0)),
-                      float(r.get("familiarity", 0)))
+                      float(r.get("familiarity", 0)), float(r.get("attraction", 0)))
             _upsert(db, a, b, r.get("kinship"), r.get("status", "acquaintance"), values, gt)
             if not r.get("one_way"):
                 _upsert(db, b, a, back.get("kinship", r.get("kinship")), back.get("status", r.get("status", "acquaintance")),
                         values, gt)
+        for place in seed.get("places") or []:
+            residents = [ids[k] for k in place.get("residents", []) if k in ids]
+            staff = community_ids.get(place.get("staff", ""))
+            db.execute("INSERT INTO place (place_key, name, location, kind, residents_json, staff_household_id, privacy,"
+                       " child_in_home, bed_ref) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(place_key) DO UPDATE SET"
+                       " name = excluded.name, location = excluded.location, kind = excluded.kind,"
+                       " residents_json = excluded.residents_json, staff_household_id = excluded.staff_household_id,"
+                       " privacy = excluded.privacy, child_in_home = excluded.child_in_home, bed_ref = excluded.bed_ref",
+                       (place["key"], place["name"], place.get("location"), place["kind"], json.dumps(residents), staff,
+                        float(place["privacy"]), int(bool(place.get("child_in_home"))), place.get("bed_ref")))
 
 
 def _upsert(db, from_id: int, to_id: int, kinship: str | None, status: str, values: tuple, gt: float) -> None:
-    trust, affinity, respect, familiarity = values
+    trust, affinity, respect, familiarity, attraction = values
     db.execute("INSERT INTO relationship (from_id, to_id, kinship, status, trust, affinity, respect, familiarity,"
-               " updated_gt) VALUES (?,?,?,?,?,?,?,?,?)"
+               " attraction, updated_gt) VALUES (?,?,?,?,?,?,?,?,?,?)"
                " ON CONFLICT(from_id, to_id) DO UPDATE SET kinship = excluded.kinship, status = excluded.status,"
                " trust = excluded.trust, affinity = excluded.affinity, respect = excluded.respect,"
-               " familiarity = excluded.familiarity, updated_gt = excluded.updated_gt",
-               (from_id, to_id, kinship, status, trust, affinity, respect, familiarity, gt))
+               " familiarity = excluded.familiarity, attraction = excluded.attraction, updated_gt = excluded.updated_gt",
+               (from_id, to_id, kinship, status, trust, affinity, respect, familiarity, attraction, gt))
