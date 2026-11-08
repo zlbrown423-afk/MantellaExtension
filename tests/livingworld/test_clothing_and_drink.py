@@ -25,6 +25,7 @@ HOUR = 1 / 24
 @pytest.fixture(autouse=True)
 def living_world_inline(monkeypatch):
     monkeypatch.setenv(ENV_VAR, "1")
+    monkeypatch.setenv("MANTELLA_LW_TASKS", "0")   # these tests count every world event; tasks add their own
     monkeypatch.setattr(LivingWorld, "start_workers", False)
 
 

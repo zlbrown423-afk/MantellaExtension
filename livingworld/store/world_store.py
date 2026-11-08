@@ -58,16 +58,16 @@ class WorldStore:
             return 0
         return self._conn.execute("SELECT COALESCE(MAX(version), 0) FROM schema_version").fetchone()[0]
 
-    def _applied_versions(self) -> set[int]:
+    def applied_versions(self) -> set[int]:
         if self.schema_version() == 0:
             return set()
-        return {row[0] for row in self._conn.execute("SELECT version FROM schema_version")}
+        return {r[0] for r in self._conn.execute("SELECT version FROM schema_version")}
 
     def migrate(self) -> None:
+        """Apply every migration not yet recorded, in version order. A lower-numbered file that arrives
+        after a higher one (two features developed side by side) is still applied."""
         with self._lock:
-            # Apply every file not applied yet, not just those above the highest version: features land
-            # in separate pull requests, so a lower-numbered file can arrive after a higher one.
-            applied = self._applied_versions()
+            applied = self.applied_versions()
             for version, sql in _migration_files():
                 if version in applied:
                     continue
