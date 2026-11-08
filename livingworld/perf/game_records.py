@@ -13,8 +13,9 @@ The Living World build of Mantella-Spell watches its own script timing (see ``Ma
 event for that hand during the hold (a healthy hold is 1 and 1), ``dups`` the repeated grab events that were
 ignored, ``short`` holds too short to count. ``ticks`` is how many times the probe ran (every half second
 while something is held); ``lag_avg``/``lag_max`` are how late, in seconds, each tick ran against when it
-was asked for, and ``stalls`` how many ticks ran more than a second late. ``grab_ms`` is how long the grab
-handler took, game real time.
+was asked for, and ``stalls`` how many ticks ran more than a second late. ``grab_ms`` is how long working out
+the grabbed body area took, game real time, and ``noarea`` how many grabs skipped it because another was
+still being worked out (each bone position read waits for the game's main thread).
 
 ``what=stall``: a regular script tick outside the probe ran ``lag`` seconds late; ``held`` = 1 if an NPC
 was being held at the time.
@@ -30,7 +31,7 @@ from typing import Any
 
 KEY_REALTIME = "mantella_lw_rt"
 _NUMBERS = ("rt0", "rt1", "grabs", "drops", "dups", "short", "ticks", "lag_avg", "lag_max", "stalls", "grab_ms",
-            "lag", "held", "gt")
+            "lag", "held", "gt", "noarea")
 
 
 def is_perf_record(raw: str) -> bool:
