@@ -58,11 +58,18 @@ class WorldStore:
             return 0
         return self._conn.execute("SELECT COALESCE(MAX(version), 0) FROM schema_version").fetchone()[0]
 
+    def applied_versions(self) -> set[int]:
+        if self.schema_version() == 0:
+            return set()
+        return {r[0] for r in self._conn.execute("SELECT version FROM schema_version")}
+
     def migrate(self) -> None:
+        """Apply every migration not yet recorded, in version order. A lower-numbered file that arrives
+        after a higher one (two features developed side by side) is still applied."""
         with self._lock:
-            current = self.schema_version()
+            applied = self.applied_versions()
             for version, sql in _migration_files():
-                if version <= current:
+                if version in applied:
                     continue
                 # executescript commits on its own, so wrap the file in an explicit transaction
                 self._conn.executescript(f"BEGIN;\n{sql}\nCOMMIT;")

@@ -6,6 +6,9 @@ code path: Mantella's /mantella route, the store, recall into each NPC's own pro
 """
 import json
 import sqlite3
+from livingworld.store.world_store import _migration_files
+
+LATEST = max(v for v, _ in _migration_files())
 
 import pytest
 
@@ -24,6 +27,7 @@ FOREARM = "NPC L Forearm [LLar]"
 @pytest.fixture(autouse=True)
 def living_world_inline(monkeypatch):
     monkeypatch.setenv(ENV_VAR, "1")
+    monkeypatch.setenv("MANTELLA_LW_TASKS", "0")   # these tests count every world event; tasks add their own
     monkeypatch.setattr(LivingWorld, "start_workers", False)
 
 
@@ -306,7 +310,7 @@ def test_migration_keeps_existing_memories(tmp_path):
     conn.close()
 
     store = WorldStore(path)
-    assert store.schema_version() == 4
+    assert store.schema_version() == LATEST
     assert tuple(store.query("SELECT content, created_by, source_kind FROM memory")[0]) == \
         ("I met Torvar at the mill.", "extraction", None)
     assert store.query("SELECT rowid FROM memory_fts WHERE memory_fts MATCH 'mill'")[0][0] == 1

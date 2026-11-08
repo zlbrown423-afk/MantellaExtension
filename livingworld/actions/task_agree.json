@@ -1,0 +1,23 @@
+{
+    "identifier": "mantella_lw_task_agree",
+    "name": "AgreeTask",
+    "description": "Use only when the NPC has asked the player for help with a piece of work and the player has clearly agreed to do it. Records that the player took the work on. If the player hesitates, refuses or changes the subject, do not use it.",
+    "note": "Living World tasks (MANTELLA_LIVING_WORLD=1). Handled by the Living World server (livingworld/work); the game needs nothing for it.",
+    "key": "AgreeTask",
+    "parameters": {
+        "source": {
+            "type": "string",
+            "description": "The NPC whose work this is.",
+            "scope": "conversation"
+        }
+    },
+    "required": ["source"],
+    "prompt": "If you asked the player to help with your work and they have clearly agreed, begin your response with '{key}:'",
+    "allowed_games": ["skyrim"],
+    "requires_response": false,
+    "is-interrupting": false,
+    "allow_repeat": true,
+    "one-on-one": true,
+    "multi-npc": true,
+    "radiant": false
+}

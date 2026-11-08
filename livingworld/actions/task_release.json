@@ -1,0 +1,23 @@
+{
+    "identifier": "mantella_lw_task_release",
+    "name": "ReleaseTask",
+    "description": "Use only when the player has agreed to do some work for the NPC and now clearly says they cannot or will not finish it, or the NPC calls the arrangement off. Ends the arrangement; the NPC remembers it.",
+    "note": "Living World tasks (MANTELLA_LIVING_WORLD=1). Handled by the Living World server (livingworld/work); the game needs nothing for it.",
+    "key": "ReleaseTask",
+    "parameters": {
+        "source": {
+            "type": "string",
+            "description": "The NPC whose work this is.",
+            "scope": "conversation"
+        }
+    },
+    "required": ["source"],
+    "prompt": "If the player tells you they cannot finish the work they agreed to do for you, or you call it off, begin your response with '{key}:'",
+    "allowed_games": ["skyrim"],
+    "requires_response": false,
+    "is-interrupting": false,
+    "allow_repeat": true,
+    "one-on-one": true,
+    "multi-npc": true,
+    "radiant": false
+}

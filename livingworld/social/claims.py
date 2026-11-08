@@ -92,6 +92,15 @@ def appraise(db, event) -> int | None:
         detail, valence = "", 0.3
         if is_child(db, obj):
             return None
+    elif etype in ("task.completed", "task.failed", "task.expired") and obj is not None:
+        # work/: someone helped a neighbour, or agreed to and let them down
+        title = db.execute("SELECT title FROM task WHERE task_id = ?", (payload.get("task_id"),)).fetchone()
+        title = title[0] if title else "with some work"
+        if etype == "task.completed":
+            act_name, detail, valence = "helped", f" {title}", 0.4
+        else:
+            act_name, detail, valence = "let_down", f", who needed help to {title}", -0.4
+        magnitude, sensitivity = 0.3, "public"
     else:
         return None
 

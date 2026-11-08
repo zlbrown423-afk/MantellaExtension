@@ -23,6 +23,8 @@ from livingworld.perception import awareness
 from livingworld.perception.intoxication import drink_state
 from livingworld.perception.pipeline import PerceptionPipeline
 from livingworld.social.world import SocialWorld
+from livingworld.work import tasks_enabled
+from livingworld.work.service import ACTIONS as TASK_ACTIONS, Scene as WorkScene, Work
 from livingworld.perception.records import KEY_ATTIRE, BadRecord, parse_record, records_from_context
 from livingworld.store.conversation_log import ConversationLog
 from livingworld.store.timeline import resolve_load
@@ -47,6 +49,7 @@ MOOD_ENV = "MANTELLA_LW_MOOD_METER"
 QUIET_ENV = "MANTELLA_LW_QUIET_CHATTER"
 KEY_MOOD = "mantella_lw_mood"                    # sent with an NPC line: the meter text to show
 KEY_QUIET_CHATTER = "mantella_lw_quiet_chatter"  # sent with the start reply: mute vanilla chatter until the end
+KEY_WANTS_A_WORD = "mantella_lw_wants_a_word"    # sent with the start reply: people with work to offer (game side: W2)
 
 
 def _never_raises(func: Callable) -> Callable:
@@ -91,6 +94,9 @@ class LivingWorld:
         self._moods_to_send: dict[str, str] = {}    # speaker ref id -> meter text to send with their next line
         self._social: dict[int, SocialWorld] = {}   # id(store) -> reputation and gossip for that world
         self._social_refreshed: int | None = None   # conv_id the social world was last brought up to date for
+        self.tasks = enabled and tasks_enabled()    # NPC tasks and shared work (livingworld/work)
+        self._work: dict[int, Work] = {}            # id(store) -> tasks for that world
+        self._work_refreshed: int | None = None     # conv_id tasks were last brought up to date for
         LivingWorld.latest = self
 
     @classmethod
@@ -221,6 +227,8 @@ class LivingWorld:
 
     @_never_raises
     def npc_line(self, sentence: Any, context: Any) -> None:
+        if self.conv_id is not None and getattr(sentence, "actions", None):
+            self._task_actions(sentence, context)
         if self.conv_id is None or sentence.is_narration or sentence.is_system_generated_sentence:
             return
         text = (sentence.text or "").strip()
@@ -267,6 +275,8 @@ class LivingWorld:
         for c in self._context.npcs_in_conversation.get_all_characters():
             present[self._npc_ids.get(c.ref_id) or self._register(c, now)] = c.name
         self._refresh_social(now, list(present))
+        self._refresh_work(now)
+        scene = self._scene(player_id, player.name if player else "the player", list(present))
         blocks = []
         for character in characters:
             if character.is_player_character:
@@ -284,6 +294,9 @@ class LivingWorld:
                 blocks.append(f"What {character.name} notices right now:\n" + "\n".join(f"- {line}" for line in noticed))
             if self.mood_meter and player is not None:
                 blocks.append("\n".join(moods.prompt_lines(character.name, self._carried_mood(npc_id, now))))
+            work = self._work_lines(npc_id, character.name, scene)
+            if work:
+                blocks.append(f"Work on {character.name}'s mind:\n" + "\n".join(f"- {line}" for line in work))
         return "\n\n".join(blocks)
 
     def _social_for(self, store: WorldStore) -> SocialWorld:
@@ -301,6 +314,74 @@ class LivingWorld:
         except Exception:
             self.errors += 1
             logger.exception("Living World: could not bring gossip up to date; carrying on without it")
+
+    # ---- tasks and shared work (livingworld/work) ----
+    def _work_for(self, store: WorldStore) -> Work:
+        if id(store) not in self._work:
+            self._work[id(store)] = Work(store)
+        return self._work[id(store)]
+
+    def _scene(self, player_id: int | None, player_name: str, present: list[int]) -> WorkScene:
+        context = self._context
+        hour = getattr(context, "ingame_time", None)
+        weather = getattr(context, "_Context__weather", None)   # Mantella keeps it private; read only
+        return WorkScene(context.game_days, int(hour) if hour is not None else int((context.game_days % 1) * 24),
+                         weather or None, player_id, player_name, present)
+
+    def _refresh_work(self, now: float) -> None:
+        """Once per conversation, before the first prompt: open needs, expire deadlines, pause outdoor work."""
+        if not self.tasks or self._work_refreshed == self.conv_id:
+            return
+        self._work_refreshed = self.conv_id
+        try:
+            scene = self._scene(None, "", [])
+            result = self._work_for(self.store).refresh(now, scene.hour, scene.weather)
+            if result.opened or result.expired or result.lapsed:
+                logger.log(23, f"Living World work: opened {result.opened}, expired {result.expired}, "
+                               f"lapsed {result.lapsed}")
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not bring tasks up to date; carrying on without them")
+
+    def _work_lines(self, npc_id: int, name: str, scene: WorkScene) -> list[str]:
+        if not self.tasks:
+            return []
+        try:
+            return self._work_for(self.store).lines_for(npc_id, name, scene)
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not add task lines; leaving them out")
+            return []
+
+    def _player_scene(self) -> WorkScene | None:
+        context = self._context
+        if context is None:
+            return None
+        now = context.game_days
+        player = context.npcs_in_conversation.get_player_character()
+        player_id = (self._npc_ids.get(player.ref_id) or self._register(player, now)) if player else None
+        present = [self._npc_ids.get(c.ref_id) or self._register(c, now)
+                   for c in context.npcs_in_conversation.get_all_characters()]
+        return self._scene(player_id, player.name if player else "the player", present)
+
+    def _task_actions(self, sentence: Any, context: Any) -> None:
+        if not self.tasks or context is not self._context:
+            return
+        wanted = [a for a in sentence.actions if isinstance(a, dict) and a.get("identifier") in TASK_ACTIONS]
+        if not wanted:
+            return
+        scene = self._player_scene()
+        for action in wanted:
+            # the giver: the NPC named in the call (advanced actions), else the speaker
+            source = (action.get("arguments") or {}).get("source")
+            name = source[0] if isinstance(source, list) and source else source
+            who = next((c for c in context.npcs_in_conversation.get_all_characters()
+                        if name and c.name.lower() == str(name).lower()), sentence.speaker)
+            if who.is_player_character:
+                continue
+            npc_id = self._npc_ids.get(who.ref_id) or self._register(who, scene.now)
+            result = self._work_for(self.store).action(action["identifier"], npc_id, scene)
+            logger.log(23, f"Living World work: {who.name} {action['identifier']}: {result}")
 
     def _carried_mood(self, npc_id: int, now: float) -> "moods.Mood | None":
         try:
@@ -326,6 +407,10 @@ class LivingWorld:
         with self.store.transaction() as db:
             moods.save(db, npc_id, mood, now)
             stage = drink_state(db, npc_id, now).stage
+        if self.tasks:
+            scene = self._player_scene()
+            if scene is not None:
+                self._work_for(self.store).mood(npc_id, mood.score, scene)
         text = moods.meter_text(character.name, mood, stage)
         logger.log(23, f"Living World mood: {text}")
         if self._moods_shown.get(npc_id) != text:
@@ -343,7 +428,26 @@ class LivingWorld:
 
     def start_reply_keys(self) -> dict[str, Any]:
         """Extra keys for the conversation start reply."""
-        return {KEY_QUIET_CHATTER: True} if self.quiet_chatter else {}
+        keys: dict[str, Any] = {KEY_QUIET_CHATTER: True} if self.quiet_chatter else {}
+        wanting = self._wants_a_word()
+        if wanting:
+            keys[KEY_WANTS_A_WORD] = wanting
+        return keys
+
+    def _wants_a_word(self) -> str:
+        """'Gerdur|Skyrim.esm|0x0001347C;...': people with work they would offer the player now."""
+        if not self.tasks or self.store is None or self._context is None:
+            return ""
+        try:
+            scene = self._player_scene()
+            ids = self._work_for(self.store).wants_a_word(scene) if scene else []
+            rows = [self.store.query("SELECT display_name, plugin, base_form_id FROM npc WHERE npc_id = ?", (i,))
+                    for i in ids]
+            return ";".join(f"{r[0][0]}|{r[0][1]}|{r[0][2]}" for r in rows if r)
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not list who wants a word; leaving it out")
+            return ""
 
     def _noticed(self, npc_id: int, name: str, now: float, present: dict[int, str]) -> list[str]:
         try:
@@ -457,6 +561,14 @@ class LivingWorld:
                 "SELECT COALESCE(MAX(game_time), (SELECT started_gt FROM conversation WHERE conv_id = ?))"
                 " FROM utterance WHERE conv_id = ?", (self.conv_id, self.conv_id))
         ConversationLog(self.store).close(self.conv_id, game_days)
+        if self.tasks:
+            try:
+                declined = self._work_for(self.store).conversation_closed(game_days)
+                if declined:
+                    logger.log(23, f"Living World work: offers not taken up: tasks {declined}")
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not close task offers")
         logger.log(23, f"Living World: conversation {self.conv_id} closed at game day {game_days:.2f}")
         if self.store.scalar("SELECT COUNT(*) FROM utterance WHERE conv_id = ?", (self.conv_id,)):
             JobQueue(self.store).enqueue(EXTRACT_JOB, {"conv_id": self.conv_id}, f"extract:conv:{self.conv_id}")

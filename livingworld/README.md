@@ -165,6 +165,27 @@ Both are on with `MANTELLA_LIVING_WORLD=1`. Switch either off with `set MANTELLA
 
 A mood never changes a relationship or what an NPC is willing to do with their body.
 
+## NPC tasks and shared work (W1: server side)
+
+On with `MANTELLA_LIVING_WORLD=1`. Switch off with `set MANTELLA_LW_TASKS=0`. A separate subsystem
+(`work/`): it reaches relationships, memory and gossip only through events, and never touches romance
+tables or attraction. No AI call is made for it.
+
+| Part | Where | What it does |
+| --- | --- | --- |
+| Templates | `work/data/riverwood_work.json` | Real needs per person: Gerdur needs 10 pieces of firewood split and stacked for the mill from Last Seed to Sun's Dawn (Hod and Faendal cannot keep up). Months, working hours, outdoor weather, who she would ask, pay (50 gold), size, deadline (3 days from agreeing), cooldown. Edit freely |
+| Store | `work/tasks.py`, migration 006 (`task`, `task_change`, `v_task`) | States available, offered, accepted, in progress, paused, completed, failed, expired; every step is a `task.*` world event and a change row on the save timeline, so an older save rolls tasks back |
+| Upkeep | `work/needs.py` | At conversation start: opens a need when the season fits and the giver is free, lapses needs nobody took, expires missed deadlines, pauses outdoor work at night or in rain and resumes it |
+| Prompt | `work/prompts.py` | "Work on Gerdur's mind": the need and why, the pay, that the player may say no; or how far the agreed work has got; or how it ended in the last 3 days. Asks only during working hours, in fit weather, someone she trusts enough, and not again within a day of a no |
+| Actions | `actions/task_*.json` | AgreeTask (player clearly agreed: records a `promise` and the deadline), CheckTask (she looks it over; only real progress counts), ReleaseTask (player backs out, or she calls it off). Server only; the game needs nothing |
+| Progress | `work/progress.py` (`work` consumer of the event processor) | `item_given` events (W2 game side: items handed to the giver) count toward the need; reaching it completes the task |
+| Consequences | `work/consequences.py` | Done: trust, affinity, respect, familiarity up for the giver toward the worker (more with admiration when on time, more than asked, in good moods; less after rough handling), a first-person memory, a `favor` obligation, and a `helped` claim that gossip spreads. Let down: trust and respect down, harder each time, half as much for backing out openly, a `let_down` claim. After 2+ let-downs with low reliability, nobody asks again and says why |
+| Who wants a word | `mantella_lw_wants_a_word` on the start reply | `Name|plugin|base id;...` of people with work they would offer the player now (read by the game's approach step in W2) |
+| Developer tool | `python -m livingworld.work.dev --db <world>.sqlite <command>` | `list`, `templates`, `show`, `explain Gerdur`, `create`, `offer` (forced, next conversation), `give`, `complete`, `fail`, `deadline --in`, `advance --days`, `reset`. Refuses to write while the Mantella server runs |
+
+Migrations are now applied by version number whether or not a higher one is already in the database,
+so features developed side by side (romance 005, work 006) can merge in either order.
+
 ### Upstream patches
 
 | File | Change |

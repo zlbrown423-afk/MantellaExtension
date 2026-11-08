@@ -1,0 +1,28 @@
+{
+  "_about": "Work that people in Riverwood genuinely need done, and when it makes sense to ask. Edit freely. giver and helpers are person keys from social/data/riverwood.json ('player' means the player). A need only opens when every check passes: the giver has no other open task, the season (months) fits, and the cooldown since the last one of its kind has passed. It is only offered while the hours and weather fit, and only to someone the giver trusts at least ask_min_trust (-1..1). need.item is matched by name against what the game reports (W2 sends items handed over). reward_gold is what the giver means to pay when the work is done (0 = a favour). size (0..1) scales how much finishing or abandoning it moves the giver's view of the worker. deadline_days counts from when someone agrees; leave it out for no deadline. open_days is how long the need waits for a helper before it lapses.",
+  "_months": "Skyrim months: Morning Star, Sun's Dawn, First Seed, Rain's Hand, Second Seed, Midyear, Sun's Height, Last Seed, Hearthfire, Frostfall, Sun's Dusk, Evening Star.",
+  "templates": [
+    {
+      "key": "mill_firewood",
+      "giver": "gerdur",
+      "community": "riverwood",
+      "location": "Riverwood",
+      "title": "split and stack firewood for the mill",
+      "why": "The mill and half of Riverwood burn wood all winter, and Hod and Faendal cannot keep up with the mill work and the woodpile both",
+      "instructions": "Split logs at the chopping block by the mill and bring the firewood to her.",
+      "need": {"item": "Firewood", "count": 10, "units": "pieces of firewood"},
+      "evidence": ["given"],
+      "helpers": ["hod", "faendal", "player"],
+      "months": ["Last Seed", "Hearthfire", "Frostfall", "Sun's Dusk", "Evening Star", "Morning Star", "Sun's Dawn"],
+      "hours": [7, 20],
+      "outdoors": true,
+      "bad_weather": ["rain", "storm", "thunder", "blizzard"],
+      "ask_min_trust": -0.2,
+      "reward_gold": 50,
+      "size": 0.35,
+      "deadline_days": 3,
+      "open_days": 5,
+      "cooldown_days": 2
+    }
+  ]
+}

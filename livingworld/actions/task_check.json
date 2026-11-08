@@ -1,0 +1,23 @@
+{
+    "identifier": "mantella_lw_task_check",
+    "name": "CheckTask",
+    "description": "The NPC looks over how far the work the player agreed to do has got, for example when the player says they have finished. The NPC's view of the work comes from what they can see, not from what the player claims.",
+    "note": "Living World tasks (MANTELLA_LIVING_WORLD=1). Handled by the Living World server (livingworld/work); the game needs nothing for it.",
+    "key": "CheckTask",
+    "parameters": {
+        "source": {
+            "type": "string",
+            "description": "The NPC whose work this is.",
+            "scope": "conversation"
+        }
+    },
+    "required": ["source"],
+    "prompt": "If the player says they have done the work they agreed to do for you and you look it over, begin your response with '{key}:'",
+    "allowed_games": ["skyrim"],
+    "requires_response": false,
+    "is-interrupting": false,
+    "allow_repeat": true,
+    "one-on-one": true,
+    "multi-npc": true,
+    "radiant": false
+}

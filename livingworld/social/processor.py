@@ -2,7 +2,7 @@
 (``event_cursor``), so every event is handled once, even across crashes and restarts.
 
 Only events visible on the active save timeline are handled; events on a timeline an older save left
-behind are skipped for good. Consumers so far: ``appraisal`` (claims from perceived events). Goals,
+behind are skipped for good. Consumers so far: ``appraisal`` (claims from perceived events) and ``work`` (task progress). Goals,
 player knowledge and body language will register here too.
 """
 from __future__ import annotations
@@ -10,11 +10,13 @@ from __future__ import annotations
 from typing import Callable
 
 from livingworld.social import claims
+from livingworld.work import progress as work_progress
 
 Consumer = Callable[[object, object], object]
 
 CONSUMERS: dict[str, Consumer] = {
     "appraisal": claims.appraise,
+    "work": work_progress.consume,   # task progress from items handed over and work done (livingworld/work)
 }
 
 
