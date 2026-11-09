@@ -212,7 +212,16 @@ now sends each person's sex on attire records.
 Migrations are now applied by version number present, not by "above the highest", so feature branches
 (005 romance, 006 hygiene) can merge in either order.
 
-## Mood meter and quiet vanilla chatter
+## Misheard speech
+
+On with `MANTELLA_LIVING_WORLD=1`. Switch off with `set MANTELLA_LW_HEARING=0`. No extra AI call.
+Code: `dialogue/hearing.py`.
+
+| Part | What it does |
+| --- | --- |
+| Rule | Each prompt tells the NPCs the player's words can arrive garbled. A line that makes no sense gets an in-character check ("Thane, you say?") or a request to say it again, not a literal answer. A clear line with one wrong word is just answered. |
+| Note | Each player line is checked against a list of commonly misheard Skyrim words ("stain of white run" -> "thane of Whiterun", "Kai's" -> "Caius", "yarl" -> "Jarl") and against near misses of the names of the people present ("Gerdar" -> "Gerdur"). Hits are added before the line as a narration note. The player's words are never rewritten. Add words to `MISHEARD`. |
+
 
 Both are on with `MANTELLA_LIVING_WORLD=1`. Switch either off with `set MANTELLA_LW_MOOD_METER=0` or
 `set MANTELLA_LW_QUIET_CHATTER=0`.

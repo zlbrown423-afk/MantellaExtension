@@ -297,6 +297,10 @@ class Conversation:
             new_message: UserMessage = UserMessage(self.__context.config, player_text, player_character.name, False)
             new_message.is_multi_npc_message = self.__context.npcs_in_conversation.contains_multiple_npcs()
             new_message = self.update_game_events(new_message)
+            living_world = getattr(self.__output_manager, "living_world", None) # LIVINGWORLD PATCH: note likely misheard words
+            hearing_note = living_world.hearing_note(player_text, self.__context) if living_world is not None else None # LIVINGWORLD PATCH
+            if hearing_note: # LIVINGWORLD PATCH
+                new_message.add_event([hearing_note]) # LIVINGWORLD PATCH
             self.__messages.add_message(new_message)
             player_voiceline = self.__get_player_voiceline(player_character, player_text)
             text = new_message.text

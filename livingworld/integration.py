@@ -20,6 +20,7 @@ from livingworld.memory.extraction import Extractor
 from livingworld.memory.jobs import JobQueue, JobWorker
 from livingworld.memory.recall import recall_for
 from livingworld import mood as moods
+from livingworld.dialogue import hearing
 from livingworld.perception import awareness
 from livingworld.perception.intoxication import drink_state
 from livingworld.perception.pipeline import PerceptionPipeline
@@ -130,6 +131,7 @@ class LivingWorld:
         self._guard_sent: set[int] = set()          # id(sentence) whose guard actions were handled
         self._guard_refreshed: int | None = None    # conv_id whose duties/probation were brought up to date
         self._player_said: str | None = None        # the player's last line (kept with a duty report)
+        self.hearing = enabled and hearing.hearing_enabled()   # catch misheard speech (MANTELLA_LW_HEARING=0 turns off)
         self.perf_monitor: PerfMonitor | None = None  # MANTELLA_LW_PERF=1 (see livingworld/perf)
         LivingWorld.latest = self
 
@@ -388,7 +390,24 @@ class LivingWorld:
             guard = self._guard_lines(npc_id, character.name)
             if guard:
                 blocks.append(f"The guard, and {character.name}:\n" + "\n".join(f"- {line}" for line in guard))
+        if self.hearing and player is not None:
+            npcs = [c.name for c in characters if not c.is_player_character]
+            if npcs:
+                rule = hearing.prompt_lines(npcs, player.name)
+                blocks.append(f"Hearing {player.name}:\n" + "\n".join(f"- {line}" for line in rule))
         return "\n\n".join(blocks)
+
+    @_never_raises
+    def hearing_note(self, text: str, context: Any) -> str | None:
+        """A narration note naming likely misheard words in the player's line, or None."""
+        if not self.hearing or context is None:
+            return None
+        player = context.npcs_in_conversation.get_player_character()
+        names = [c.name for c in context.npcs_in_conversation.get_all_characters() if not c.is_player_character]
+        note = hearing.note_text(text, names, player.name if player else "The player")
+        if note:
+            logger.log(23, f"Living World: {note}")
+        return note
 
     def _social_for(self, store: WorldStore) -> SocialWorld:
         if id(store) not in self._social:
