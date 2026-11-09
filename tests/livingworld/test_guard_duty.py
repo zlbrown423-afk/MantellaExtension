@@ -38,6 +38,9 @@ def talk(work_dir, day, say=None, npcs=None, location="Whiterun", extra=None, ev
                  if KEY_GUARD_ISSUE in (r.get(comm_consts.KEY_REPLYTYPE_NPCTALK) or {})]
         talk.issued = [line[KEY_GUARD_ISSUE] for line in lines]
         talk.counts = [line.get("mantella_lw_guard_issue_counts") for line in lines]
+        talk.beds = [((r.get(comm_consts.KEY_REPLYTYPE_NPCTALK) or {}).get("mantella_lw_guard_bed_id"),
+                      (r.get(comm_consts.KEY_REPLYTYPE_NPCTALK) or {}).get("mantella_lw_guard_bed_own"))
+                     for _, r in s.exchanges if "mantella_lw_guard_bed_id" in (r.get(comm_consts.KEY_REPLYTYPE_NPCTALK) or {})]
         talk.hints = [h for _, r in s.exchanges for h in ((r.get(comm_consts.KEY_REPLYTYPE_NPCTALK) or {})
                                                            .get("mantella_lw_hints") or [])]
     return llm.dialogue_calls[0].system_prompt if llm.dialogue_calls else ""
@@ -72,7 +75,7 @@ def test_caius_gives_his_recruit_a_duty_that_fits_the_hour_and_rank(tmp_path):
     assert d.key in ("gate_watch", "wall_patrol", "market_watch", "barracks_drill")   # 9 am, recruit: no night watch
     assert f"has a duty for Torvar right now: {d.title}" in prompt
     assert "begin the reply with 'ReportDuty:'" in prompt
-    assert "a bunk in the Whiterun barracks" in prompt
+    assert "a bunk of their own in the Guard Barracks" in prompt
     # the next conversation reminds rather than giving another
     prompt = talk(tmp_path, DAY + 0.02)
     assert len(duties(tmp_path)) == 1 and f"gave Torvar a duty: {d.title}" in prompt
@@ -377,3 +380,15 @@ def test_incidents_come_up_by_themselves_and_go_cold(tmp_path):
     assert opened >= 3 and cold >= 1
     rolls = db.execute("SELECT COUNT(*) FROM world_event WHERE type = 'guard.incident_roll'").fetchone()[0]
     assert rolls == len({int(d) for d in range(4, 14)}) + 0 or rolls >= 10
+
+
+
+def test_a_barracks_bunk_is_given_on_joining_and_taken_back_on_leaving(tmp_path):
+    talk(tmp_path, DAY, say="I want to join the guard.")
+    assert talk.beds == [(0xD46B7, True)]
+    talk(tmp_path, DAY + 0.1, npcs=[whiterun_guard()])
+    assert talk.beds == []                                      # once only
+    talk(tmp_path, DAY + 0.2, say="debug guard dismiss", npcs=[whiterun_guard()])
+    assert talk.beds == [(0xD46B7, False)]                     # on the next line after leaving
+    talk(tmp_path, DAY + 0.3, npcs=[whiterun_guard()])
+    assert talk.beds == []

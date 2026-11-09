@@ -298,6 +298,27 @@ class Guard:
                 return "nothing owed", None
             return f"paid {amount} gold", Issue([org.gold], [amount])
 
+    # ---- the barracks bunk ----
+    def bed_change(self, scene: Scene) -> tuple[O.Item, bool] | None:
+        """The bed the game should give the player (True) or take back (False) now, once each; else None."""
+        if scene.player_id is None:
+            return None
+        with self.store.transaction() as db:
+            svc = S.current(db, scene.player_id)
+            for org in O.orgs():
+                if org.bed is None:
+                    continue
+                granted = S.last_event_gt(db, "bed_granted", scene.player_id, org.key)
+                revoked = S.last_event_gt(db, "bed_revoked", scene.player_id, org.key)
+                serving = svc is not None and svc.org_key == org.key and svc.status in ("probation", "active")
+                if serving and (granted is None or granted < svc.joined_gt or (revoked or -1) > granted):
+                    S.event(db, "bed_granted", [scene.player_id], {"org": org.key}, scene.now, None, [])
+                    return org.bed, True
+                if not serving and granted is not None and (revoked is None or revoked < granted):
+                    S.event(db, "bed_revoked", [scene.player_id], {"org": org.key}, scene.now, None, [])
+                    return org.bed, False
+        return None
+
     # ---- the game's approach step ----
     def wants_a_word(self, scene: Scene) -> list[int]:
         """Leaders met before (not in this conversation) who would invite the player to join, and have not

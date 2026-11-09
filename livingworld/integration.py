@@ -65,6 +65,9 @@ KEY_GUARD_ISSUE = "mantella_lw_guard_issue"      # sent with an NPC line: items 
 KEY_GUARD_ISSUE_IDS = "mantella_lw_guard_issue_ids"          # ...the same items as plugin-relative form IDs (the game reads these)
 KEY_GUARD_ISSUE_PLUGINS = "mantella_lw_guard_issue_plugins"  # ...and the plugin each one comes from
 KEY_GUARD_ISSUE_COUNTS = "mantella_lw_guard_issue_counts"    # ...and how many of each (wages: the gold)
+KEY_GUARD_BED_ID = "mantella_lw_guard_bed_id"            # the barracks bunk: plugin-relative REFR id
+KEY_GUARD_BED_PLUGIN = "mantella_lw_guard_bed_plugin"
+KEY_GUARD_BED_OWN = "mantella_lw_guard_bed_own"          # True: make it the player's; False: unowned again
 # Sent by the Living World build of Mantella-Spell (guard careers): per actor, and in the context
 KEY_IS_GUARD = "mantella_lw_is_guard"            # actor: Actor.IsGuard()
 KEY_CRIME_FACTION = "mantella_lw_crime_faction"  # actor: form ID of Actor.GetCrimeFaction()
@@ -604,6 +607,19 @@ class LivingWorld:
         text = self._moods_to_send.pop(speaker.ref_id, None)
         if text:
             keys[KEY_MOOD] = text
+        if self.guard and self.store is not None:     # each NPC line: joining or leaving can happen mid-conversation
+            try:
+                scene = self._guard_scene()
+                change = self._guard_for(self.store).bed_change(scene) if scene else None
+                if change is not None:
+                    bed, own = change
+                    keys[KEY_GUARD_BED_ID] = int(bed.form_id, 16)
+                    keys[KEY_GUARD_BED_PLUGIN] = bed.plugin
+                    keys[KEY_GUARD_BED_OWN] = own
+                    logger.log(23, f"Living World guard: barracks bunk {bed.form_id} {'given' if own else 'taken back'}")
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not check the barracks bunk; carrying on")
         if self.guard and self.store is not None:
             self._hints_to_send += self._guard_for(self.store).take_notices()   # shift started / over
         if self._hints_to_send:
