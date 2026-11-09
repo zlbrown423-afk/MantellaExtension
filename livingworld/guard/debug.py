@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from livingworld.guard import orgs as O
 
 COMMANDS = ("enlist", "rank", "dismiss", "reinstate", "thane", "status", "duty", "seen", "report", "pay", "record",
-            "probation", "incident", "watch", "training")
+            "probation", "incident", "watch", "training", "suspect")
 
 
 @dataclass(frozen=True)

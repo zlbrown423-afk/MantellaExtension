@@ -60,6 +60,7 @@
       "quarters": "a bunk of their own in the Guard Barracks by the main gate (the guardhouse just inside the gate), with a footlocker at its foot",
       "bed": {"_verified": "Read from the player's Skyrim.esm on 2026-11-09: WhiterunGuardHouse 0x00036ED6 ('Guard Barracks', owned by GuardFactionWhiterun); 0x000D46B7 is its only persistent bed (CommonBed01L).", "name": "Guard Barracks bunk", "plugin": "Skyrim.esm", "ref": "0x000D46B7"},
       "chest": {"_verified": "Read from the player's Skyrim.esm on 2026-11-09: PlayerHouseChest 0x000F3923 ('Chest', UpperChest01.nif), DATA flags 0x00 (never respawns), empty. Placed once by the game at the player's feet the first time they stand by their bunk.", "name": "footlocker", "plugin": "Skyrim.esm", "base": "0x000F3923"},
+      "jail": {"_verified": "Read from the player's Skyrim.esm on 2026-11-09: CrimeFactionWhiterun JAIL leads to WhiterunPrisonMarker 0x000267E4 (persistent) in WhiterunDragonsreachBasement 0x0004A376 'Dragonsreach Dungeon', inside the cell behind WRJailDoor01 0x000A7618 (Adept lock, WhiterunJailKey).", "name": "Dragonsreach Dungeon", "plugin": "Skyrim.esm", "ref": "0x000267E4"},
       "recruit": {
         "min_standing": -0.1,
         "sponsor_bonus": 0.25,

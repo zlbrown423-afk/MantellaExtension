@@ -68,6 +68,8 @@ class PerceptionPipeline:
             return self._guard_watch(record)
         if record.type == "react":
             return self._reaction(record)
+        if record.type == "jail":
+            return self._guard_jail(record)
         if record.type == "hit" and harmless_spell(record.item):
             # an animation, expression or test spell cast on someone is not an attack
             logger.log(23, f"Living World: hit record {record.key} is a harmless spell ({record.item}); not stored")
@@ -202,6 +204,17 @@ class PerceptionPipeline:
                                         record.via or ENC.OBSERVE, gt, record.location)
         logger.log(23, f"Living World guard: watch window {record.win} of duty {record.task} ({record.via}) -> "
                        f"event {event_id}")
+        return Outcome(event_id, duplicate=event_id is None)
+
+    def _guard_jail(self, record: PerceptionRecord) -> Outcome:
+        """G2f: the game locked up someone the player arrested, or let them out (``task`` = the arrest)."""
+        from livingworld.guard import guard_enabled
+        if not guard_enabled():
+            return Outcome(None)
+        from livingworld.guard import arrest as AR
+        with self.store.transaction() as db:
+            event_id = AR.record_jail(db, record.task, record.via, record.game_time, record.location)
+        logger.log(23, f"Living World guard: arrest {record.task} {record.via} -> event {event_id}")
         return Outcome(event_id, duplicate=event_id is None)
 
     def _reaction(self, record: PerceptionRecord) -> Outcome:

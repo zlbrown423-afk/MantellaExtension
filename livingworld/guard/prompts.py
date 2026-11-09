@@ -281,3 +281,66 @@ def pay_line(name: str, player: str, pay) -> str:
     else:
         out += f" Nothing more is owed right now. Do not use {PAY_KEY}."
     return out
+
+
+# ---- G2f arrests ----
+
+def _evidence_text(ev) -> str:
+    return "; ".join(e.why for e in ev)
+
+
+def arrest_note(name: str, player: str, org: O.Org, decision, jail_name: str) -> str:
+    """For the NPC being arrested, added to the player's line: what the rules decided they do."""
+    a = decision.arrest
+    if a.response == "argue":
+        return (f"[{player}, of {org.name}, has just told {name} they are under arrest, but nothing in the guard's "
+                f"record ties {name} to any crime. {name} does not go: {name} protests and demands to know the charge, "
+                f"in {name}'s own way. If {player} insists, {name} will have to go.]")
+    charge = f"for {a.charge}" if a.charge else "with no charge they can name"
+    ev = (f" What the guard holds against {name}: {_evidence_text(decision.evidence)}." if decision.evidence else
+          f" Nothing in the record ties {name} to a crime: this arrest is wrongful, and {name} knows it.")
+    doing = {
+        "submit": (f"The rules decided: {name} goes quietly (protesting is fine) and follows {player} to the cells in "
+                   f"{jail_name}. {name} does not run or fight now."),
+        "flee": f"The rules decided: {name} will not be taken. {name} bolts and runs from {player} right now.",
+        "fight": f"The rules decided: {name} will not be taken. {name} turns on {player} and fights to get away.",
+    }[a.response]
+    return f"[{player}, of {org.name}, is arresting {name} {charge}.{ev} {doing}]"
+
+
+def arrest_notice(name: str, decision, jail_name: str) -> str:
+    a = decision.arrest
+    if a.response == "argue":
+        return (f"Arrest: nothing on record against {name}. Say it again to arrest them anyway "
+                f"(wrongful arrest: reprimand).")
+    if a.response == "submit":
+        return f"Arrest: {name} goes quietly. Bring them to the cell in {jail_name}" + \
+            (" (wrongful arrest)." if a.wrongful else ".")
+    return f"Arrest: {name} " + ("runs for it!" if a.response == "flee" else "fights back!")
+
+
+def prisoner_line(name: str, player: str, a, state: str, until: float | None, now: float, jail_name: str) -> str:
+    charge = f"for {a.charge}" if a.charge else "with no charge named"
+    if state == "escorting":
+        return (f"{name} is under arrest {charge}, arrested by {player}, and is being taken to the cells in "
+                f"{jail_name}. {name} is in {player}'s custody and does not wander off.")
+    left = f" for about {hours_text(until - now)} more" if until is not None and until > now else ""
+    return (f"{name} is locked in a cell in {jail_name}{left}, arrested by {player} {charge}. {name} cannot leave "
+            f"and feels about {player} as {name} sees fit.")
+
+
+def booked_line(name: str, player: str, bookings) -> str:
+    parts = []
+    for b in bookings:
+        a = b.arrest
+        if b.wrongful:
+            parts.append(f"{a.name} (nothing against them: {name} has just had {a.name} let out and reprimands {player} "
+                         f"for a wrongful arrest)")
+        else:
+            parts.append(f"{a.name} for {a.charge} (well done)")
+    return f"{player} has just brought in and booked: " + "; ".join(parts) + "."
+
+
+def prisoners_line(name: str, org: O.Org, held, jail_name: str) -> str:
+    who = ", ".join(f"{a.name} ({a.charge or 'no charge'})" for a, _ in held)
+    return f"In the cells of {jail_name} right now: {who}."

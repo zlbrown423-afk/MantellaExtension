@@ -3,9 +3,10 @@ list leaders who would invite the player, and run the in-conversation test comma
 its own transaction."""
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 
-from livingworld.guard import debug as D, duty as DU, encounter as ENC, incident as INC, reports as RP, training as TR, orgs as O, peace as PEACE, prompts as P, profiles, recruit as R, store as S
+from livingworld.guard import arrest as AR, debug as D, duty as DU, encounter as ENC, incident as INC, reports as RP, training as TR, orgs as O, peace as PEACE, prompts as P, profiles, recruit as R, store as S
 from livingworld.guard.profiles import GuardFacts
 from livingworld.social import claims, processor
 from livingworld.store.minors import is_child
@@ -32,6 +33,16 @@ class Scene:
     facts: dict[int, GuardFacts] = field(default_factory=dict)   # npc_id -> what the game reported
     thane_of: tuple[str, ...] = ()                                # holds the game reports the player is thane of
     said: str | None = None                                       # the player's last line in this conversation
+
+
+@dataclass
+class ArrestOrder:
+    """What the game does with someone the player arrested (reply keys mantella_lw_guard_arrest_*)."""
+    name: str
+    mode: str              # 'submit' (follows to the cells) | 'flee' | 'fight'
+    arrest_id: int
+    days: float
+    jail: O.Item | None
 
 
 @dataclass
@@ -67,6 +78,9 @@ class Guard:
         self._encounters: dict[int, ENC.Encounter] = {}   # npc_id -> why they came over (this conversation)
         self._report_lines: list[str] = []      # what the player said after a filed report (written report)
         self._watch_soon: tuple[int, float] | None = None   # "debug guard watch": (task id, when asked)
+        self.arrest_orders: list[ArrestOrder] = []   # G2f: for the game, sent with the next NPC line
+        self.release_orders: list[int] = []          # G2f: arrest ids whose prisoner the game lets out now
+        self.bookings: list[AR.Booking] = []         # G2f: prisoners booked with the superior this conversation
 
     def take_notices(self) -> list[str]:
         out, self.notices = self.notices, []
@@ -118,6 +132,7 @@ class Guard:
         enc_line = self._encounter_line(db, npc_id, name, p, svc, scene)
         if enc_line:
             out.append(enc_line)
+        out += self._prisoner_lines(db, npc_id, name, scene)
         if p is None:
             return out
         org = O.by_key(p.org_key)
@@ -148,6 +163,73 @@ class Guard:
                 S.event(db, "invited", [scene.player_id, npc_id], {"org": org.key, "path": d.path}, scene.now,
                         scene.location, witnesses=[])
         return out
+
+    def _prisoner_lines(self, db, npc_id: int, name: str, scene: Scene) -> list[str]:
+        if not AR.enabled():
+            return []
+        a = AR.held(db, npc_id, scene.now)
+        if a is None:
+            return []
+        org = O.by_key(a.org_key)
+        st = AR.status(db, a, scene.now)
+        j = AR.jailed(db, a)
+        return [P.prisoner_line(name, self._name(db, a.member_id) or scene.player_name, a, st,
+                                float(j["until"]) if j else None, scene.now, self._jail_name(org))]
+
+    @staticmethod
+    def _jail_name(org: O.Org | None) -> str:
+        return org.jail.name if org is not None and org.jail is not None else "the cells"
+
+    def arrest_turn(self, scene: Scene, text: str) -> list[str]:
+        """G2f: the player, serving, says someone present is under arrest. The rules decide what that person does;
+        returns notes for the AI (added to the player's line)."""
+        if scene.player_id is None or not AR.enabled() or not AR.wants_arrest(text):
+            return []
+        with self.store.transaction() as db:
+            svc = S.current(db, scene.player_id)
+            org = O.by_key(svc.org_key) if svc else None
+            if org is None or svc.status not in ("probation", "active"):
+                return []
+            names = {i: self._name(db, i) or "" for i in scene.present if i != scene.player_id and not is_child(db, i)}
+            boss = DU.superior_id(db, org, svc)
+            said = text.lower()
+            named = [i for i, n in names.items() if n and (n.lower() in said or n.split()[0].lower() in said.split()
+                                                           or n.split()[0].lower() + "," in said)]
+            civilians = [i for i in names if i != boss and profiles.get(db, i) is None]
+            target = named[0] if len(named) == 1 else civilians[0] if len(civilians) == 1 and not named else None
+            if target is None or target == boss:
+                return []
+            guards = sum(1 for i in names if i != target and profiles.get(db, i) is not None)
+            witnesses = [i for i in names if i != target]
+            d = AR.decide(db, org, svc, target, names[target], scene.now, guards_present=guards,
+                          location=scene.location, witnesses=witnesses)
+            if d is None:
+                return []
+            a = d.arrest
+            logger.log(23, f"Living World guard: arrest {a.event_id} of {a.name}: {a.response} (charge {a.charge}, "
+                           f"evidence {len(d.evidence)}, p_submit {d.p_submit:.2f}, wrongful {a.wrongful})")
+            jail = self._jail_name(org)
+            self.notices.append(P.arrest_notice(a.name, d, jail))
+            if a.response != AR.ARGUE:
+                self.arrest_orders.append(ArrestOrder(a.name, a.response, a.event_id, a.days, org.jail))
+            processor.process(db, {"appraisal": claims.appraise})
+            return [P.arrest_note(a.name, scene.player_name, org, d, jail)]
+
+    def _debug_suspect(self, db, org: O.Org, svc: S.Service | None, scene: Scene) -> str:
+        if svc is None:
+            return "not serving"
+        others = [i for i in scene.present if i != scene.player_id and profiles.get(db, i) is None
+                  and not is_child(db, i)]
+        if len(others) != 1:
+            return "talk to exactly one person who is not a guard to make them a suspect"
+        name = self._name(db, others[0]) or ""
+        inc = _suspect_incident(db, O.by_key(svc.org_key) or org, name, scene.now)
+        return f"incident {inc.event_id}: {inc.title}; suspect {name}" if inc else "no incident names suspects"
+
+    def take_arrest_orders(self) -> tuple[list[ArrestOrder], list[int]]:
+        out, rel = self.arrest_orders, self.release_orders
+        self.arrest_orders, self.release_orders = [], []
+        return out, rel
 
     def _encounter_line(self, db, npc_id: int, name: str, p, svc: S.Service | None, scene: Scene) -> str | None:
         """G2e: the reason this NPC came over to the player on their shift, if they did just now."""
@@ -258,6 +340,11 @@ class Guard:
             return out
         if self.filed is not None and self.filed.task is not None:
             out.append(P.filed_line(name, player, self.filed, self.summary))
+        if self.bookings:
+            out.append(P.booked_line(name, player, self.bookings))
+        held = AR.prisoners(db, org, scene.now) if AR.enabled() else []
+        if held:
+            out.append(P.prisoners_line(name, org, held, self._jail_name(org)))
         checks = DU.checks(db, org, svc, scene.now) if task is None else []
         if task is None and all(c.ok for c in checks):
             prev = DU.last(db, svc.member_id)
@@ -330,6 +417,7 @@ class Guard:
         self.summary = None
         self._encounters = {}
         self._report_lines = []
+        self.bookings = []
         with self.store.transaction() as db:
             svc = S.current(db, scene.player_id) if scene.player_id is not None else None
             org = O.by_key(svc.org_key) if svc else None
@@ -338,6 +426,19 @@ class Guard:
                 result["incidents"] = [i.event_id for i in INC.spawn(db, org, scene.now, since=svc.joined_gt)]
                 result["cold"] = INC.expire(db, org, scene.now)
             boss = DU.superior_id(db, org, svc) if org else None
+            if AR.enabled():
+                result["slipped"] = AR.slipped(db, scene.now)
+                if org is not None and boss is not None and boss in scene.present:
+                    self.bookings = AR.book(db, org, svc, boss, scene.now, scene.location,
+                                            [i for i in scene.present if i != scene.player_id])
+                    for b in self.bookings:
+                        if b.wrongful:
+                            self.release_orders.append(b.arrest.event_id)
+                            self.notices.append(f"Booked: {b.arrest.name} let out. Wrongful arrest: reprimanded.")
+                        else:
+                            self.notices.append(f"Booked: {b.arrest.name} for {b.arrest.charge}.")
+                    result["booked"] = [b.arrest.event_id for b in self.bookings]
+                    svc = S.get(db, svc.service_id)
             # reporting to the superior is not standing the post: only other conversations count as sightings
             held = DU.in_hand(db, svc.member_id) if svc is not None else None
             first = held is not None and DU.seen_count(db, held) == 0
@@ -537,7 +638,25 @@ class Guard:
                     return "no routine duty in hand (watch windows come with routine duties)"
                 self._watch_soon = (held.task_id, scene.now)
                 return f"watch windows of duty {held.task_id} brought forward (sent with the next line)"
+            if cmd.verb == "suspect":
+                return self._debug_suspect(db, org, svc, scene)
             return run(db, cmd, org, scene.player_id, scene.now, scene.location)
+
+
+def _suspect_incident(db, org: O.Org, name: str, now: float) -> INC.Incident | None:
+    """Open a theft incident that names ``name`` as the suspect (test command)."""
+    k = next((k for k in INC.kinds(org.key) if k.suspects), None)
+    if k is None:
+        return None
+    seed = INC._roll(org.key, now, k.key, name)
+    inc = INC._open(db, org, k, int(now), now, seed)
+    payload = json.loads(db.execute("SELECT payload_json FROM world_event WHERE event_id = ?", (inc.event_id,)).fetchone()[0])
+    if payload.get("suspect") == name:
+        return inc
+    INC.close(db, inc, "went cold", now)
+    payload.update({"suspect": name, "culprit": name, "why": payload["why"].split(". Word is")[0] + f". Word is it was {name}"})
+    event_id = S.event(db, "incident", [], payload, now, inc.where[0] if inc.where else org.hold, [], "admin")
+    return INC.get(db, event_id)
 
 
 def run(db, cmd: D.Command, org: O.Org, player_id: int, now: float, location: str | None) -> str:
