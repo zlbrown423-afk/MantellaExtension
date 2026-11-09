@@ -65,6 +65,7 @@ class Org:
     pay: dict[str, Any] = field(default_factory=dict, compare=False, hash=False)
     quarters: str = ""                    # where a member sleeps and keeps their things
     bed: Item | None = None               # the bed reference the game makes the member's own (a REFR, not a base form)
+    chest: Item | None = None             # a container base (CONT, never respawns) the game places by that bed, once
 
     @property
     def generic_rank(self) -> str:
@@ -137,7 +138,7 @@ def _org(raw: dict[str, Any]) -> Org:
                probation_days=float(raw.get("probation_days", 7)), recruit=dict(raw.get("recruit") or {}),
                uniform=uniform, generic_rank_key=raw.get("generic_rank"), rank_note=raw.get("rank_note", ""),
                duty_file=raw.get("duties"), pay=dict(raw.get("pay") or {}), quarters=raw.get("quarters", ""),
-               bed=_bed(raw.get("bed")))
+               bed=_bed(raw.get("bed")), chest=_chest(raw.get("chest")))
 
 
 @functools.lru_cache(maxsize=1)
@@ -154,6 +155,12 @@ def _bed(raw: dict | None) -> Item | None:
     if not raw or not raw.get("ref"):
         return None
     return Item(raw.get("name", "bed"), raw.get("plugin", "Skyrim.esm"), local_id(raw["ref"]))
+
+
+def _chest(raw: dict | None) -> Item | None:
+    if not raw or not raw.get("base"):
+        return None
+    return Item(raw.get("name", "footlocker"), raw.get("plugin", "Skyrim.esm"), local_id(raw["base"]))
 
 
 def by_key(key: str | None) -> Org | None:

@@ -221,5 +221,214 @@
         "Redoran's Retreat"
       ]
     }
-  ]
+  ],
+  "encounters": {
+    "_about": "G2e shift encounters (guard/encounter.py). Each routine duty has watch windows at these fractions of the shift. While nothing has happened yet a window comes up with first_chance (by window), after that with extra_chance: with 0.5/0.8/0.9 about 1 shift in 100 has nothing at all. approach_share of windows bring someone over (if nobody suitable is near, the member notices one of the observations instead). Categories are weighted by weight, x night between 22 and 5, x the first matching place word, x when_incident while trouble is open; min_rank makes a category rare below that rank. who: anyone (not a guard), guard (a fellow guard), superior (the member's own superior, inspecting), returning (someone who came over in the last two weeks). Placeholders: {player} is not used; {post}, {superior}, {incident}, {last}, {hold}, {guard}. refer = usually a matter for the superior. Each answered encounter adds merit_each merit (at most merit_cap a shift). npc_cooldown_days: the game skips someone who came over this recently.",
+    "windows": [
+      0.15,
+      0.5,
+      0.85
+    ],
+    "first_chance": [
+      0.5,
+      0.8,
+      0.9
+    ],
+    "extra_chance": 0.35,
+    "approach_share": 0.75,
+    "npc_cooldown_days": 3,
+    "merit_each": 0.25,
+    "merit_cap": 1.0,
+    "categories": [
+      {
+        "key": "civilian",
+        "label": "A civilian's question",
+        "weight": 3,
+        "night": 0.4,
+        "reasons": [
+          "you want directions (to a shop, a house, the road to Riverwood or Rorikstead) and a guard should know",
+          "you have lost something (a purse, a ring, a goat) and want the guard to keep an eye out for it",
+          "you want to know whether the roads out of {hold} are safe right now",
+          "you heard a rumour and want a guard to tell you whether it is true",
+          "you want to complain about a noisy or unpleasant neighbour"
+        ]
+      },
+      {
+        "key": "commercial",
+        "label": "A merchant's dispute",
+        "weight": 2,
+        "refer": true,
+        "night": 0.2,
+        "places": {
+          "market": 3,
+          "plains": 2,
+          "belethor": 3,
+          "warmaiden": 3,
+          "drunken huntsman": 3,
+          "arcadia": 2
+        },
+        "reasons": [
+          "a customer will not pay what they owe you, or a trader cheated you, and you want the guard to settle it",
+          "you suspect a stall is selling stolen or spoiled goods",
+          "you want a guard to keep an eye on your stall or cart for a while",
+          "two traders are quarrelling over who may set up where, and you want it sorted"
+        ]
+      },
+      {
+        "key": "political",
+        "label": "A political request",
+        "weight": 1,
+        "refer": true,
+        "min_rank": "guardsman",
+        "night": 0.3,
+        "places": {
+          "dragonsreach": 3,
+          "cloud": 3,
+          "gildergreen": 2
+        },
+        "reasons": [
+          "you want a message carried to the Jarl's steward and think a guard can see it gets there",
+          "you want the guard to hear your complaint about the Jarl's handling of the war",
+          "you want the guard's help to bring a petition before the Jarl's court"
+        ]
+      },
+      {
+        "key": "law",
+        "label": "A report of wrongdoing",
+        "weight": 1.5,
+        "when_incident": 3,
+        "night": 1.3,
+        "reasons": [
+          "you saw something to do with the recent trouble ({incident}) and want to tell a guard",
+          "someone has been loitering near your home and you want the guard to look into it",
+          "a few coins or a basket went missing today and you want to report it"
+        ]
+      },
+      {
+        "key": "medical",
+        "label": "Someone needs help",
+        "weight": 0.4,
+        "night": 1.2,
+        "refer": false,
+        "reasons": [
+          "someone nearby has been hurt or taken ill (a fall, a fever, a drunk who hit their head) and you want the guard's help getting them to Arcadia or the Temple of Kynareth"
+        ]
+      },
+      {
+        "key": "unexpected",
+        "label": "An odd encounter",
+        "weight": 0.7,
+        "night": 2,
+        "reasons": [
+          "you are new in {hold} and looking for someone who does not seem to be here",
+          "you have had a few drinks and want to share your opinion of the guard",
+          "you saw something strange in the sky or on the plains and want to know if the guard has heard of it",
+          "you lost a bet and want a guard to settle a silly argument"
+        ]
+      },
+      {
+        "key": "military",
+        "label": "Word from a fellow guard",
+        "weight": 5,
+        "who": "guard",
+        "reasons": [
+          "you bring word from {superior}: keep a sharp eye out at the post, there has been talk of trouble",
+          "you are passing on the watchword for tonight and checking {post} is covered",
+          "you want to warn a fellow guard about a troublemaker you saw earlier",
+          "you are on your rounds and stop to compare notes about the shift"
+        ]
+      },
+      {
+        "key": "inspection",
+        "label": "An inspection",
+        "weight": 5,
+        "who": "superior",
+        "reasons": [
+          "you are inspecting your subordinate at their post: their kit, their alertness, and whether they know their orders for the duty to {post}",
+          "you are checking that the duty to {post} is being done properly and want a quick report"
+        ]
+      },
+      {
+        "key": "follow_up",
+        "label": "A follow-up",
+        "weight": 2,
+        "who": "returning",
+        "reasons": [
+          "you are coming back about what you raised with this guard last time ({last})"
+        ]
+      }
+    ],
+    "observations": [
+      {
+        "text": "A cart has lost a wheel near the gate and is blocking half the road."
+      },
+      {
+        "text": "The bar on the main gate is cracked and will need replacing.",
+        "refer": true
+      },
+      {
+        "text": "A stall's awning was cut through in the night.",
+        "refer": true,
+        "hours": [
+          5,
+          12
+        ]
+      },
+      {
+        "text": "A lamp along the walls has gone out.",
+        "hours": [
+          18,
+          6
+        ]
+      },
+      {
+        "text": "Two drunks argued outside the Bannered Mare and went their separate ways.",
+        "hours": [
+          17,
+          2
+        ]
+      },
+      {
+        "text": "A courier passed through the gate heading for Dragonsreach."
+      },
+      {
+        "text": "A stray dog keeps nosing around the market stalls.",
+        "hours": [
+          7,
+          20
+        ]
+      },
+      {
+        "text": "Fresh footprints in the mud lead from the wall towards the river.",
+        "refer": true
+      },
+      {
+        "text": "Your shield strap is fraying; your kit needs a look at Warmaiden's."
+      },
+      {
+        "text": "A merchant's scales look off; customers may be short-changed.",
+        "refer": true,
+        "hours": [
+          8,
+          18
+        ]
+      },
+      {
+        "text": "Smoke from a chimney in the Plains District looked heavy for a while, then settled."
+      },
+      {
+        "text": "A pair of travellers asked about work at the stables and moved on."
+      },
+      {
+        "text": "Someone has been sleeping rough behind the Drunken Huntsman.",
+        "hours": [
+          20,
+          8
+        ]
+      },
+      {
+        "text": "A Khajiit caravan's people were turned away at the gate again and grumbled about it."
+      }
+    ]
+  }
 }

@@ -144,18 +144,46 @@ def incidents_line(name: str, org: O.Org, incidents) -> str:
             f"it, without inventing details beyond it.")
 
 
-def filed_notice(boss: str, r, d) -> str:
+def filed_notice(boss: str, r, d, summary=None) -> str:
     gain = f" (+{d.merit:g} merit)" if r.outcome == "done" else ""
-    return f"Reported to {boss}: {r.task.title if r.task else d.title}, done{gain}." + (" Commended!" if r.commended else "")
+    shift = f" Shift: {summary.counts()}." if summary is not None else ""
+    return (f"Reported to {boss}: {r.task.title if r.task else d.title}, done{gain}.{shift}"
+            + (" Commended!" if r.commended else ""))
 
 
-def filed_line(name: str, player: str, r) -> str:
+def filed_line(name: str, player: str, r, summary=None) -> str:
     out = (f"{player} has just come back to {name} from their duty ({r.task.title}), and the guard's record shows it "
            f"was done properly; {name} takes the report now, may ask how it went, and acknowledges it in their own "
            f"words. The report is already recorded: do not use {REPORT_KEY}.")
+    if summary is not None:
+        out += (f" What {player} has to report from the shift (from the guard's record; {player} tells it in their "
+                f"own words and {name} may ask about any of it): {summary.text()}")
+        if summary.attention:
+            out += (f" {name} decides what to do about the matters for the superior: deal with them, pass them up, "
+                    f"or tell {player} to follow one up.")
+        if summary.quiet:
+            out += f" A quiet shift is rare; {name} may remark on it."
     if r.commended:
         out += f" {player} has earned a commendation for a run of good service; {name} tells them so."
     return out
+
+
+def encounter_line(name: str, player: str, org: O.Org, svc: S.Service, enc, *, is_superior: bool,
+                   is_guard: bool) -> str:
+    """Why ``name`` came over to the player on their shift (G2e): the reason, and who outranks whom."""
+    title = org.title(svc.rank_key)
+    if is_superior:
+        head = (f"{name} has come over to {player}, their subordinate ({title}), who is on duty: {enc.reason}. "
+                f"{name} speaks as the superior: brief, expects answers, may give an instruction.")
+    elif is_guard:
+        head = (f"{name}, a fellow member of {org.name}, has come over to {player} ({title}), who is on duty, because "
+                f"{enc.reason}. {name} speaks to them as one guard to another, minding rank.")
+    else:
+        head = (f"{name} has come over to {player}, a {title} of {org.name} on duty, because {enc.reason}. This is why "
+                f"{name} is talking to them: {name} raises it in their own first words, as fits who they are and what "
+                f"they remember of {player}. It is an everyday matter, not an emergency unless it says so.")
+    return (head + f" {player} may help, send them elsewhere, or say they will take it to their superior; {name} "
+            f"reacts as they would. {name} does not invent a crime, a fight or danger beyond this.")
 
 
 def duty_line(name: str, player: str, task, d, shift_end: float, now: float, *, new: bool, seen: bool) -> str:
@@ -183,6 +211,11 @@ def duty_line(name: str, player: str, task, d, shift_end: float, now: float, *, 
     return (head + f" When {player} comes back to report on this duty, {name} hears them out and asks what happened; "
             f"then begin the reply with '{REPORT_KEY}:'. {name} does not decide whether the report is true; "
             f"the guard's own record will show that.")
+
+
+def watch_line(name: str, player: str) -> str:
+    return (f"While on a shift, people may come to {player} with questions, disputes and reports, and {player} "
+            f"should keep their eyes open: all of it goes in the report when they come back to {name}.")
 
 
 def record_line(name: str, player: str, rec) -> str:

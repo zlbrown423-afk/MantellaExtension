@@ -41,6 +41,8 @@ def talk(work_dir, day, say=None, npcs=None, location="Whiterun", extra=None, ev
         talk.beds = [((r.get(comm_consts.KEY_REPLYTYPE_NPCTALK) or {}).get("mantella_lw_guard_bed_id"),
                       (r.get(comm_consts.KEY_REPLYTYPE_NPCTALK) or {}).get("mantella_lw_guard_bed_own"))
                      for _, r in s.exchanges if "mantella_lw_guard_bed_id" in (r.get(comm_consts.KEY_REPLYTYPE_NPCTALK) or {})]
+        talk.watch = [r[comm_consts.KEY_REPLYTYPE_NPCTALK] for _, r in s.exchanges
+                      if "mantella_lw_guard_watch_task" in (r.get(comm_consts.KEY_REPLYTYPE_NPCTALK) or {})]
         talk.hints = [h for _, r in s.exchanges for h in ((r.get(comm_consts.KEY_REPLYTYPE_NPCTALK) or {})
                                                            .get("mantella_lw_hints") or [])]
     return llm.dialogue_calls[0].system_prompt if llm.dialogue_calls else ""
