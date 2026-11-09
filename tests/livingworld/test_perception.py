@@ -293,6 +293,19 @@ def test_loading_a_save_from_before_the_grab_forgets_it(tmp_path):
     assert trust is None or trust[0] == 0
 
 
+def test_a_record_sent_again_after_loading_a_later_save_is_not_stored_twice(tmp_path):
+    """What the 2026-11-08 session did: grabs at day 14.51 were stored, then a save from 14.54 was loaded
+    and the game sent the same grabs again. They happened before that save, so they still count, once."""
+    load = lambda timeline, nonce, day: {KEY_TIMELINE_ID: timeline, KEY_LOAD_NONCE: nonce, KEY_LOADED_GAME_DAYS: day}  # noqa: E731
+    talk(tmp_path, [actors.gerdur()], 3.5, extra=load(0, 1, 3.4))
+    talk(tmp_path, [actors.gerdur()], 3.55, [grab_scene()], extra=load(1, 1, 3.4))
+    # load a save made at day 3.52, after the grab at 3.51; the game sends the grab record again
+    talk(tmp_path, [actors.gerdur()], 3.6, [grab_scene()], extra=load(1, 2, 3.52))
+    db = open_db(tmp_path)
+    assert db.execute("SELECT COUNT(*) FROM v_visible_event").fetchone()[0] == 1
+    assert len([m for m in memories(db, "Gerdur")]) == 1
+
+
 # ---- migration -----------------------------------------------------------------------------------
 
 def test_migration_keeps_existing_memories(tmp_path):

@@ -95,6 +95,29 @@ def clock(gt: float) -> str:
     return f"{(h % 12) or 12}:{m:02d} {'am' if h < 12 else 'pm'}"
 
 
+HOUR_WORDS = ("twelve", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven")
+
+
+def spoken_time(gt: float) -> str:
+    """Game time as words for a prompt, e.g. 'half past nine in the evening'.
+
+    Prompts never carry '9:41 pm': the model copies it, and Mantella reads 'Your next duty begins at 9:'
+    as a line addressed to a character called 'Your next duty begins at 9', and drops it."""
+    quarters = int(round((gt % 1.0) * 24 * 4)) % (24 * 4)
+    h, q = divmod(quarters, 4)
+    if q == 0 and h == 0:
+        return "midnight"
+    if q == 0 and h == 12:
+        return "noon"
+    part = ("at night" if h < 5 or h >= 22 else "in the morning" if h < 12
+            else "in the afternoon" if h < 18 else "in the evening")
+    if q == 3 and h in (11, 23):
+        return f"a quarter to {'noon' if h == 11 else 'midnight'}"
+    hour = HOUR_WORDS[((h + 1) if q == 3 else h) % 12]
+    said = {0: hour, 1: f"a quarter past {hour}", 2: f"half past {hour}", 3: f"a quarter to {hour}"}[q]
+    return f"{said} {part}"
+
+
 def quarters_line(name: str, player: str, org: O.Org) -> str:
     return f"As a member of {org.name}, {player} has {org.quarters}."
 
@@ -109,7 +132,7 @@ def report_to_line(name: str, player: str, superior: str) -> str:
 
 
 def no_duty_line(name: str, player: str, why: str, next_at: float | None, now: float) -> str:
-    when = (f" The next duty {name} could give {player} starts at {clock(next_at)}; {name} may tell {player} to come "
+    when = (f" The next duty {name} could give {player} starts at {spoken_time(next_at)}; {name} may tell {player} to come "
             f"back then." if next_at is not None and next_at > now else "")
     return (f"{name} has no duty for {player} right now ({why}).{when} {name} does not invent a duty, a post, a shift "
             f"length or times; {player} is off duty until given one. Do not use {REPORT_KEY}.")
@@ -119,11 +142,11 @@ def duty_line(name: str, player: str, task, d, shift_end: float, now: float, *, 
     if new:
         head = (f"{name} is {player}'s superior and has a duty for {player} right now: {d.title}. "
                 f"Why: {d.why}. What to do: {d.instructions} The shift lasts {hours_text(d.shift_hours / 24)}: "
-                f"from now ({clock(now)}) until {clock(shift_end)}. {name} gives the order in their own words.")
+                f"from now ({spoken_time(now)}) until {spoken_time(shift_end)}. {name} gives the order in their own words.")
     else:
         left = shift_end - now
         start = shift_end - d.shift_hours / 24
-        when = (f"It is now {clock(now)}; the shift runs from {clock(start)} to {clock(shift_end)}, so "
+        when = (f"It is now {spoken_time(now)}; the shift runs from {spoken_time(start)} to {spoken_time(shift_end)}, so "
                 + (f"{hours_text(left)} of it {'is' if round(left * 24) <= 1 else 'are'} left." if left > 0
                    else "it is over."))
         head = f"{name} gave {player} a duty: {d.title}. {when} Use these times, not a guess."

@@ -286,6 +286,24 @@ def test_loading_an_older_save_rolls_romance_back():
     assert visible == 0
 
 
+def test_whoever_was_there_can_tell_the_player_about_a_flirt():
+    """2026-11-08: the player was told Riverwood was talking about Hod; Hilde, the only one who knew (Hod had
+    flirted with her), had nothing about it in her prompt, so asking her led nowhere."""
+    from livingworld.memory.recall import recall_for
+    s = world()
+    hod, hilde, sven = nid(s, "Hod"), nid(s, "Hilde"), nid(s, "Sven")
+    with s.transaction() as db:
+        romance._event(db, 1, "romance.flirt", "Riverwood", [hod, hilde], {"returned": False}, 13.8,
+                       {hod: "participated", hilde: "participated", sven: "saw"})
+        processor.process(db)
+    said = recall_for(s, hilde, 14.8, mark_rehearsed=False).text()
+    assert "(yesterday, it happened to me) Hod flirted with me in Riverwood. I did not return it." in said, said
+    assert "(yesterday, I saw it myself) Hod flirted with Hilde in Riverwood." in \
+        recall_for(s, sven, 14.8, mark_rehearsed=False).text()
+    # a month and more later it has faded from the prompt
+    assert "flirted" not in recall_for(s, hilde, 50.0, mark_rehearsed=False).text()
+
+
 def test_recall_lines_speak_in_their_own_words():
     s = world()
     gerdur, hod, faendal = nid(s, "Gerdur"), nid(s, "Hod"), nid(s, "Faendal")

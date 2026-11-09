@@ -87,7 +87,6 @@ class MoodFilter:
         self.on_mood = on_mood
         self._held = ""
         self._emitted = False   # any text passed on yet
-        self._trim = False      # a tag opened the reply: drop the space after it
 
     def feed(self, chunk: str) -> str:
         text = self._held + (chunk or "")
@@ -114,15 +113,14 @@ class MoodFilter:
                 if mood:
                     self.on_mood(mood)
                 text = rest[end + 1:]
-                if not self._emitted and not "".join(out).strip():
-                    self._trim = True      # no stray space at the start of the reply
             else:
                 out.append(rest[0])
                 text = rest[1:]
         result = "".join(out)
-        if self._trim:
-            result = result.lstrip()
-            self._trim = not result
+        if not self._emitted:
+            # No stray space at the start of the reply, and no colon: the model sometimes writes
+            # "<mood wary 6>: What is it?", then copies ": ..." from its own history into later replies.
+            result = result.lstrip(" \t\r\n:;")
         self._emitted = self._emitted or bool(result.strip())
         return result
 
