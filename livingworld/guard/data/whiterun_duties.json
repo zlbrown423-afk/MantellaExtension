@@ -430,5 +430,154 @@
         "text": "A Khajiit caravan's people were turned away at the gate again and grumbled about it."
       }
     ]
+  },
+  "training": {
+    "_about": "G2g recruit training (guard/training.py). A member of a rank in for_ranks gets these steps from their superior one at a time, in order, before routine duties and incidents, with no rest needed between steps. need: seen (be at the place, report after half the step's hours), fight (a sparring bout: the game's fight record at the place), escort (seen at the place with a fellow guard in the conversation), quiz (the superior asks the questions below there and then; an answer with any of a question's words counts right; pass_right right answers pass, fail_wrong wrong ones fail the attempt without a reprimand). Each step adds its merit; all done adds complete_merit and, with no reprimand, passes probation early (early_probation).",
+    "for_ranks": [
+      "recruit"
+    ],
+    "pass_right": 3,
+    "fail_wrong": 3,
+    "complete_merit": 2.0,
+    "early_probation": true,
+    "steps": [
+      {
+        "key": "drill",
+        "title": "drill with spear and shield in the barracks yard",
+        "why": "A recruit who cannot hold a shield wall is a danger to the guards beside them",
+        "instructions": "Go to the barracks and drill until the drill master is satisfied: stance, shield, spear, and keeping your place in line.",
+        "where": [
+          "Whiterun"
+        ],
+        "need": "seen",
+        "shift_hours": 2,
+        "merit": 0.5
+      },
+      {
+        "key": "spar",
+        "title": "go a sparring bout with fists against a fellow guard",
+        "why": "Most trouble a guard meets is a drunk or a brawler, and it is settled with fists, not steel",
+        "instructions": "Ask a fellow guard for a bout, fists only, and fight it out. Win or lose, you learn.",
+        "where": [
+          "Whiterun"
+        ],
+        "need": "fight",
+        "shift_hours": 3,
+        "merit": 0.5
+      },
+      {
+        "key": "quiz",
+        "title": "answer questions on Whiterun's law and the guard's orders",
+        "why": "A guard who does not know the law cannot enforce it",
+        "instructions": "Answer the Commander's questions on the law and on standing orders.",
+        "where": [
+          "Whiterun"
+        ],
+        "need": "quiz",
+        "shift_hours": 1,
+        "merit": 0.5
+      },
+      {
+        "key": "patrol",
+        "title": "walk a patrol through the city beside a senior guard",
+        "why": "The streets are learned on foot, beside someone who knows them",
+        "instructions": "Find a senior guard and walk their round with them, through the Plains District and up to the Wind District.",
+        "where": [
+          "Whiterun"
+        ],
+        "need": "escort",
+        "shift_hours": 3,
+        "merit": 0.5
+      }
+    ],
+    "questions": [
+      {
+        "key": "theft",
+        "ask": "What do you do with someone caught stealing from a stall?",
+        "answer": "stop them, get the goods back to the owner, and arrest them or have them pay a fine",
+        "words": [
+          "arrest",
+          "jail",
+          "fine",
+          "bounty",
+          "return",
+          "give it back",
+          "give back",
+          "owner",
+          "lock",
+          "seize"
+        ]
+      },
+      {
+        "key": "superior",
+        "ask": "Who do you take your orders from and report to?",
+        "answer": "the Commander of the Guard, Caius, and above him the Housecarl and the Jarl",
+        "words": [
+          "caius",
+          "commander",
+          "jarl",
+          "housecarl",
+          "irileth",
+          "superior"
+        ]
+      },
+      {
+        "key": "bribe",
+        "ask": "A merchant offers you coin to look the other way. What do you do?",
+        "answer": "refuse it and report the offer; taking it is a crime",
+        "words": [
+          "refuse",
+          "report",
+          "decline",
+          "turn it down",
+          "won't take",
+          "will not take",
+          "arrest",
+          "never"
+        ]
+      },
+      {
+        "key": "murder",
+        "ask": "What is the penalty for murder in Whiterun?",
+        "answer": "death, or prison for life if the Jarl shows mercy",
+        "words": [
+          "death",
+          "execut",
+          "hang",
+          "behead",
+          "prison",
+          "life"
+        ]
+      },
+      {
+        "key": "steel",
+        "ask": "When may a guard draw steel on a citizen?",
+        "answer": "only when someone draws a weapon or attacks; words alone are no reason",
+        "words": [
+          "attack",
+          "weapon",
+          "threat",
+          "self defence",
+          "self-defence",
+          "defend",
+          "only when",
+          "only if",
+          "draws"
+        ]
+      },
+      {
+        "key": "alarm",
+        "ask": "The bell rings for an attack on the walls. Where do you go?",
+        "answer": "to your post on the walls or at the gate, ready to defend",
+        "words": [
+          "wall",
+          "walls",
+          "gate",
+          "post",
+          "station",
+          "tower"
+        ]
+      }
+    ]
   }
 }

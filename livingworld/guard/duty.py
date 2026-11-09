@@ -51,9 +51,10 @@ class Duty:
     min_rank: str | None
     max_rank: str | None
     merit: float
-    need: str = "seen"                 # 'seen' at the post | 'fight' there (bandits)
+    need: str = "seen"                 # 'seen' at the post | 'fight' there (bandits) | training: 'quiz', 'escort'
     incident_id: int | None = None     # G2d: the guard.incident this duty answers
     outcome: str | None = None         # incident: 'arrested' | 'cleared'
+    training: bool = False             # G2g: a recruit training step
 
 
 @dataclass(frozen=True)
@@ -94,9 +95,18 @@ def incident_duty(inc) -> Duty:
                 inc.shift_hours, inc.min_rank, None, inc.merit, inc.need, inc.event_id, inc.outcome)
 
 
+def training_duty(step) -> Duty:
+    return Duty(f"training:{step.key}", step.title, step.why, step.instructions, step.where, (0, 24), step.shift_hours,
+                None, None, step.merit, step.need, None, None, True)
+
+
 def duty_for(db, task: T.Task) -> Duty | None:
-    """The duty a task stands for: a routine one from the org's list, or an incident."""
-    from livingworld.guard import incident as INC
+    """The duty a task stands for: a routine one from the org's list, an incident, or a training step."""
+    from livingworld.guard import incident as INC, training as TR
+    if TR.is_training(task.template):
+        org = _org_of(db, task)
+        step = TR.course(org.key).step(task.template) if org else None
+        return training_duty(step) if step else None
     inc_id = INC.event_id_of(task.template)
     if inc_id is not None:
         inc = INC.get(db, inc_id)
@@ -175,7 +185,8 @@ def checks(db, org: O.Org, svc: S.Service, now: float) -> list[Check]:
     held = in_hand(db, svc.member_id)
     out.append(Check("free", held is None, "no duty in hand" if held is None else f"already on duty: {held.title}"))
     prev = last(db, svc.member_id)
-    if prev is not None and prev.state in T.DONE:
+    from livingworld.guard import training as TR
+    if prev is not None and prev.state in T.DONE and not (TR.is_training(prev.template) and not TR.trained(db, svc)):
         rested = (now - (prev.state_gt or prev.created_gt)) * 24
         out.append(Check("rested", rested >= r.rest_hours, f"last duty ended {rested:.1f} h ago (rest {r.rest_hours:g} h)"))
     return out
@@ -234,10 +245,12 @@ def mark_seen(db, member_id: int, location: str | None, now: float, witnesses: l
     if task is None:
         return None
     d = duty_for(db, task)
-    if d is None or (d.need == "fight" and not force):
+    if d is None or (d.need in ("fight", "quiz") and not force):
         return None
     if not force and (not at_post(d, location) or now > shift_end(db, task, d) + 1e-9):
         return None
+    if d.need == "escort" and not force and not any(profiles.get(db, w) is not None for w in (witnesses or [])):
+        return None          # a patrol beside a senior guard: one has to be there
     state = "in_progress" if task.state in ("accepted", "paused") else None
     return T.change(db, task, state, f"seen at post: {location or 'developer'}", now, witnesses=witnesses)
 
@@ -311,11 +324,28 @@ def _maybe_commend(db, org: O.Org, svc: S.Service, by: int | None, now: float, w
 
 # ---- reporting back ----
 
+def done_count(db, task: T.Task, d: Duty | None) -> int:
+    """How often the duty's work was seen done: fights for a fight, right answers for a quiz, else sightings."""
+    if d is not None and d.need == "fight":
+        return fought_count(db, task)
+    if d is not None and d.need == "quiz":
+        from livingworld.guard import training as TR
+        org = _org_of(db, task)
+        right, _ = TR.answers(db, task)
+        return 1 if org and len(right) >= TR.course(org.key).pass_right else 0
+    return seen_count(db, task)
+
+
+def _no_shift(d: Duty | None) -> bool:
+    """Done when done, not after half a shift: incidents, fights and the quiz."""
+    return d is not None and (d.incident_id is not None or d.need in ("fight", "quiz"))
+
+
 def ready(db, task: T.Task, d: Duty, now: float) -> bool:
-    """Whether the duty is done and can be reported: dealt with (incident), or seen at the post and at least
-    half the shift gone (routine)."""
-    if d.incident_id is not None or d.need == "fight":
-        return (fought_count(db, task) if d.need == "fight" else seen_count(db, task)) > 0
+    """Whether the duty is done and can be reported: dealt with (incident, bout, quiz), or seen at the post and at
+    least half the shift gone (routine)."""
+    if _no_shift(d):
+        return done_count(db, task, d) > 0
     return seen_count(db, task) > 0 and now >= assigned_gt(db, task) + d.shift_hours / 48.0 - 1e-9
 
 @dataclass
@@ -323,6 +353,7 @@ class Report:
     outcome: str          # done | early | false | none
     task: T.Task | None
     commended: bool = False
+    trained: bool = False      # G2g: this report finished recruit training
 
 
 def report(db, org: O.Org, svc: S.Service, superior: int, now: float, said: str | None = None, *,
@@ -335,10 +366,10 @@ def report(db, org: O.Org, svc: S.Service, superior: int, now: float, said: str 
     member, boss = svc.member_id, superior
     words = (said or "").strip()
     quoted = f" They said: \"{words[:300]}\"" if words else ""
-    seen = (fought_count(db, task) if d and d.need == "fight" else seen_count(db, task)) > 0
+    seen = done_count(db, task, d) > 0
     half = assigned_gt(db, task) + (d.shift_hours if d else 4) / 48.0
-    if d is not None and d.incident_id is not None:
-        half = assigned_gt(db, task)          # an incident is done when dealt with, not after a shift
+    if _no_shift(d):
+        half = assigned_gt(db, task)          # an incident, a bout or the quiz is done when done, not after a shift
     who = _name(db, member)
     if not seen:
         task = T.change(db, task, "failed", "false report: nobody saw them at their post", now,
@@ -375,7 +406,12 @@ def report(db, org: O.Org, svc: S.Service, superior: int, now: float, said: str 
             INC.close(db, inc, d.outcome or "cleared", now, member_id=member, by=boss, witnesses=witnesses,
                       source=source)
     fresh = S.get(db, svc.service_id)
-    return Report("done", task, _maybe_commend(db, org, fresh, boss, now, witnesses, source))
+    commended = _maybe_commend(db, org, fresh, boss, now, witnesses, source)
+    trained = False
+    if d is not None and d.training:
+        from livingworld.guard import training as TR
+        trained = TR.complete(db, org, S.get(db, svc.service_id), boss, now, witnesses, source)
+    return Report("done", task, commended, trained)
 
 
 def _last_event(db, task: T.Task) -> int | None:
@@ -510,11 +546,14 @@ class Record:
     reprimanded: int
     merit: float
     helped: int = 0          # G2e: people dealt with on shift
+    reports: int = 0         # written reports in the ledger
 
     def words(self) -> str:
         parts = [f"{self.done} dut{'y' if self.done == 1 else 'ies'} done"]
         if self.helped:
             parts.append(f"{self.helped} {'person' if self.helped == 1 else 'people'} dealt with on shift")
+        if self.reports:
+            parts.append(f"{self.reports} written report{'s' if self.reports != 1 else ''}")
         if self.missed:
             parts.append(f"{self.missed} missed")
         if self.false_reports:
@@ -543,6 +582,6 @@ def record(db, svc: S.Service) -> Record:
                          " AND t.created_gt >= ? AND EXISTS (SELECT 1 FROM v_task v WHERE v.task_id = t.task_id"
                          " AND v.assignee_id = ?)", (svc.joined_gt - 1e-9, svc.member_id)).fetchone()[0]
     failed = tasks("state = 'failed'")
-    from livingworld.guard import encounter as ENC
+    from livingworld.guard import encounter as ENC, reports as RP
     return Record(tasks("state = 'completed'"), tasks("state = 'expired'"), false_n, failed - false_n,
-                  events("commended"), events("reprimanded"), svc.merit, ENC.helped(db, svc))
+                  events("commended"), events("reprimanded"), svc.merit, ENC.helped(db, svc), RP.count(db, svc))

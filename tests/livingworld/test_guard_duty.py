@@ -54,9 +54,14 @@ def duties(work_dir):
                                         " ORDER BY task_id")]
 
 
-def enlisted(work_dir, day=DAY):
+def enlisted(work_dir, day=DAY, trained=True):
     talk(work_dir, day, say="I want to join the guard.")
     assert service(open_db(work_dir))["status"] == "probation"
+    if trained:                     # these tests are about routine duties: recruit training (G2g) counts as done
+        store = WorldStore(db_path(work_dir))
+        with store.transaction() as db:
+            S.change(db, S.current(db, npc_id(db, "Torvar")), "test: training skipped", day, kind="trained",
+                     source="admin")
 
 
 def given_duty(work_dir, day):
@@ -238,8 +243,10 @@ def test_loading_an_older_save_rolls_the_duty_back(tmp_path):
 
 def test_in_game_duty_commands(tmp_path):
     talk(tmp_path, DAY, say="debug guard enlist")
+    talk(tmp_path, DAY + 0.005, say="debug guard training", npcs=[whiterun_guard()])   # skip recruit training
     talk(tmp_path, DAY + 0.01, say="debug guard duty")
     assert duties(tmp_path)[-1]["state"] in ("accepted", "in_progress")
+    assert not duties(tmp_path)[-1]["template"].startswith("duty:training:")
     talk(tmp_path, DAY + 0.02, say="debug guard seen")
     assert duties(tmp_path)[-1]["state"] == "in_progress"
     talk(tmp_path, DAY + 0.4, say="debug guard report")
