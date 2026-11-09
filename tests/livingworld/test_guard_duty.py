@@ -422,3 +422,43 @@ def test_coming_back_too_soon_does_not_file_anything(tmp_path):
     talk(tmp_path, DAY + 0.02, npcs=[whiterun_guard()])
     talk(tmp_path, DAY + 0.03)                                        # before half the shift: nothing filed
     assert duties(tmp_path)[-1]["state"] == "in_progress"
+
+
+# ---- keeping the peace: a guard who saw the player grab someone steps in ----
+
+def test_a_guard_who_saw_a_grab_warns_first_and_may_arrest_the_second_time(tmp_path):
+    from livingworld.harness import actors
+    from livingworld.harness.perception import react
+    victim = actors.actor("Lillith Maiden-Loom", 0x00013BC0, 0x0010E2B6, 1, "Nord", "FemaleEvenToned")
+    guard = whiterun_guard()
+    first = react(guard, PLAYER, 3.40, via="guard", victim_json=victim, area="left shoulder")
+    prompt = talk(tmp_path, 3.40, npcs=[guard, victim], events=[first])
+    assert "saw Torvar put hands on Lillith Maiden-Loom by the left shoulder against their will" in prompt
+    assert "a firm warning, no arrest. Do not use ReportCrime." in prompt
+    # the next day it happens again: now the guard may arrest
+    again = react(guard, PLAYER, 4.2, via="guard", victim_json=victim, area="face")
+    prompt = talk(tmp_path, 4.2, npcs=[guard, victim], events=[again])
+    assert "already had to stop Torvar doing this once" in prompt and "ReportCrime with a bounty of 40 gold" in prompt
+    # a guard who did not step in hears nothing about it
+    prompt = talk(tmp_path, 4.3, npcs=[whiterun_guard(ref=0x0001A6B3)])
+    assert "stepped in" not in prompt
+
+
+def test_the_person_grabbed_reacting_is_stored_but_gives_no_guard_line(tmp_path):
+    from livingworld.harness import actors
+    from livingworld.harness.perception import react
+    victim = actors.actor("Lillith Maiden-Loom", 0x00013BC0, 0x0010E2B6, 1, "Nord", "FemaleEvenToned")
+    talk(tmp_path, 3.40, npcs=[victim], events=[react(victim, PLAYER, 3.40)])
+    db = open_db(tmp_path)
+    assert db.execute("SELECT COUNT(*) FROM world_event WHERE type = 'reaction'").fetchone()[0] == 1
+    assert "stepped in" not in talk(tmp_path, 3.41, npcs=[whiterun_guard()])
+
+
+def test_a_bad_react_record_is_refused():
+    from livingworld.harness import actors
+    from livingworld.harness.perception import react
+    from livingworld.perception.records import BadRecord, parse_record
+    with pytest.raises(BadRecord):
+        parse_record(react(whiterun_guard(), PLAYER, 3.4, via="guard"))       # a guard needs the person grabbed
+    with pytest.raises(BadRecord):
+        parse_record(react(actors.gerdur(), PLAYER, 3.4, via="cheer"))

@@ -23,6 +23,10 @@ from silero_vad_lite import SileroVAD
 
 logger = utils.get_logger()
 
+
+class ListenAborted(Exception):
+    """LIVINGWORLD PATCH: the conversation ended while the server was waiting for the player to speak."""
+
 try:
     from moonshine_onnx import MoonshineOnnxModel, load_tokenizer
     has_moonshine = True
@@ -147,6 +151,8 @@ class Transcriber:
         self._last_update_time = 0
         self._current_transcription = ""
         self._transcription_ready = threading.Event()
+        self._waiting = False      # LIVINGWORLD PATCH: a request is blocked in get_latest_transcription
+        self._abort_wait = False   # LIVINGWORLD PATCH: the conversation ended while that request waited
         self._consecutive_empty_count = 0
         self._max_consecutive_empty = 10
 
@@ -557,12 +563,34 @@ If you would prefer to run speech-to-text locally, please ensure the `Speech-to-
         Returns:
             The transcribed text, or None if silence_timeout elapsed without any speech being detected
         """
+        self._waiting = True
+        try:
+            return self.__wait_for_transcription(silence_timeout)
+        finally:
+            self._waiting = False
+
+    def abort_wait(self) -> bool:
+        """LIVINGWORLD PATCH: wake a request blocked in get_latest_transcription, which then raises ListenAborted.
+
+        The game ends a conversation (the player walked away or used the end spell) while the server is still
+        waiting for speech. Without this the end request queued behind that wait until the player next spoke."""
+        if not self._waiting:
+            return False
+        self._abort_wait = True
+        self._transcription_ready.set()
+        return True
+
+    def __wait_for_transcription(self, silence_timeout: float) -> str | None:
         while True:
             # Use timeout only if silence_timeout > 0 and player hasn't started speaking yet
             use_timeout = silence_timeout > 0 and not self._speech_detected
             timeout_value = silence_timeout if use_timeout else None
             
             received_transcription = self._transcription_ready.wait(timeout=timeout_value)
+            if self._abort_wait:  # LIVINGWORLD PATCH
+                self._abort_wait = False
+                self._transcription_ready.clear()
+                raise ListenAborted()
             
             if not received_transcription and use_timeout and not self._speech_detected:
                 logger.log(self.loglevel, f"Silence timeout of {silence_timeout} seconds reached without speech")

@@ -19,7 +19,7 @@ from src.llm.message_thread import message_thread
 from src.conversation.conversation_type import conversation_type, multi_npc, pc_to_npc, radiant
 from src.character_manager import Character
 from src.http.communication_constants import communication_constants as comm_consts
-from src.stt.stt import Transcriber
+from src.stt.stt import ListenAborted, Transcriber
 import src.utils as utils
 from src.actions.function_manager import FunctionManager
 
@@ -263,7 +263,11 @@ class Conversation:
                 # Start tracking how long it has taken to receive a player response
                 input_wait_start_time = time.time()
                 while not player_text:
-                    player_text = self.__stt.get_latest_transcription(silence_timeout=silence_timeout)
+                    try:
+                        player_text = self.__stt.get_latest_transcription(silence_timeout=silence_timeout)
+                    except ListenAborted:  # LIVINGWORLD PATCH: the conversation is ending
+                        self.__stt.stop_listening()
+                        raise
                     
                     # Handle silence timeout (None returned)
                     if player_text is None:
@@ -484,6 +488,10 @@ class Conversation:
         return None
 
     @utils.time_it
+    def abort_player_wait(self) -> bool:
+        """LIVINGWORLD PATCH: stop waiting for the player to speak, because the conversation is ending."""
+        return bool(self.__stt) and self.__stt.abort_wait()
+
     def end(self, end_timestamp: float | None = None):
         """Ends a conversation
         

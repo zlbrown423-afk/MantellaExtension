@@ -59,7 +59,7 @@ def test_note_text():
 def test_rule_mentions_the_listener():
     lines = hearing.prompt_lines(["Gerdur"], "Torvar")
     assert "what Gerdur hears" in lines[0]
-    assert any("Thane, you say?" in line for line in lines)
+    assert any("short question" in line for line in lines)
     assert "what those listening hear" in hearing.prompt_lines(["Gerdur", "Hod"], "Torvar")[0]
 
 
@@ -87,3 +87,15 @@ def test_switched_off(tmp_path, monkeypatch):
         call = llm.dialogue_calls[-1]
         assert "Hearing Torvar:" not in call.system_prompt
         assert "may be" not in call.last_user_text
+
+
+def test_riften_words():
+    assert hearing.notes("I could catch him outside the pond pron.") == ['"pond pron" may be "Pawned Prawn"']
+    assert hearing.notes("Ma'avin sent me to look for him.") == ['"Ma\'avin" may be "Maven"']
+    assert hearing.notes("Looking for a gentleman named Wald.") == ['"named Wald" may be "named Vald"']
+    assert hearing.notes("I opened the vault door.") == []
+
+
+def test_the_rule_gives_no_word_to_parrot():
+    rule = " ".join(hearing.prompt_lines(["Laila"], "Titus"))
+    assert "Thane, you say" not in rule and "Never ask about a word they did not say" in rule

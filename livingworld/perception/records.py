@@ -33,6 +33,11 @@ fight ends: ``hp`` is the lowest share of health they fell to (0..1). A ``swim``
 stops swimming: ``dur`` is how long, in seconds. Both only change how clean someone is (see ``hygiene/``).
 An ``attire`` record also carries ``sex`` (``m`` or ``f``), the actor's sex in game.
 
+A ``react`` record is someone reacting on the spot to the player's hands on them, outside any conversation:
+``actor`` is who reacts, ``target`` the player, ``via`` is ``victim`` (the person grabbed speaks up) or ``guard``
+(a guard who saw it steps in, and ``party`` is the person grabbed); ``area`` and ``dur`` are the grab's. The game
+starts a conversation with them right after sending it.
+
 A ``purchase`` record is an NPC (``actor``) buying a round from a bartender (``target``) with the
 Living World OrderDrinks action: ``gold`` paid in total, ``payer`` is ``player`` or ``npc`` (the buyer),
 and ``party`` is who the round is shared with (the player). Buying is not drinking: it never counts
@@ -192,7 +197,7 @@ def parse_record(text: str) -> PerceptionRecord:
         fields["cover"] = fields["cover"].strip().lower()
     if fields.get("payer"):
         fields["payer"] = fields["payer"].strip().lower()
-    if kind not in ("grab", "consume", "attire", "purchase", "fight", "swim", "gift", "theft", "hit", "watch"):
+    if kind not in ("grab", "consume", "attire", "purchase", "fight", "swim", "gift", "theft", "hit", "watch", "react"):
         raise BadRecord(f"unknown event type {kind!r}")
     record = PerceptionRecord(
         key=fields["key"], type=kind, game_time=float(fields["gt"]), location=fields.get("loc") or None,
@@ -210,6 +215,9 @@ def parse_record(text: str) -> PerceptionRecord:
         witnesses=witnesses, raw=text)
     if kind == "watch" and (record.via not in ("approach", "observe") or record.win is None or not record.task):
         raise BadRecord("a watch record needs via=approach or observe, win and task")
+    if kind == "react" and (record.via not in ("victim", "guard") or record.target is None
+                            or (record.via == "guard" and record.party is None)):
+        raise BadRecord("a react record needs via=victim or guard, the player as target, and party for a guard")
     if kind == "grab" and record.target is None:
         raise BadRecord("a grab needs a target")
     if kind == "consume" and not record.item:

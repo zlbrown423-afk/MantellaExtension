@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from livingworld.guard import debug as D, duty as DU, encounter as ENC, incident as INC, orgs as O, prompts as P, profiles, recruit as R, store as S
+from livingworld.guard import debug as D, duty as DU, encounter as ENC, incident as INC, orgs as O, peace as PEACE, prompts as P, profiles, recruit as R, store as S
 from livingworld.guard.profiles import GuardFacts
 from livingworld.social import claims, processor
 from livingworld.store.minors import is_child
@@ -121,6 +121,10 @@ class Guard:
         org = O.by_key(p.org_key)
         if org is None:
             return out
+        stepped_in = PEACE.line(db, npc_id, name, scene.player_id, player, scene.now,
+                                fellow=org.name if svc is not None and svc.org_key == org.key else None)
+        if stepped_in:
+            out.append(stepped_in)
         if p.given_name:
             out.append(P.given_name(name, org, p))
         if svc is not None and svc.org_key == org.key:
