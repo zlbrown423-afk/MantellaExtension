@@ -148,7 +148,17 @@ def prompt_lines(name: str, carried: Mood | None) -> list[str]:
 
 # ---- storage (emotion_state) ----
 def save(db, npc_id: int, mood: Mood, game_time: float) -> None:
-    payload = json.dumps({"label": mood.label, "score": mood.score})
+    """Store the NPC's mood, keeping anything else in ``mood_json`` (body language keeps its feelings there)."""
+    data: dict = {}
+    row = db.execute("SELECT mood_json FROM emotion_state WHERE npc_id = ?", (npc_id,)).fetchone()
+    if row:
+        try:
+            loaded = json.loads(row[0] or "{}")
+            data = loaded if isinstance(loaded, dict) else {}
+        except ValueError:
+            data = {}
+    data.update({"label": mood.label, "score": mood.score})
+    payload = json.dumps(data)
     db.execute("INSERT INTO emotion_state (npc_id, mood_json, baseline_json, updated_gt) VALUES (?, ?, '{}', ?)"
                " ON CONFLICT(npc_id) DO UPDATE SET mood_json = excluded.mood_json, updated_gt = excluded.updated_gt",
                (npc_id, payload, game_time))

@@ -90,7 +90,8 @@ def test_mood_is_hidden_stored_and_sent_to_the_game(tmp_path):
 
         lines = s.say("You idiot.")
         assert lines[0].text == "Get out of my sight!"
-        assert talk_replies(s)[-1][KEY_MOOD] == "Gerdur: furious [=---------]"
+        # body language (bodylang/presence.clamp_mood_score): the tag moves at most 2 points a turn, 4 -> 2
+        assert talk_replies(s)[-1][KEY_MOOD] == "Gerdur: furious [==--------]"
         s.end(game_days=2.01)
 
     prompt = llm.dialogue_calls[0].system_prompt

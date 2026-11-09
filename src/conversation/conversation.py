@@ -301,6 +301,9 @@ class Conversation:
             hearing_note = living_world.hearing_note(player_text, self.__context) if living_world is not None else None # LIVINGWORLD PATCH
             if hearing_note: # LIVINGWORLD PATCH
                 new_message.add_event([hearing_note]) # LIVINGWORLD PATCH
+            body_notes = living_world.body_events(self.__context) if living_world is not None else None # LIVINGWORLD PATCH: body language noticed since the last line
+            if body_notes: # LIVINGWORLD PATCH
+                new_message.add_event(body_notes) # LIVINGWORLD PATCH
             self.__messages.add_message(new_message)
             player_voiceline = self.__get_player_voiceline(player_character, player_text)
             text = new_message.text
