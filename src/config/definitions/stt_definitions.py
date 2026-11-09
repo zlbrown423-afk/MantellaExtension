@@ -46,7 +46,7 @@ class STTDefinitions:
                     If you feel like you are being cut off before you finish your response, increase this value.
                     If you feel like there is too much of a delay between you finishing your response and the text conversion, decrease this value.
                     Set this value to 0 for faster response times."""
-        return ConfigValueFloat("pause_threshold","Pause Threshold", description, 0.25, 0, 999, tags=[ConfigValueTag.advanced])
+        return ConfigValueFloat("pause_threshold","Pause Threshold", description, 1.2, 0, 999, tags=[ConfigValueTag.advanced])
 
     @staticmethod
     def get_ptt_enabled_config_value() -> ConfigValue:
