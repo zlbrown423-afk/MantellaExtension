@@ -159,3 +159,15 @@ def presence(target_json: dict[str, Any], what: str, game_days: float, player_js
         parts.append(f"dur={seconds}")
     parts.append(f"n={count}")
     return "|".join(parts)
+
+
+def react(actor_json: dict[str, Any], player_json: dict[str, Any], game_days: float, via: str = "victim",
+          victim_json: dict[str, Any] | None = None, area: str = "left shoulder", seconds: float = 6.0,
+          location: str = "Whiterun", key: str | None = None) -> str:
+    """Someone reacting on the spot to the player's hands on them: the person grabbed, or a guard who saw it."""
+    parts = ["v=1", f"key={key or _key('react')}", "type=react", f"gt={game_days}", f"loc={location}",
+             f"actor={actor_field(actor_json)}", f"target={actor_field(player_json)}", f"via={via}",
+             f"area={area}", f"dur={seconds}"]
+    if victim_json is not None:
+        parts.append(f"party={actor_field(victim_json)}")
+    return "|".join(parts)
