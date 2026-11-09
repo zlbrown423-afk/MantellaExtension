@@ -7,6 +7,7 @@ An event the game sends twice (same key on the same timeline) is stored once.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -21,6 +22,14 @@ from livingworld.store.minors import is_child
 from livingworld.store.world_store import WorldStore
 
 logger = utils.get_logger()
+
+# Spells that land as a "hit" but do no harm: animation and expression spells (Anim: Kneel, Face: Gasp)
+# and our own test spells (Debug Bath). The game side skips non-hostile spells; this catches the rest.
+_HARMLESS_SPELL = re.compile(r"^\s*(?:anim|animation|face|expression|emote|pose|debug)\b", re.IGNORECASE)
+
+
+def harmless_spell(name: str | None) -> bool:
+    return bool(name) and bool(_HARMLESS_SPELL.match(name))
 
 
 @dataclass
@@ -59,6 +68,10 @@ class PerceptionPipeline:
             return self._guard_watch(record)
         if record.type == "react":
             return self._reaction(record)
+        if record.type == "hit" and harmless_spell(record.item):
+            # an animation, expression or test spell cast on someone is not an attack
+            logger.log(23, f"Living World: hit record {record.key} is a harmless spell ({record.item}); not stored")
+            return Outcome(None)
         timeline = self.store.active_timeline_id()
         # The game can send a record again after an older save is loaded (the save still has it queued).
         # Look on every timeline the active one can see, not only the active one, or the NPCs get the

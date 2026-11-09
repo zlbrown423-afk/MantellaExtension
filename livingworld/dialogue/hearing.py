@@ -4,7 +4,7 @@ The player's voice goes through speech-to-text before an NPC hears it, and small
 Skyrim words into English ones ("As thane of Whiterun" arrives as "As stain of white run"). Two parts:
 
 - ``prompt_lines``: a standing rule in each NPC's prompt. When a line makes no sense, the NPC
-  checks the word they think was meant ("Thane, you say?") or asks the player to say it again,
+  checks the word they think was meant ("Gerdur, you say?") or asks the player to say it again,
   instead of answering it literally.
 - ``notes``: for each player line, a short note naming likely mishearings, from a list of
   commonly misheard Skyrim words and from near-misses of the names of the people in the scene.
@@ -45,6 +45,13 @@ MISHEARD: list[tuple[str, str]] = [
     (r"\bfall\s*creeth\b|\bfalcrest\b|\bfalkreth\b", "Falkreath"),
     (r"\bwinter\s+hold\b", "Winterhold"),
     (r"\bsky\s+rim\b|\bsky\s+room\b", "Skyrim"),
+    # Riften
+    (r"\b(?:pond|pawn|pawned|ponned|pond's)\s+(?:pron|prawn|prong|prawns|prone|ron)\b", "Pawned Prawn"),
+    (r"\bragged\s+(?:flag\s*on|flaggin|flagging|wagon|dragon)\b", "Ragged Flagon"),
+    (r"\b(?:rifton|rift\s+ton|riff\s+ten|rift\s+ten)\b", "Riften"),
+    (r"\bmist\s*(?:vale|veil|whale)\s+(?:keep|cape)\b", "Mistveil Keep"),
+    (r"\b(?:honey\s+side|honey\s+cide)\b", "Honeyside"),
+    (r"\bbee\s+(?:and|in|n)\s+(?:barb|bob|barbe|bard)\b", "Bee and Barb"),
     # people (vanilla Whiterun hold)
     (r"\bbal\s*(?:gr|g)?(?:roof|ruf|rough|groove|grove)\b|\bbulgruf\b|\bball\s+groove\b", "Balgruuf"),
     (r"\b(?:i\s+rel?\s*eth|irilith|ira\s+leth|ear\s+a\s+leth)\b", "Irileth"),
@@ -59,6 +66,10 @@ MISHEARD: list[tuple[str, str]] = [
     (r"\b(?:emar|aimar|eye\s+mar)\b", "Eimar"),
     (r"\b(?:ulf\s+rick|olfrick|alfrick|elf\s+rick|ulf\s+rich)\b", "Ulfric"),
     (r"\b(?:storm\s+cloaks?|storm\s+clocks?)\b", "Stormcloak"),
+    (r"\b(?:ma'?avin|ma'?aven(?:ed)?|mavin|may\s+ven|maven'?ed)\b", "Maven"),
+    (r"\bblack\s+(?:briar|brier|bryer|friar)\b", "Black-Briar"),
+    (r"\b(?:brinjolf|bryn\s+jolf|brin\s+yolf|brynjulf)\b", "Brynjolf"),
+    (r"\b(?:named|called|for|find|is|about)\s+(?:vault|wald|valde|valled|valid)\b", "... Vald"),
     # lore words
     (r"\bdragon\s+born\b", "Dragonborn"),
     (r"\b(?:dova\s*keen|dovakin|dove\s+a\s+keen|dover\s+keen|dova\s+kin)\b", "Dovahkiin"),
@@ -94,9 +105,11 @@ def prompt_lines(npc_names: Iterable[str], player_name: str) -> list[str]:
         f"{player_name} speaks aloud, and what {who} hear{'s' if len(names) == 1 else ''} can come through "
         "garbled, the way half-heard words do: a wrong word that sounds like the right one "
         "(\"stain of white run\" for \"thane of Whiterun\", \"Kai's\" for \"Caius\").",
-        f"If a line from {player_name} makes no sense, or a key word seems wrong, do not answer it literally "
-        "and do not pretend to understand. Check the word you think they meant, briefly and in character "
-        "(\"Thane, you say?\", \"Gerdur? What about her?\"), or ask them to say it again.",
+        f"Most lines from {player_name} come through clearly: answer those normally and never question a word "
+        "that fits.",
+        f"Only if a line makes no sense, or a key word seems wrong, do not answer it literally and do not "
+        "pretend to understand. Repeat back the word you think they meant as a short question, in character, "
+        "or ask them to say it again. Never ask about a word they did not say.",
         "If the meaning is clear despite a wrong word, just answer what they meant without remarking on it.",
         "A note in the conversation may name likely misheard words. Use it as a guess, not a fact.",
         "Never mention transcription, microphones or text; to you it is only speech, sometimes unclear.",
@@ -115,6 +128,9 @@ def notes(text: str, names: Iterable[str] = ()) -> list[str]:
             if meant == "thane of ...":
                 hold = re.split(r"\s+of\s+", heard, maxsplit=1, flags=re.IGNORECASE)[1]
                 meant_here = f"thane of {_hold_name(hold)}"
+            elif meant.startswith("... "):
+                # the pattern needs the word before the name for context; keep that word as heard
+                meant_here = heard.rsplit(None, 1)[0] + " " + meant[4:]
             else:
                 meant_here = meant
             if _norm(heard) == _norm(meant_here):
