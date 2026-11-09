@@ -36,6 +36,8 @@ def talk(work_dir, day, say=None, npcs=None, location="Whiterun", extra=None):
                  if KEY_GUARD_ISSUE in (r.get(comm_consts.KEY_REPLYTYPE_NPCTALK) or {})]
         talk.issued = [line[KEY_GUARD_ISSUE] for line in lines]
         talk.counts = [line.get("mantella_lw_guard_issue_counts") for line in lines]
+        talk.hints = [h for _, r in s.exchanges for h in ((r.get(comm_consts.KEY_REPLYTYPE_NPCTALK) or {})
+                                                           .get("mantella_lw_hints") or [])]
     return llm.dialogue_calls[0].system_prompt if llm.dialogue_calls else ""
 
 
@@ -247,3 +249,65 @@ def test_developer_duty_tools(tmp_path, monkeypatch):
     assert run_dev(tmp_path, "--now", str(DAY + 0.4), "report")[1][-1] == "report: done"
     assert run_dev(tmp_path, "record")[1][-1].startswith("record: 1 duty done")
     assert run_dev(tmp_path, "--now", str(DAY + 7.1), "pay")[1][-1].startswith("pay: 1 weeks, earned 60")
+
+
+def irileth():
+    from tests.livingworld.test_guard import guard_keys
+    from livingworld.harness import actors
+    return guard_keys(actors.actor("Irileth", 0x00013BB8, 0x00013BB9, 1, "DarkElf", "FemaleDarkElf"), is_guard=False)
+
+
+def test_irileth_sends_her_recruit_to_caius_for_duties(tmp_path):
+    prompt = talk(tmp_path, DAY, say="I want to join the guard.", npcs=[irileth()])
+    assert "A recruit takes duties and wages from Commander Caius, not from Irileth." in prompt
+    assert service(open_db(tmp_path))["status"] == "probation"
+    prompt = talk(tmp_path, DAY + 0.01, npcs=[irileth()])
+    assert "duties, reports and wages go through Commander Caius" in prompt
+    assert "has a duty for Torvar" not in prompt and duties(tmp_path) == []
+
+
+def test_on_screen_notes_when_a_shift_starts_and_ends(tmp_path):
+    enlisted(tmp_path)
+    talk(tmp_path, DAY + 0.01)
+    assert any(h.startswith("Duty: ") and "report back to Commander Caius" in h for h in talk.hints), talk.hints
+    talk(tmp_path, DAY + 0.05, npcs=[whiterun_guard()])
+    assert "On duty: seen at your post (Whiterun)." in talk.hints
+    talk(tmp_path, DAY + 0.3, npcs=[whiterun_guard()], location="Riverwood")
+    assert "Shift over: report back to Commander Caius." in talk.hints
+
+
+def test_the_prompt_gives_clock_times_for_the_shift():
+    from livingworld.guard import prompts as P
+    assert P.clock(3 + 9 / 24 + 40 / 1440) == "9:40 am" and P.clock(3 + 13 / 24 + 40 / 1440) == "1:40 pm"
+    assert P.clock(4.0) == "12:00 am"
+
+
+def test_caius_reminds_with_the_real_shift_times(tmp_path):
+    enlisted(tmp_path)
+    task = given_duty(tmp_path, DAY + 0.01)
+    d = DU.rules("whiterun_guard").duty(task["template"])
+    prompt = talk(tmp_path, DAY + 0.01 + d.shift_hours / 24)          # exactly at the end of the shift
+    assert "the shift runs from" in prompt and "so it is over." in prompt
+
+
+def test_no_duty_at_night_is_said_plainly_and_not_invented(tmp_path):
+    enlisted(tmp_path, day=3.05)                          # 1:12 am: nothing for a recruit until the 6 am drill
+    prompt = talk(tmp_path, 3.06)
+    assert "has no duty for Torvar right now (no duty for a Recruit at this hour)" in prompt
+    assert "starts at 6:00 am" in prompt and "does not invent a duty" in prompt
+    assert duties(tmp_path) == []
+
+
+def test_a_recruit_gets_the_evening_lamp_round(tmp_path):
+    enlisted(tmp_path, day=3.86)                          # 8:38 pm, the hour of the user's first try
+    prompt = talk(tmp_path, 3.87)
+    assert "walk the evening lamp round" in prompt and duties(tmp_path)[-1]["template"] == "duty:lamp_round"
+
+
+def test_resting_between_duties_says_when_to_come_back(tmp_path):
+    enlisted(tmp_path)
+    given_duty(tmp_path, DAY + 0.01)
+    talk(tmp_path, DAY + 0.05, npcs=[whiterun_guard()])
+    talk(tmp_path, DAY + 0.2, say="Reporting back.")
+    prompt = talk(tmp_path, DAY + 0.21)
+    assert "has no duty for Torvar right now (last duty ended" in prompt and "starts at" in prompt

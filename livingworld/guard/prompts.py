@@ -57,6 +57,10 @@ def recruit_lines(name: str, player: str, d: R.Decision, recruiters: list[str], 
                f"two first, and expects a recruit to keep the peace, follow orders and serve the Jarl. If {name} accepts "
                f"and {player} still wants it, begin the reply with '{ENLIST_KEY}:'. A recruit gets the guard's "
                f"armour, but no authority over anyone yet."]
+        boss = org.superior(org.ranks[0].key)
+        if boss is not None:
+            out[0] += (f" A recruit takes duties and wages from {boss.name}" +
+                       (" (that is {name} themself)." if boss.name == name else f", not from {name}.").format(name=name))
         if d.invite:
             reason = (f"{player} is thane of {org.hold}" if thane else f"{name} thinks well of {player}")
             out.append(f"{reason}; if it fits the moment, {name} may suggest {player} join {org.name}.")
@@ -77,11 +81,18 @@ REPORT_KEY = "ReportDuty"
 PAY_KEY = "PayWages"
 
 
-def _hours(days: float) -> str:
+def hours_text(days: float) -> str:
     h = max(0.0, days * 24)
     if h < 1:
         return "less than an hour"
     return f"about {round(h)} hour{'s' if round(h) != 1 else ''}"
+
+
+def clock(gt: float) -> str:
+    """Game time (days.fraction) as a clock time, e.g. '1:40 pm'."""
+    minutes = int(round((gt % 1.0) * 24 * 60)) % (24 * 60)
+    h, m = divmod(minutes, 60)
+    return f"{(h % 12) or 12}:{m:02d} {'am' if h < 12 else 'pm'}"
 
 
 def quarters_line(name: str, player: str, org: O.Org) -> str:
@@ -92,15 +103,30 @@ def on_duty_line(name: str, player: str, task) -> str:
     return f"{player} is on duty right now: they were told to {task.title}."
 
 
+def report_to_line(name: str, player: str, superior: str) -> str:
+    return (f"{player}'s duties, reports and wages go through {superior}, {player}'s direct superior, not {name}. "
+            f"If {player} asks {name} for a duty or their pay, {name} sends them to {superior}.")
+
+
+def no_duty_line(name: str, player: str, why: str, next_at: float | None, now: float) -> str:
+    when = (f" The next duty {name} could give {player} starts at {clock(next_at)}; {name} may tell {player} to come "
+            f"back then." if next_at is not None and next_at > now else "")
+    return (f"{name} has no duty for {player} right now ({why}).{when} {name} does not invent a duty, a post, a shift "
+            f"length or times; {player} is off duty until given one. Do not use {REPORT_KEY}.")
+
+
 def duty_line(name: str, player: str, task, d, shift_end: float, now: float, *, new: bool, seen: bool) -> str:
     if new:
         head = (f"{name} is {player}'s superior and has a duty for {player} right now: {d.title}. "
-                f"Why: {d.why}. What to do: {d.instructions} The shift lasts {_hours(d.shift_hours / 24)}. "
-                f"{name} gives the order in their own words.")
+                f"Why: {d.why}. What to do: {d.instructions} The shift lasts {hours_text(d.shift_hours / 24)}: "
+                f"from now ({clock(now)}) until {clock(shift_end)}. {name} gives the order in their own words.")
     else:
         left = shift_end - now
-        when = f"with {_hours(left)} of the shift left" if left > 0 else "and the shift is over"
-        head = f"{name} gave {player} a duty: {d.title}, {when}."
+        start = shift_end - d.shift_hours / 24
+        when = (f"It is now {clock(now)}; the shift runs from {clock(start)} to {clock(shift_end)}, so "
+                + (f"{hours_text(left)} of it {'is' if round(left * 24) <= 1 else 'are'} left." if left > 0
+                   else "it is over."))
+        head = f"{name} gave {player} a duty: {d.title}. {when} Use these times, not a guess."
         if seen:
             head += f" Others have seen {player} at the post."
     return (head + f" When {player} comes back to report on this duty, {name} hears them out and asks what happened; "
