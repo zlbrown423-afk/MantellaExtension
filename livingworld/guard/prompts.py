@@ -57,6 +57,10 @@ def recruit_lines(name: str, player: str, d: R.Decision, recruiters: list[str], 
                f"two first, and expects a recruit to keep the peace, follow orders and serve the Jarl. If {name} accepts "
                f"and {player} still wants it, begin the reply with '{ENLIST_KEY}:'. A recruit gets the guard's "
                f"armour, but no authority over anyone yet."]
+        boss = org.superior(org.ranks[0].key)
+        if boss is not None:
+            out[0] += (f" A recruit takes duties and wages from {boss.name}" +
+                       (" (that is {name} themself)." if boss.name == name else f", not from {name}.").format(name=name))
         if d.invite:
             reason = (f"{player} is thane of {org.hold}" if thane else f"{name} thinks well of {player}")
             out.append(f"{reason}; if it fits the moment, {name} may suggest {player} join {org.name}.")
@@ -77,7 +81,7 @@ REPORT_KEY = "ReportDuty"
 PAY_KEY = "PayWages"
 
 
-def _hours(days: float) -> str:
+def hours_text(days: float) -> str:
     h = max(0.0, days * 24)
     if h < 1:
         return "less than an hour"
@@ -92,14 +96,19 @@ def on_duty_line(name: str, player: str, task) -> str:
     return f"{player} is on duty right now: they were told to {task.title}."
 
 
+def report_to_line(name: str, player: str, superior: str) -> str:
+    return (f"{player}'s duties, reports and wages go through {superior}, {player}'s direct superior, not {name}. "
+            f"If {player} asks {name} for a duty or their pay, {name} sends them to {superior}.")
+
+
 def duty_line(name: str, player: str, task, d, shift_end: float, now: float, *, new: bool, seen: bool) -> str:
     if new:
         head = (f"{name} is {player}'s superior and has a duty for {player} right now: {d.title}. "
-                f"Why: {d.why}. What to do: {d.instructions} The shift lasts {_hours(d.shift_hours / 24)}. "
+                f"Why: {d.why}. What to do: {d.instructions} The shift lasts {hours_text(d.shift_hours / 24)}. "
                 f"{name} gives the order in their own words.")
     else:
         left = shift_end - now
-        when = f"with {_hours(left)} of the shift left" if left > 0 else "and the shift is over"
+        when = f"with {hours_text(left)} of the shift left" if left > 0 else "and the shift is over"
         head = f"{name} gave {player} a duty: {d.title}, {when}."
         if seen:
             head += f" Others have seen {player} at the post."

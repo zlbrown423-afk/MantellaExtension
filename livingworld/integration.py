@@ -604,6 +604,8 @@ class LivingWorld:
         text = self._moods_to_send.pop(speaker.ref_id, None)
         if text:
             keys[KEY_MOOD] = text
+        if self.guard and self.store is not None:
+            self._hints_to_send += self._guard_for(self.store).take_notices()   # shift started / over
         if self._hints_to_send:
             keys[KEY_HINTS] = self._hints_to_send
             self._hints_to_send = []

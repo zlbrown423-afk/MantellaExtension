@@ -57,6 +57,11 @@ class Guard:
     def __init__(self, store: WorldStore) -> None:
         self.store = store
         self._assigned: set[int] = set()     # duties given in the conversation now running
+        self.notices: list[str] = []          # on-screen notes for the player (shift started / over)
+
+    def take_notices(self) -> list[str]:
+        out, self.notices = self.notices, []
+        return out
 
     # ---- who is who ----
     def note(self, npc_id: int, facts: GuardFacts | None, gt: float) -> profiles.Profile | None:
@@ -137,6 +142,9 @@ class Guard:
         if npc_id != boss:
             if task is not None:
                 out.append(P.on_duty_line(name, player, task))
+            person = org.superior(svc.rank_key)
+            if person is not None:
+                out.append(P.report_to_line(name, player, person.name))
             return out
         if task is None and all(c.ok for c in DU.checks(db, org, svc, scene.now)):
             prev = DU.last(db, svc.member_id)
@@ -145,6 +153,9 @@ class Guard:
                 task = DU.assign(db, org, svc, npc_id, d, scene.now,
                                  witnesses=[i for i in scene.present if i != svc.member_id])
                 self._assigned.add(task.task_id)
+                boss_name = self._name(db, npc_id) or "your superior"
+                self.notices.append(f"Duty: {d.title}. Shift: {P.hours_text(d.shift_hours / 24)}. "
+                                    f"Be seen at your post, then report back to {boss_name}.")
         if task is not None:
             d = DU.rules(org.key).duty(task.template)
             if d is not None:
@@ -159,17 +170,33 @@ class Guard:
     def refresh(self, scene: Scene) -> dict[str, list[int]]:
         """Missed duties, probation, and whether the player is at their post right now."""
         self._assigned = set()
+        self.notices = []
         with self.store.transaction() as db:
             result = DU.upkeep(db, scene.now)
             svc = S.current(db, scene.player_id) if scene.player_id is not None else None
             org = O.by_key(svc.org_key) if svc else None
             boss = DU.superior_id(db, org, svc) if org else None
             # reporting to the superior is not standing the post: only other conversations count as sightings
+            held = DU.in_hand(db, svc.member_id) if svc is not None else None
+            first = held is not None and DU.seen_count(db, held) == 0
             if svc is not None and (boss is None or boss not in scene.present):
                 seen = DU.mark_seen(db, scene.player_id, scene.location, scene.now,
                                     witnesses=[i for i in scene.present if i != scene.player_id])
                 if seen is not None:
                     result.setdefault("seen", []).append(seen.task_id)
+                    if first:
+                        self.notices.append(f"On duty: seen at your post ({scene.location}).")
+            held = DU.in_hand(db, svc.member_id) if svc is not None else None
+            d = DU.rules(org.key).duty(held.template) if held is not None and org else None
+            if d is not None:
+                end = DU.shift_end(db, held, d)
+                boss_name = self._name(db, boss) or "your superior"
+                half = DU.assigned_gt(db, held) + d.shift_hours / 48.0
+                if scene.now >= end:
+                    self.notices.append(f"Shift over: report back to {boss_name}.")
+                elif scene.now >= half and DU.seen_count(db, held) > 0:
+                    self.notices.append(f"You may report back to {boss_name} now "
+                                        f"({P.hours_text(end - scene.now)} of the shift left).")
             processor.process(db, {"appraisal": claims.appraise})
         return result
 

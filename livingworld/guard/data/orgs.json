@@ -78,6 +78,11 @@
             "id": "0x00021615"
           },
           {
+            "name": "Steel Sword",
+            "plugin": "Skyrim.esm",
+            "id": "0x00013989"
+          },
+          {
             "name": "Whiterun Guard's Shield",
             "plugin": "Skyrim.esm",
             "id": "0x000214E0"

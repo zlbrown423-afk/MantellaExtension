@@ -36,6 +36,8 @@ def talk(work_dir, day, say=None, npcs=None, location="Whiterun", extra=None):
                  if KEY_GUARD_ISSUE in (r.get(comm_consts.KEY_REPLYTYPE_NPCTALK) or {})]
         talk.issued = [line[KEY_GUARD_ISSUE] for line in lines]
         talk.counts = [line.get("mantella_lw_guard_issue_counts") for line in lines]
+        talk.hints = [h for _, r in s.exchanges for h in ((r.get(comm_consts.KEY_REPLYTYPE_NPCTALK) or {})
+                                                           .get("mantella_lw_hints") or [])]
     return llm.dialogue_calls[0].system_prompt if llm.dialogue_calls else ""
 
 
@@ -247,3 +249,28 @@ def test_developer_duty_tools(tmp_path, monkeypatch):
     assert run_dev(tmp_path, "--now", str(DAY + 0.4), "report")[1][-1] == "report: done"
     assert run_dev(tmp_path, "record")[1][-1].startswith("record: 1 duty done")
     assert run_dev(tmp_path, "--now", str(DAY + 7.1), "pay")[1][-1].startswith("pay: 1 weeks, earned 60")
+
+
+def irileth():
+    from tests.livingworld.test_guard import guard_keys
+    from livingworld.harness import actors
+    return guard_keys(actors.actor("Irileth", 0x00013BB8, 0x00013BB9, 1, "DarkElf", "FemaleDarkElf"), is_guard=False)
+
+
+def test_irileth_sends_her_recruit_to_caius_for_duties(tmp_path):
+    prompt = talk(tmp_path, DAY, say="I want to join the guard.", npcs=[irileth()])
+    assert "A recruit takes duties and wages from Commander Caius, not from Irileth." in prompt
+    assert service(open_db(tmp_path))["status"] == "probation"
+    prompt = talk(tmp_path, DAY + 0.01, npcs=[irileth()])
+    assert "duties, reports and wages go through Commander Caius" in prompt
+    assert "has a duty for Torvar" not in prompt and duties(tmp_path) == []
+
+
+def test_on_screen_notes_when_a_shift_starts_and_ends(tmp_path):
+    enlisted(tmp_path)
+    talk(tmp_path, DAY + 0.01)
+    assert any(h.startswith("Duty: ") and "report back to Commander Caius" in h for h in talk.hints), talk.hints
+    talk(tmp_path, DAY + 0.05, npcs=[whiterun_guard()])
+    assert "On duty: seen at your post (Whiterun)." in talk.hints
+    talk(tmp_path, DAY + 0.3, npcs=[whiterun_guard()], location="Riverwood")
+    assert "Shift over: report back to Commander Caius." in talk.hints

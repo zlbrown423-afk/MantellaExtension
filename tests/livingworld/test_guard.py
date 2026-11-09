@@ -110,8 +110,8 @@ def test_asking_to_join_starts_a_service_as_a_recruit(tmp_path):
     assert svc["path"] == "applied" and svc["recruiter_id"] == npc_id(db, "Commander Caius")
     assert svc["member_id"] == npc_id(db, "Torvar")
     assert talk.issued == ["Whiterun Guard's Armor|Skyrim.esm|0x0002150D;Whiterun Guard's Helmet|Skyrim.esm|0x00021615;"
-                           "Whiterun Guard's Shield|Skyrim.esm|0x000214E0"]
-    assert talk.issued_ids == [[0x2150D, 0x21615, 0x214E0]] and talk.issued_plugins == [["Skyrim.esm"] * 3]
+                           "Steel Sword|Skyrim.esm|0x00013989;Whiterun Guard's Shield|Skyrim.esm|0x000214E0"]
+    assert talk.issued_ids == [[0x2150D, 0x21615, 0x13989, 0x214E0]] and talk.issued_plugins == [["Skyrim.esm"] * 4]
 
 
 def test_a_bounty_in_the_hold_bars_joining_and_the_action_is_refused(tmp_path):
