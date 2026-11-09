@@ -15,6 +15,10 @@ The game sends one ``type=presence`` record per meaningful moment, never per tic
 - ``stare``: the player kept facing the NPC from within 2 m for several seconds (head direction only:
   there is no eye tracking, so this is worded as "facing", never as "eyes")
 
+Gestures (BL2, read in VR through VRIK; ``target`` is the NPC the gesture was made to, ``about`` is who
+was pointed at, as a name): ``wave``, ``nod``, ``shake`` (head), ``point``, ``beckon``, ``hands_up``,
+``thumbs_up``, ``thumbs_down``.
+
 Only the player's behaviour is ever a percept (see the loop guards in ``__init__``).
 """
 from __future__ import annotations
@@ -25,14 +29,22 @@ from livingworld.bodylang.state import Feelings
 from livingworld.perception.records import RECORD_VERSION, BadRecord, GameActor, _actor
 
 KIND = "presence"
-WHATS = ("approach", "crowd", "backed_off", "weapon", "stare")
+GESTURES = ("wave", "nod", "shake", "point", "beckon", "hands_up", "thumbs_up", "thumbs_down")
+WHATS = ("approach", "crowd", "backed_off", "weapon", "stare") + GESTURES
 OBSERVATION_MINUTES = 15.0   # older observations are not worth telling the dialogue model
+ANSWERS = ("nod", "shake")   # a silent yes or no only means something right after a question
+ANSWER_MINUTES = 2.0
 MAX_OBSERVATIONS = 3
 FELT_LINE_AT = 0.3           # a feeling this strong gets a line in the prompt
 
 
 def is_presence(raw: str) -> bool:
     return "|type=presence" in (raw or "").lower()
+
+
+def is_gesture_record(raw: str) -> bool:
+    low = (raw or "").lower()
+    return any(f"|what={g}" in low for g in GESTURES)
 
 
 @dataclass(frozen=True)
@@ -46,6 +58,11 @@ class Presence:
     distance_m: float | None = None
     duration_s: float | None = None
     count: int = 1
+    about: str | None = None   # who the player pointed at (a name)
+
+    @property
+    def is_gesture(self) -> bool:
+        return self.what in GESTURES
 
 
 def _float(value: str | None) -> float | None:
@@ -78,7 +95,12 @@ def parse(raw: str) -> Presence:
         count = 1
     return Presence(key=fields["key"], game_time=float(fields["gt"]), location=fields.get("loc") or None,
                     actor=actor, target=target, what=what, distance_m=_float(fields.get("dist")),
-                    duration_s=_float(fields.get("dur")), count=count)
+                    duration_s=_float(fields.get("dur")), count=count, about=_about(fields.get("about")))
+
+
+def _about(value: str | None) -> str | None:
+    text = " ".join((value or "").split())[:60]
+    return text or None
 
 
 @dataclass
@@ -132,7 +154,17 @@ def appraise(p: Presence, traits: dict[str, float], bond: Bond) -> dict[str, flo
             return {}
         return {"embarrassment": round(0.1 * (0.5 + t("reserve")), 3),
                 "unease": round(0.05 * (0.5 + t("anxiety")), 3)}
-    return {}
+    if p.what == "hands_up":   # a surrender takes the edge off fear and anger
+        return {"fear": -0.15, "irritation": -0.08}
+    if p.what == "wave" and not bond.hostile:
+        return {"unease": -0.03}
+    if p.what == "thumbs_up":
+        return {"unease": -0.03, "irritation": -0.02}
+    if p.what == "thumbs_down":
+        return {"irritation": round(0.05 * (0.5 + t("temper")), 3)}
+    if p.what == "beckon" and bond.hostile:
+        return {"unease": round(0.05 * (0.5 + t("anxiety")), 3)}
+    return {}   # nod, shake, point: their meaning is for the conversation, not a feeling
 
 
 def observation(p: Presence, player_name: str) -> str:
@@ -153,6 +185,26 @@ def observation(p: Presence, player_name: str) -> str:
         return f"{player_name} drew a weapon or readied a spell {dist} away."
     if p.what == "stare":
         return f"{player_name} kept facing them from {dist} away for several seconds."
+    if p.what == "wave":
+        return f"{player_name} waved at them."
+    if p.what == "nod":
+        return f"{player_name} nodded (a silent yes)."
+    if p.what == "shake":
+        return f"{player_name} shook their head (a silent no)."
+    if p.what == "point":
+        if p.about and p.about != p.target.name:
+            return f"{player_name} pointed at {p.about}."
+        if p.about:
+            return f"{player_name} pointed at them."
+        return f"{player_name} pointed off into the distance."
+    if p.what == "beckon":
+        return f"{player_name} beckoned them over, a \"come here\" gesture."
+    if p.what == "hands_up":
+        return f"{player_name} raised both hands above their head, as if surrendering."
+    if p.what == "thumbs_up":
+        return f"{player_name} gave them a thumbs up."
+    if p.what == "thumbs_down":
+        return f"{player_name} gave them a thumbs down."
     return ""
 
 
