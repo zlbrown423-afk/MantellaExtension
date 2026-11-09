@@ -88,6 +88,13 @@ def hours_text(days: float) -> str:
     return f"about {round(h)} hour{'s' if round(h) != 1 else ''}"
 
 
+def clock(gt: float) -> str:
+    """Game time (days.fraction) as a clock time, e.g. '1:40 pm'."""
+    minutes = int(round((gt % 1.0) * 24 * 60)) % (24 * 60)
+    h, m = divmod(minutes, 60)
+    return f"{(h % 12) or 12}:{m:02d} {'am' if h < 12 else 'pm'}"
+
+
 def quarters_line(name: str, player: str, org: O.Org) -> str:
     return f"As a member of {org.name}, {player} has {org.quarters}."
 
@@ -104,12 +111,15 @@ def report_to_line(name: str, player: str, superior: str) -> str:
 def duty_line(name: str, player: str, task, d, shift_end: float, now: float, *, new: bool, seen: bool) -> str:
     if new:
         head = (f"{name} is {player}'s superior and has a duty for {player} right now: {d.title}. "
-                f"Why: {d.why}. What to do: {d.instructions} The shift lasts {hours_text(d.shift_hours / 24)}. "
-                f"{name} gives the order in their own words.")
+                f"Why: {d.why}. What to do: {d.instructions} The shift lasts {hours_text(d.shift_hours / 24)}: "
+                f"from now ({clock(now)}) until {clock(shift_end)}. {name} gives the order in their own words.")
     else:
         left = shift_end - now
-        when = f"with {hours_text(left)} of the shift left" if left > 0 else "and the shift is over"
-        head = f"{name} gave {player} a duty: {d.title}, {when}."
+        start = shift_end - d.shift_hours / 24
+        when = (f"It is now {clock(now)}; the shift runs from {clock(start)} to {clock(shift_end)}, so "
+                + (f"{hours_text(left)} of it {'is' if round(left * 24) <= 1 else 'are'} left." if left > 0
+                   else "it is over."))
+        head = f"{name} gave {player} a duty: {d.title}. {when} Use these times, not a guess."
         if seen:
             head += f" Others have seen {player} at the post."
     return (head + f" When {player} comes back to report on this duty, {name} hears them out and asks what happened; "

@@ -274,3 +274,17 @@ def test_on_screen_notes_when_a_shift_starts_and_ends(tmp_path):
     assert "On duty: seen at your post (Whiterun)." in talk.hints
     talk(tmp_path, DAY + 0.3, npcs=[whiterun_guard()], location="Riverwood")
     assert "Shift over: report back to Commander Caius." in talk.hints
+
+
+def test_the_prompt_gives_clock_times_for_the_shift():
+    from livingworld.guard import prompts as P
+    assert P.clock(3 + 9 / 24 + 40 / 1440) == "9:40 am" and P.clock(3 + 13 / 24 + 40 / 1440) == "1:40 pm"
+    assert P.clock(4.0) == "12:00 am"
+
+
+def test_caius_reminds_with_the_real_shift_times(tmp_path):
+    enlisted(tmp_path)
+    task = given_duty(tmp_path, DAY + 0.01)
+    d = DU.rules("whiterun_guard").duty(task["template"])
+    prompt = talk(tmp_path, DAY + 0.01 + d.shift_hours / 24)          # exactly at the end of the shift
+    assert "the shift runs from" in prompt and "so it is over." in prompt

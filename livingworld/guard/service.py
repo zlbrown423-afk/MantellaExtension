@@ -10,6 +10,9 @@ from livingworld.guard.profiles import GuardFacts
 from livingworld.social import claims, processor
 from livingworld.store.minors import is_child
 from livingworld.store.world_store import WorldStore
+from src import utils
+
+logger = utils.get_logger()
 
 ENLIST = "mantella_lw_guard_enlist"
 REPORT = "mantella_lw_guard_report"
@@ -159,6 +162,10 @@ class Guard:
         if task is not None:
             d = DU.rules(org.key).duty(task.template)
             if d is not None:
+                logger.log(23, f"Living World guard: duty {task.task_id} '{d.key}' given day "
+                               f"{DU.assigned_gt(db, task):.4f} ({P.clock(DU.assigned_gt(db, task))}), ends "
+                               f"{P.clock(DU.shift_end(db, task, d))}, now day {scene.now:.4f} ({P.clock(scene.now)}), "
+                               f"seen {DU.seen_count(db, task)}, new={task.task_id in self._assigned}")
                 out.append(P.duty_line(name, player, task, d, DU.shift_end(db, task, d), scene.now,
                                        new=task.task_id in self._assigned, seen=DU.seen_count(db, task) > 0))
         out.append(P.record_line(name, player, DU.record(db, svc)))
