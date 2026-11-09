@@ -11,7 +11,7 @@ Run on the PC with the game's database, while the Mantella server is NOT running
     python -m livingworld.guard.dev --db ... dismiss | reinstate whiterun
     python -m livingworld.guard.dev --db ... thane whiterun
     python -m livingworld.guard.dev --db ... reset whiterun --yes
-    python -m livingworld.guard.dev --db ... duty | seen | report | pay | record | probation | upkeep
+    python -m livingworld.guard.dev --db ... duty | seen | report | pay | record | probation | upkeep | incident [camp|road|brawl|theft]
 
 "Now" is the latest game time in the database unless ``--now`` is given. Everything written here is on the
 active save timeline and marked as coming from the developer (``source = 'admin'`` events, reasons starting
@@ -72,6 +72,7 @@ def run(argv: list[str], out=print) -> int:
     sub.add_parser("thane").add_argument("org", nargs="?")
     for verb in ("duty", "seen", "report", "pay", "record", "probation", "upkeep"):
         sub.add_parser(verb)
+    sub.add_parser("incident").add_argument("kind", nargs="?", choices=("camp", "road", "brawl", "theft"))
     r = sub.add_parser("reset"); r.add_argument("org", nargs="?"); r.add_argument("--yes", action="store_true")
     args = p.parse_args(argv)
 
@@ -168,7 +169,8 @@ def _dispatch(db, args, now: float, out) -> int:
         out(run_command(db, D.Command("rank", o.key, o.ranks[i].key), o, player, now, None))
         return 0
     verb = {"set-rank": "rank"}.get(cmd, cmd)
-    out(run_command(db, D.Command(verb, org.key, getattr(args, "rank", None)), org, player, now, None))
+    out(run_command(db, D.Command(verb, org.key, getattr(args, "rank", None), getattr(args, "kind", None)), org,
+                    player, now, None))
     return 0
 
 

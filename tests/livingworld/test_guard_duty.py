@@ -10,6 +10,7 @@ import pytest
 from livingworld.guard import duty as DU, orgs as O, store as S
 from livingworld.harness.scripted_llm import ScriptedLLM, when_player_says
 from livingworld.harness.session import HeadlessSession
+from livingworld.harness.perception import KEY_EVENTS, fight
 from livingworld.integration import KEY_GUARD_ISSUE, LivingWorld
 from livingworld.store.world_store import WorldStore
 from src.http.communication_constants import communication_constants as comm_consts
@@ -22,10 +23,11 @@ REPORT = when_player_says("reporting back", "ReportDuty: Let's hear it, then.")
 PAY = when_player_says("my wages", "PayWages: Here, your pay.")
 
 
-def talk(work_dir, day, say=None, npcs=None, location="Whiterun", extra=None):
+def talk(work_dir, day, say=None, npcs=None, location="Whiterun", extra=None, events=None):
     llm = ScriptedLLM(rules=[ENLIST, REPORT, PAY], replies=["Hm."])
     with HeadlessSession(str(work_dir), llm) as s:
-        s.start([PLAYER, *(npcs or [caius()])], location=location, game_days=day, extra=extra)
+        s.start([PLAYER, *(npcs or [caius()])], location=location, game_days=day, extra=extra,
+                context_extra={KEY_EVENTS: events} if events else None)
         s.continue_until_player_turn()
         if say:
             s.say(say)
@@ -311,3 +313,67 @@ def test_resting_between_duties_says_when_to_come_back(tmp_path):
     talk(tmp_path, DAY + 0.2, say="Reporting back.")
     prompt = talk(tmp_path, DAY + 0.21)
     assert "has no duty for Torvar right now (last duty ended" in prompt and "starts at" in prompt
+
+
+
+# ---- G2d incidents ----
+
+def claims_of(work_dir, act):
+    return [r[0] for r in open_db(work_dir).execute("SELECT detail FROM claim WHERE act = ?", (act,))]
+
+
+def test_a_theft_is_handed_out_dealt_with_and_the_arrest_gets_around(tmp_path):
+    enlisted(tmp_path)
+    talk(tmp_path, DAY + 0.005, say="debug guard incident theft", npcs=[whiterun_guard()], location="Riverwood")
+    prompt = talk(tmp_path, DAY + 0.01)
+    assert "sending Torvar to deal with trouble: catch the cutpurse" in prompt
+    assert "Trouble: catch the cutpurse" in " ".join(talk.hints)
+    task = duties(tmp_path)[-1]
+    assert task["template"].startswith("duty:incident:market_theft:")
+    talk(tmp_path, DAY + 0.02, npcs=[whiterun_guard()])                 # asking around in the market
+    talk(tmp_path, DAY + 0.03, say="Reporting back, I caught the thief.")  # no half-shift wait for trouble
+    assert duties(tmp_path)[-1]["state"] == "completed"
+    db = open_db(tmp_path)
+    assert db.execute("SELECT COUNT(*) FROM world_event WHERE type = 'guard.arrested'").fetchone()[0] == 1
+    assert any("in the Plains District market" in d for d in claims_of(tmp_path, "arrested"))
+    assert "Trouble the Whiterun Guard knows of" not in talk(tmp_path, DAY + 0.04, npcs=[whiterun_guard()])
+
+
+def test_bandits_only_count_once_you_fight_them_there(tmp_path):
+    enlisted(tmp_path)
+    talk(tmp_path, DAY + 0.005, say="debug guard incident camp", npcs=[whiterun_guard()], location="Riverwood")
+    talk(tmp_path, DAY + 0.01)
+    task = duties(tmp_path)[-1]
+    camp = task["location"]
+    assert task["template"].startswith("duty:incident:camp_raid:") and camp.endswith(("Camp", "Towers", "Retreat"))
+    talk(tmp_path, DAY + 0.1, npcs=[whiterun_guard()], location=camp)     # being there is not enough
+    assert duties(tmp_path)[-1]["state"] == "accepted"
+    talk(tmp_path, DAY + 0.3, npcs=[whiterun_guard()], location="Whiterun",
+         events=[fight(PLAYER, 0.5, DAY + 0.25, location=camp)])        # the game reports the fight there
+    assert duties(tmp_path)[-1]["state"] == "in_progress"
+    assert "Dealt with: report back to Commander Caius." in talk.hints
+    talk(tmp_path, DAY + 0.35, say="Reporting back: the camp is cleared.")
+    assert duties(tmp_path)[-1]["state"] == "completed"
+    assert any(camp in d for d in claims_of(tmp_path, "cleared"))
+
+
+def test_claiming_bandits_were_dealt_with_without_a_fight_is_a_false_report(tmp_path):
+    enlisted(tmp_path)
+    talk(tmp_path, DAY + 0.005, say="debug guard incident road", npcs=[whiterun_guard()], location="Riverwood")
+    talk(tmp_path, DAY + 0.01)
+    talk(tmp_path, DAY + 0.2, say="Reporting back, the road is safe.")
+    assert duties(tmp_path)[-1]["state"] == "failed"
+    assert service(open_db(tmp_path))["merit"] == pytest.approx(-3.0)
+
+
+def test_incidents_come_up_by_themselves_and_go_cold(tmp_path):
+    enlisted(tmp_path)
+    for day in range(4, 14):
+        talk(tmp_path, day + 0.4, npcs=[whiterun_guard()], location="Riverwood")
+    db = open_db(tmp_path)
+    opened = db.execute("SELECT COUNT(*) FROM world_event WHERE type = 'guard.incident'").fetchone()[0]
+    cold = db.execute("SELECT COUNT(*) FROM world_event WHERE type = 'guard.incident_closed'"
+                      " AND json_extract(payload_json, '$.outcome') = 'went cold'").fetchone()[0]
+    assert opened >= 3 and cold >= 1
+    rolls = db.execute("SELECT COUNT(*) FROM world_event WHERE type = 'guard.incident_roll'").fetchone()[0]
+    assert rolls == len({int(d) for d in range(4, 14)}) + 0 or rolls >= 10

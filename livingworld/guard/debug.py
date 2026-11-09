@@ -9,6 +9,7 @@
 * "debug guard seen"                                    - count you as seen at the post of the duty in hand
 * "debug guard report"                                  - report back on the duty in hand (the rules judge it)
 * "debug guard pay" / "debug guard record"              - show wages owed / the service record
+* "debug guard incident" / "... incident camp|road|brawl|theft" - open an incident now
 * "debug guard probation"                               - settle probation now as if it had run its course
 
 "debug" (or "test") and "guard" must both be in the line, so normal speech never triggers it. The hold
@@ -23,7 +24,7 @@ from dataclasses import dataclass
 from livingworld.guard import orgs as O
 
 COMMANDS = ("enlist", "rank", "dismiss", "reinstate", "thane", "status", "duty", "seen", "report", "pay", "record",
-            "probation")
+            "probation", "incident")
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,7 @@ class Command:
     verb: str
     org_key: str | None
     rank: str | None = None
+    arg: str | None = None
 
 
 def parse(text: str) -> Command | None:
@@ -48,4 +50,7 @@ def parse(text: str) -> Command | None:
         rank = next((w for w in words[words.index("rank") + 1:] if w in keys), None)
         if rank is None:
             return None
-    return Command(verb, org, rank)
+    arg = None
+    if verb == "incident":
+        arg = next((w for w in words[words.index("incident") + 1:] if w in ("camp", "road", "brawl", "theft")), None)
+    return Command(verb, org, rank, arg)

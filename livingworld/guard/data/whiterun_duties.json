@@ -123,5 +123,103 @@
       "min_rank": "guardsman",
       "merit": 1.0
     }
+  ],
+  "_about_incidents": "Incidents (G2d, guard/incident.py): trouble the guard is sent to deal with. Each game day every kind is rolled once (chance); at most one of each kind is open. The member's superior gives an open incident as a duty ahead of routine duties, at any hour, if the member's rank is at least min_rank. need 'seen' = done by being at a place in 'where' (a conversation there); need 'fight' = done only by fighting there. Reporting back after that closes it (outcome arrested / cleared, which gossip carries); merit as for duties. It goes cold after lasts_days if nobody takes it. {complainant} and {camp} are filled from the lists.",
+  "incidents": [
+    {
+      "key": "market_theft",
+      "title": "catch the cutpurse working the Plains District market",
+      "why": "{complainant} had a purse snatched in the market and wants the thief caught",
+      "instructions": "Go to the market, ask the stallholders and passers-by what they saw, find the thief and bring them in.",
+      "where": [
+        "Whiterun"
+      ],
+      "need": "seen",
+      "outcome": "arrested",
+      "place": "in the Plains District market",
+      "shift_hours": 3,
+      "lasts_days": 1,
+      "chance": 0.35,
+      "min_rank": "recruit",
+      "merit": 1.5,
+      "complainants": [
+        "Carlotta Valentia",
+        "Fralia Gray-Mane",
+        "Anoriath",
+        "Brenuin"
+      ],
+      "culprits": [
+        "a drifter named Hrolfr Two-Purses",
+        "a Dunmer sellsword named Teris Arvel",
+        "a Breton tinker named Jonnet",
+        "a Nord farmhand named Ulgar the Lean"
+      ]
+    },
+    {
+      "key": "tavern_brawl",
+      "title": "break up the brawl at the Bannered Mare",
+      "why": "Hulda sent word that drinkers at the Bannered Mare have come to blows",
+      "instructions": "Get to the Bannered Mare, separate the brawlers, and take the one who started it to the cells.",
+      "where": [
+        "Bannered Mare"
+      ],
+      "need": "seen",
+      "outcome": "arrested",
+      "place": "at the Bannered Mare",
+      "shift_hours": 2,
+      "lasts_days": 0.5,
+      "chance": 0.25,
+      "min_rank": "recruit",
+      "merit": 1.0,
+      "culprits": [
+        "a drunk caravan guard named Bjorn Ale-Belly",
+        "a farmhand from the Battle-Born fields named Gerdvald",
+        "a sellsword named Kraldar the Loud"
+      ]
+    },
+    {
+      "key": "road_bandits",
+      "title": "drive off the bandits waylaying travellers on the road to Riverwood",
+      "why": "Travellers coming up from Riverwood say bandits are stopping carts near the river and taking their coin",
+      "instructions": "Ride or walk the road towards Riverwood, find the bandits and drive them off or put them down. Come back when it is done.",
+      "where": [
+        "Riverwood",
+        "Whiterun Stables",
+        "Honningbrew",
+        "Pelagia",
+        "Riverwood Road"
+      ],
+      "need": "fight",
+      "outcome": "cleared",
+      "place": "on the road to Riverwood",
+      "shift_hours": 12,
+      "lasts_days": 2,
+      "chance": 0.25,
+      "min_rank": "recruit",
+      "merit": 2.5
+    },
+    {
+      "key": "camp_raid",
+      "title": "clear out the bandits at {camp}",
+      "why": "The bandits holed up at {camp} have been raiding farms on the plains, and the Jarl wants them gone",
+      "instructions": "Take whoever you can trust, go to {camp} and clear the bandits out. Come back and report when it is done.",
+      "where": [
+        "{camp}"
+      ],
+      "need": "fight",
+      "outcome": "cleared",
+      "place": "at {camp}",
+      "shift_hours": 24,
+      "lasts_days": 3,
+      "chance": 0.15,
+      "min_rank": "recruit",
+      "merit": 4.0,
+      "camps": [
+        "Halted Stream Camp",
+        "Silent Moons Camp",
+        "Valtheim Towers",
+        "Redoran's Retreat"
+      ]
+    }
   ]
 }

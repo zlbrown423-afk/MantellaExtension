@@ -51,6 +51,9 @@ class Duty:
     min_rank: str | None
     max_rank: str | None
     merit: float
+    need: str = "seen"                 # 'seen' at the post | 'fight' there (bandits)
+    incident_id: int | None = None     # G2d: the guard.incident this duty answers
+    outcome: str | None = None         # incident: 'arrested' | 'cleared'
 
 
 @dataclass(frozen=True)
@@ -85,6 +88,22 @@ def rules(org_key: str) -> Rules:
 
 
 # ---- small helpers ----
+
+def incident_duty(inc) -> Duty:
+    return Duty(f"incident:{inc.key}:{inc.event_id}", inc.title, inc.why, inc.instructions, inc.where, (0, 24),
+                inc.shift_hours, inc.min_rank, None, inc.merit, inc.need, inc.event_id, inc.outcome)
+
+
+def duty_for(db, task: T.Task) -> Duty | None:
+    """The duty a task stands for: a routine one from the org's list, or an incident."""
+    from livingworld.guard import incident as INC
+    inc_id = INC.event_id_of(task.template)
+    if inc_id is not None:
+        inc = INC.get(db, inc_id)
+        return incident_duty(inc) if inc else None
+    org = _org_of(db, task)
+    return rules(org.key).duty(task.template) if org else None
+
 
 def hour_of(now: float) -> int:
     return int((now % 1.0) * 24)
@@ -214,14 +233,27 @@ def mark_seen(db, member_id: int, location: str | None, now: float, witnesses: l
     task = in_hand(db, member_id)
     if task is None:
         return None
-    org = _org_of(db, task)
-    d = rules(org.key).duty(task.template) if org else None
-    if d is None:
+    d = duty_for(db, task)
+    if d is None or (d.need == "fight" and not force):
         return None
     if not force and (not at_post(d, location) or now > shift_end(db, task, d) + 1e-9):
         return None
     state = "in_progress" if task.state in ("accepted", "paused") else None
     return T.change(db, task, state, f"seen at post: {location or 'developer'}", now, witnesses=witnesses)
+
+
+def mark_fought(db, member_id: int, location: str | None, now: float) -> T.Task | None:
+    """A fight the game reported at ``location``: counts for a bandit duty there, while it runs."""
+    task = in_hand(db, member_id)
+    d = duty_for(db, task) if task else None
+    if d is None or d.need != "fight" or not at_post(d, location) or (task.deadline_gt and now > task.deadline_gt):
+        return None
+    state = "in_progress" if task.state in ("accepted", "paused") else None
+    return T.change(db, task, state, f"fought at post: {location}", now)
+
+
+def fought_count(db, task: T.Task) -> int:
+    return T.count_changes(db, task.task_id, "fought at post")
 
 
 def _org_of(db, task: T.Task) -> O.Org | None:
@@ -292,12 +324,14 @@ def report(db, org: O.Org, svc: S.Service, superior: int, now: float, said: str 
     if task is None:
         return Report("none", None)
     r = rules(org.key)
-    d = r.duty(task.template)
+    d = duty_for(db, task)
     member, boss = svc.member_id, superior
     words = (said or "").strip()
     quoted = f" They said: \"{words[:300]}\"" if words else ""
-    seen = seen_count(db, task) > 0
+    seen = (fought_count(db, task) if d and d.need == "fight" else seen_count(db, task)) > 0
     half = assigned_gt(db, task) + (d.shift_hours if d else 4) / 48.0
+    if d is not None and d.incident_id is not None:
+        half = assigned_gt(db, task)          # an incident is done when dealt with, not after a shift
     who = _name(db, member)
     if not seen:
         task = T.change(db, task, "failed", "false report: nobody saw them at their post", now,
@@ -306,8 +340,8 @@ def report(db, org: O.Org, svc: S.Service, superior: int, now: float, said: str 
         reprimand(db, svc, boss, f"false report about the duty to {task.title}", r.false_merit, now,
                   task_id=task.task_id, witnesses=witnesses, source=source)
         _relate(db, boss, member, {"trust": -0.08, "respect": -0.05}, event_id, f"false duty report (task {task.task_id})", now)
-        _remember(db, boss, member, f"{who} reported that they had done their duty to {task.title}, but nobody saw "
-                                    f"them at their post.{quoted}", -0.5, 0.6, event_id, location, now)
+        _remember(db, boss, member, f"{who} reported that they had done their duty to {task.title}, but there was "
+                                    f"no sign of it.{quoted}", -0.5, 0.6, event_id, location, now)
         return Report("false", task)
     if now < half:
         task = T.change(db, task, "failed", "left the post early", now, payload={"duty_report": "early"},
@@ -327,6 +361,12 @@ def report(db, org: O.Org, svc: S.Service, superior: int, now: float, said: str 
             f"duty done (task {task.task_id})", now)
     _remember(db, boss, member, f"{who} reported back from their duty to {task.title}.{quoted}", 0.2, 0.35, event_id,
               location, now)
+    if d is not None and d.incident_id is not None:
+        from livingworld.guard import incident as INC
+        inc = INC.get(db, d.incident_id)
+        if inc is not None:
+            INC.close(db, inc, d.outcome or "cleared", now, member_id=member, by=boss, witnesses=witnesses,
+                      source=source)
     fresh = S.get(db, svc.service_id)
     return Report("done", task, _maybe_commend(db, org, fresh, boss, now, witnesses, source))
 

@@ -115,7 +115,21 @@ def no_duty_line(name: str, player: str, why: str, next_at: float | None, now: f
             f"length or times; {player} is off duty until given one. Do not use {REPORT_KEY}.")
 
 
+def incidents_line(name: str, org: O.Org, incidents) -> str:
+    items = "; ".join(f"{i.why}" for i in incidents[:3])
+    return (f"Trouble {org.name} knows of right now: {items}. {name} knows this as any guard would and may mention "
+            f"it, without inventing details beyond it.")
+
+
 def duty_line(name: str, player: str, task, d, shift_end: float, now: float, *, new: bool, seen: bool) -> str:
+    if d.incident_id is not None:
+        how = ("fighting the bandits there" if d.need == "fight" else "going there and dealing with it")
+        head = (f"{name} is sending {player} to deal with trouble: {d.title}. Why: {d.why}. What to do: "
+                f"{d.instructions} There is no set shift; it is done by {how}." if new else
+                f"{name} sent {player} to deal with trouble: {d.title}." +
+                (f" There are signs {player} has dealt with it." if seen else ""))
+        return (head + f" When {player} comes back to report, {name} hears them out; then begin the reply with "
+                f"'{REPORT_KEY}:'. {name} does not decide whether it was really done; the guard's record will show it.")
     if new:
         head = (f"{name} is {player}'s superior and has a duty for {player} right now: {d.title}. "
                 f"Why: {d.why}. What to do: {d.instructions} The shift lasts {hours_text(d.shift_hours / 24)}: "

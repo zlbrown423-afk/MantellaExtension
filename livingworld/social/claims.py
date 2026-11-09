@@ -162,7 +162,7 @@ def appraise(db, event) -> int | None:
 
 GUARD_ACTS = {"guard.enlisted": "enlisted", "guard.promoted": "promoted", "guard.demoted": "demoted",
               "guard.dismissed": "dismissed", "guard.reinstated": "reinstated", "guard.commended": "commended",
-              "guard.reprimanded": "reprimanded"}
+              "guard.reprimanded": "reprimanded", "guard.arrested": "arrested", "guard.cleared": "cleared"}
 
 
 def _guard_claim(etype: str, payload: dict) -> tuple[str, str, float, str, float] | None:
@@ -177,9 +177,11 @@ def _guard_claim(etype: str, payload: dict) -> tuple[str, str, float, str, float
               "demoted": f" to {rank} in {org.name}", "dismissed": f" from {org.name}",
               "reinstated": f" into {org.name} as {a_rank}",
               "commended": f" for good service in {org.name}",
-              "reprimanded": f" in {org.name} ({payload.get('why') or 'a breach of duty'})"}[act_name]
+              "reprimanded": f" in {org.name} ({payload.get('why') or 'a breach of duty'})",
+              "arrested": f" {payload.get('culprit') or 'a troublemaker'} {payload.get('place') or ''}".rstrip(),
+              "cleared": f" the bandits {payload.get('place') or ''}".rstrip()}[act_name]
     valence = {"enlisted": 0.2, "promoted": 0.3, "demoted": -0.3, "dismissed": -0.5, "reinstated": 0.1,
-               "commended": 0.3, "reprimanded": -0.25}[act_name]
+               "commended": 0.3, "reprimanded": -0.25, "arrested": 0.3, "cleared": 0.4}[act_name]
     return act_name, detail, {"dismissed": 0.6, "enlisted": 0.4}.get(act_name, 0.4), "public", valence
 
 
