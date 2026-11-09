@@ -13,8 +13,13 @@
       "title": "stand watch at the main gate",
       "why": "Every traveller, caravan and drunk from the Bannered Mare's road comes through the main gate, and the Jarl wants eyes on all of them",
       "instructions": "Stand by the main gate, question strangers who look like trouble, and keep the road clear.",
-      "where": ["Whiterun"],
-      "hours": [6, 18],
+      "where": [
+        "Whiterun"
+      ],
+      "hours": [
+        6,
+        18
+      ],
       "shift_hours": 6,
       "min_rank": "recruit",
       "merit": 1.0
@@ -24,8 +29,13 @@
       "title": "walk the walls and the Plains District on patrol",
       "why": "Giants, bandits and now dragons come from the plains, and the walls are only as good as the guards on them",
       "instructions": "Walk the wall walks and the Plains District, look out over the plains, and report anything odd.",
-      "where": ["Whiterun"],
-      "hours": [8, 20],
+      "where": [
+        "Whiterun"
+      ],
+      "hours": [
+        8,
+        20
+      ],
       "shift_hours": 4,
       "min_rank": "recruit",
       "merit": 1.0
@@ -35,8 +45,13 @@
       "title": "keep order in the Plains District market",
       "why": "Pickpockets work the market stalls and tempers run hot over prices",
       "instructions": "Stay near the market stalls, watch for thieves, and calm quarrels before they turn into fights.",
-      "where": ["Whiterun"],
-      "hours": [8, 18],
+      "where": [
+        "Whiterun"
+      ],
+      "hours": [
+        8,
+        18
+      ],
       "shift_hours": 4,
       "min_rank": "recruit",
       "merit": 1.0
@@ -46,8 +61,31 @@
       "title": "drill with the other recruits at the barracks",
       "why": "A recruit who cannot hold a shield wall is a danger to the guard beside them",
       "instructions": "Go to the barracks by the main gate and drill: shield, sword and bow.",
-      "where": ["Barracks", "Whiterun"],
-      "hours": [6, 12],
+      "where": [
+        "Barracks",
+        "Whiterun"
+      ],
+      "hours": [
+        6,
+        12
+      ],
+      "shift_hours": 3,
+      "min_rank": "recruit",
+      "max_rank": "recruit",
+      "merit": 0.5
+    },
+    {
+      "key": "lamp_round",
+      "title": "walk the evening lamp round with the watch",
+      "why": "When the sun goes down the braziers on the walls and the gate need lighting and tending, and a recruit learns the night streets that way",
+      "instructions": "Go round with the evening watch: light and tend the braziers on the walls and at the gate, and walk the Plains District until the streets are quiet.",
+      "where": [
+        "Whiterun"
+      ],
+      "hours": [
+        18,
+        24
+      ],
       "shift_hours": 3,
       "min_rank": "recruit",
       "max_rank": "recruit",
@@ -58,8 +96,13 @@
       "title": "keep the night watch on the walls",
       "why": "Most trouble comes after dark, and the night watch is the one nobody wants",
       "instructions": "Take the night watch on the walls and at the gate until the morning shift relieves you.",
-      "where": ["Whiterun"],
-      "hours": [20, 6],
+      "where": [
+        "Whiterun"
+      ],
+      "hours": [
+        20,
+        6
+      ],
       "shift_hours": 6,
       "min_rank": "guardsman",
       "merit": 1.5
@@ -69,8 +112,13 @@
       "title": "stand guard in Dragonsreach",
       "why": "The Jarl holds court in Dragonsreach, and petitioners, envoys and the odd madman come before him every day",
       "instructions": "Stand your post in the great hall of Dragonsreach and keep the peace before the Jarl's throne.",
-      "where": ["Dragonsreach"],
-      "hours": [8, 20],
+      "where": [
+        "Dragonsreach"
+      ],
+      "hours": [
+        8,
+        20
+      ],
       "shift_hours": 6,
       "min_rank": "guardsman",
       "merit": 1.0

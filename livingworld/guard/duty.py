@@ -169,6 +169,18 @@ def choices(org: O.Org, svc: S.Service, prev_key: str | None, hour: int) -> list
     return fresh or fit
 
 
+def next_start(org: O.Org, svc: S.Service, now: float, rested_at: float | None = None) -> float | None:
+    """The first game time from ``now`` (or once rested) when some duty fits the member's rank and the hour."""
+    t = max(now, rested_at or now)
+    for step in range(0, 48):
+        at = t + step / 24.0 if step else t
+        if step:
+            at = int(at * 24) / 24.0          # on the hour
+        if choices(org, svc, None, hour_of(at)):
+            return at
+    return None
+
+
 def pick(org: O.Org, svc: S.Service, prev_key: str | None, now: float, key: str | None = None,
          any_hour: bool = False) -> Duty | None:
     if key:

@@ -288,3 +288,26 @@ def test_caius_reminds_with_the_real_shift_times(tmp_path):
     d = DU.rules("whiterun_guard").duty(task["template"])
     prompt = talk(tmp_path, DAY + 0.01 + d.shift_hours / 24)          # exactly at the end of the shift
     assert "the shift runs from" in prompt and "so it is over." in prompt
+
+
+def test_no_duty_at_night_is_said_plainly_and_not_invented(tmp_path):
+    enlisted(tmp_path, day=3.05)                          # 1:12 am: nothing for a recruit until the 6 am drill
+    prompt = talk(tmp_path, 3.06)
+    assert "has no duty for Torvar right now (no duty for a Recruit at this hour)" in prompt
+    assert "starts at 6:00 am" in prompt and "does not invent a duty" in prompt
+    assert duties(tmp_path) == []
+
+
+def test_a_recruit_gets_the_evening_lamp_round(tmp_path):
+    enlisted(tmp_path, day=3.86)                          # 8:38 pm, the hour of the user's first try
+    prompt = talk(tmp_path, 3.87)
+    assert "walk the evening lamp round" in prompt and duties(tmp_path)[-1]["template"] == "duty:lamp_round"
+
+
+def test_resting_between_duties_says_when_to_come_back(tmp_path):
+    enlisted(tmp_path)
+    given_duty(tmp_path, DAY + 0.01)
+    talk(tmp_path, DAY + 0.05, npcs=[whiterun_guard()])
+    talk(tmp_path, DAY + 0.2, say="Reporting back.")
+    prompt = talk(tmp_path, DAY + 0.21)
+    assert "has no duty for Torvar right now (last duty ended" in prompt and "starts at" in prompt

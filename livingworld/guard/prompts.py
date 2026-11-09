@@ -108,6 +108,13 @@ def report_to_line(name: str, player: str, superior: str) -> str:
             f"If {player} asks {name} for a duty or their pay, {name} sends them to {superior}.")
 
 
+def no_duty_line(name: str, player: str, why: str, next_at: float | None, now: float) -> str:
+    when = (f" The next duty {name} could give {player} starts at {clock(next_at)}; {name} may tell {player} to come "
+            f"back then." if next_at is not None and next_at > now else "")
+    return (f"{name} has no duty for {player} right now ({why}).{when} {name} does not invent a duty, a post, a shift "
+            f"length or times; {player} is off duty until given one. Do not use {REPORT_KEY}.")
+
+
 def duty_line(name: str, player: str, task, d, shift_end: float, now: float, *, new: bool, seen: bool) -> str:
     if new:
         head = (f"{name} is {player}'s superior and has a duty for {player} right now: {d.title}. "

@@ -149,9 +149,14 @@ class Guard:
             if person is not None:
                 out.append(P.report_to_line(name, player, person.name))
             return out
-        if task is None and all(c.ok for c in DU.checks(db, org, svc, scene.now)):
+        checks = DU.checks(db, org, svc, scene.now) if task is None else []
+        if task is None and all(c.ok for c in checks):
             prev = DU.last(db, svc.member_id)
             d = DU.pick(org, svc, prev.template if prev else None, scene.now)
+            if d is None:
+                nxt = DU.next_start(org, svc, scene.now)
+                out.append(P.no_duty_line(name, player, f"no duty for {org.a_title(svc.rank_key)} at this hour",
+                                          nxt, scene.now))
             if d is not None:
                 task = DU.assign(db, org, svc, npc_id, d, scene.now,
                                  witnesses=[i for i in scene.present if i != svc.member_id])
@@ -159,6 +164,14 @@ class Guard:
                 boss_name = self._name(db, npc_id) or "your superior"
                 self.notices.append(f"Duty: {d.title}. Shift: {P.hours_text(d.shift_hours / 24)}. "
                                     f"Be seen at your post, then report back to {boss_name}.")
+        elif task is None:
+            failed = [c for c in checks if not c.ok]
+            rested_at = None
+            if any(c.name == "rested" for c in failed):
+                prev = DU.last(db, svc.member_id)
+                rested_at = (prev.state_gt or prev.created_gt) + DU.rules(org.key).rest_hours / 24.0
+            nxt = DU.next_start(org, svc, scene.now, rested_at) if svc.status in ("probation", "active") else None
+            out.append(P.no_duty_line(name, player, "; ".join(c.why for c in failed), nxt, scene.now))
         if task is not None:
             d = DU.rules(org.key).duty(task.template)
             if d is not None:
