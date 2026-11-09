@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, Callable
 
 NEUTRAL = 5
 CARRY_OVER_DAYS = 0.5     # a mood from a conversation this recent (game days) carries into the next one
@@ -137,6 +137,60 @@ INSTRUCTION = (
     "kindness, gifts, flattery, insults, threats, bad news, drink. A mood never changes what {name} is "
     "willing to do with their body.")
 CARRY_OVER = "{name} comes into this conversation still feeling {label} ({score}/10) from a little while ago."
+
+
+REMINDER = ("(Reply as {name}: start with a mood tag for how {name} feels right now, such as <mood wary 4>, "
+            "then speak. Let it move with what just happened.)")
+
+
+def _reminder_class() -> type:
+    from src.llm.message_thread import message_thread
+
+    class WithReminder(message_thread):
+        """The conversation as the model sees it, with a one-line mood reminder on the newest message.
+
+        Tags are cut out of what NPCs say, so the stored history holds no tagged replies; after its first reply
+        the model copied its own untagged lines and the meter froze (2026-11-08: 9 tags in 89 replies, one per
+        conversation). The reminder is added to this call only, never stored, so the history stays as spoken.
+        A message_thread subclass (Mantella checks the type) that reads everything else from the real thread."""
+
+        def __init__(self, thread: Any, text: str) -> None:   # no super().__init__: everything comes from thread
+            self._lw_thread = thread
+            self._lw_text = text
+
+        def __getattr__(self, name: str) -> Any:
+            if name.startswith("_lw_"):
+                raise AttributeError(name)
+            return getattr(self._lw_thread, name)
+
+        def __len__(self) -> int:
+            return len(self._lw_thread)
+
+        def __getitem__(self, index):
+            return self._lw_thread[index]
+
+        def get_openai_messages(self) -> list:
+            out = [dict(m) for m in self._lw_thread.get_openai_messages()]
+            if out and out[-1].get("role") == "user" and isinstance(out[-1].get("content"), str):
+                out[-1]["content"] = f"{out[-1]['content']}\n\n{self._lw_text}"
+            else:
+                out.append({"role": "system", "content": self._lw_text})
+            return out
+
+    return WithReminder
+
+
+_REMINDER_CLASS: type | None = None
+
+
+def with_reminder(messages: Any, name: str) -> Any:
+    """``messages`` for one AI call, reminding the model to open with a mood tag. A plain message passes through."""
+    global _REMINDER_CLASS
+    if not hasattr(messages, "get_openai_messages"):
+        return messages
+    if _REMINDER_CLASS is None:
+        _REMINDER_CLASS = _reminder_class()
+    return _REMINDER_CLASS(messages, REMINDER.format(name=name))
 
 
 def prompt_lines(name: str, carried: Mood | None) -> list[str]:

@@ -632,6 +632,14 @@ class LivingWorld:
         return moods.MoodFilter(lambda mood: self._mood_seen(character, mood))
 
     @_never_raises
+    def mood_messages(self, messages: Any, character: Any) -> Any:
+        """The messages for this NPC's AI call, with a reminder to open with a mood tag (never stored)."""
+        try:
+            return moods.with_reminder(messages, character.name)
+        except Exception:
+            logger.exception("Living World: could not add the mood reminder; sending the messages as they are")
+            return messages
+
     def _mood_seen(self, character: Any, mood: "moods.Mood") -> None:
         now = self._context.game_days
         npc_id = self._npc_ids.get(character.ref_id) or self._register(character, now)
