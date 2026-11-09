@@ -287,3 +287,22 @@ after a test hold.
 | `src/conversation/context.py` | `focused_on(character)`: a copy of the context holding only the player and one NPC, for building that NPC's own prompt |
 | `src/actions/function_manager.py` | Skips actions marked `living_world` unless `MANTELLA_LIVING_WORLD` is set |
 | `src/game_manager.py` | Calls the Living World hooks at conversation start, on each request's context (perception records), each spoken line (plus its mood meter), player input, actor changes and conversation end, adds the quiet-chatter key to the start reply, and wraps Mantella's memory with the recall (does nothing unless `MANTELLA_LIVING_WORLD` is set) |
+
+## Body language, step 1 (BL1): proximity and gaze
+
+NPCs notice where you stand. The game reacts on its own, at once, from a small "expression profile" the
+server sends for each NPC in a conversation (comfort distance, how readily they hold your gaze, how
+guarded they get, whether they step back). It reports what you did as `type=presence` records; the server
+turns those into short-lived feelings and tells the dialogue model, in neutral words, what the NPC noticed.
+Mantella-Spell's `MantellaRepository.psc` holds the game side.
+
+| Piece | File | What it does |
+| --- | --- | --- |
+| Records | `bodylang/presence.py` | `approach`, `crowd`, `backed_off`, `weapon`, `stare`: only ever about the player and one NPC |
+| Feelings | `bodylang/state.py` | irritation, unease, fear, embarrassment (0..1) and a "crowded" count, each fading with a half-life in game minutes, stored in `emotion_state.mood_json` under `body` beside the mood meter |
+| Appraisal and profile | `bodylang/presence.py` | Rules only: the same moment moves each NPC differently by traits (`personal_space`, `anxiety`, `temper`, `bold`, `warmth`, `reserve`, `dominance`) and by how they see you |
+| Dialogue | `integration.py` | What the NPC noticed goes into the first prompt, or as an in-game event on your next line; each thing is told once |
+| Mood clamp | `bodylang/presence.py` | The mood tag the model writes moves at most 2 points a turn, and fresh fear or irritation caps it |
+| Loop guards | `bodylang/__init__.py`, `harness/bodysim.py` | NPCs never react to each other's body language; an NPC's own step back never counts as you leaving; cooldowns and a per-minute cap. `tests/livingworld/test_bodylang.py` checks a model of the game's rules settles |
+
+`MANTELLA_LW_BODY_LANGUAGE=0` turns all of it off (the game hears it with the conversation start reply).

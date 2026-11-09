@@ -20,6 +20,9 @@ from livingworld.memory.extraction import Extractor
 from livingworld.memory.jobs import JobQueue, JobWorker
 from livingworld.memory.recall import recall_for
 from livingworld import mood as moods
+from livingworld.bodylang import body_language_enabled
+from livingworld.bodylang.presence import is_presence
+from livingworld.bodylang.service import BodyLanguage
 from livingworld.dialogue import hearing
 from livingworld.perception import awareness
 from livingworld.perception.intoxication import drink_state
@@ -61,6 +64,8 @@ HYGIENE_DEBUG_ENV = "MANTELLA_LW_HYGIENE_DEBUG"
 KEY_MOOD = "mantella_lw_mood"                    # sent with an NPC line: the meter text to show
 KEY_QUIET_CHATTER = "mantella_lw_quiet_chatter"  # sent with the start reply: mute vanilla chatter until the end
 KEY_WANTS_A_WORD = "mantella_lw_wants_a_word"    # sent with the start reply: people with work to offer (game side: W2)
+KEY_BODY_ON = "mantella_lw_body_on"              # sent with the start reply: body language on or off (game side)
+KEY_BODY = "mantella_lw_body"                    # sent with an NPC line: changed expression profiles ('Name|comfort|gaze|guard|step')
 KEY_HINTS = "mantella_lw_hints"                  # sent with the first NPC line: what the player overhears (S2)
 KEY_GUARD_ISSUE = "mantella_lw_guard_issue"      # sent with an NPC line: items handed to the player ('Name|plugin|0xID;...', for logs)
 KEY_GUARD_ISSUE_IDS = "mantella_lw_guard_issue_ids"          # ...the same items as plugin-relative form IDs (the game reads these)
@@ -147,6 +152,8 @@ class LivingWorld:
         self._watch_sent: tuple | None = None       # G2e: the watch plan last sent to the game this conversation
         self.hearing = enabled and hearing.hearing_enabled()   # catch misheard speech (MANTELLA_LW_HEARING=0 turns off)
         self.perf_monitor: PerfMonitor | None = None  # MANTELLA_LW_PERF=1 (see livingworld/perf)
+        self.body_language = enabled and body_language_enabled()   # MANTELLA_LW_BODY_LANGUAGE=0 turns off
+        self._body: dict[int, BodyLanguage] = {}    # id(store) -> body language for that world
         LivingWorld.latest = self
 
     @classmethod
@@ -214,6 +221,14 @@ class LivingWorld:
         for marker in perf_markers:   # the game's own timing summaries go to the performance monitor only
             PERF.add_marker(marker)
         attire_raw = records_from_context(context_json, KEY_ATTIRE)
+        body_raw = [r for r in raw if is_presence(r)]   # body language records never reach the event pipeline
+        raw = [r for r in raw if not is_presence(r)]
+        if body_raw and self.store is not None and self.body_language:
+            try:
+                self._body_for(self.store).ingest(body_raw)
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: body language records failed; carrying on without them")
         if not (raw or attire_raw) or self.store is None:
             return 0
         pipeline = PerceptionPipeline(self.store)
@@ -401,6 +416,12 @@ class LivingWorld:
             noticed = self._noticed(npc_id, character.name, now, present)
             if noticed:
                 blocks.append(f"What {character.name} notices right now:\n" + "\n".join(f"- {line}" for line in noticed))
+            body = self._body_lines(npc_id, character.name, now)
+            if body:
+                who = player.name if player is not None else "the player"
+                blocks.append(f"What {character.name} noticed {who} doing just now (the game saw it happen; "
+                              f"mention it only if it matters to {character.name}):\n"
+                              + "\n".join(f"- {line}" for line in body))
             if self.mood_meter and player is not None:
                 blocks.append("\n".join(moods.prompt_lines(character.name, self._carried_mood(npc_id, now))))
             work = self._work_lines(npc_id, character.name, scene)
@@ -614,6 +635,13 @@ class LivingWorld:
     def _mood_seen(self, character: Any, mood: "moods.Mood") -> None:
         now = self._context.game_days
         npc_id = self._npc_ids.get(character.ref_id) or self._register(character, now)
+        if self.body_language:   # the model's mood tag is advice: rules cap how far and which way it moves
+            previous = self._carried_mood(npc_id, now)
+            score = self._body_for(self.store).clamp_mood(npc_id, mood.score, previous.score if previous else None, now)
+            if score != mood.score:
+                logger.log(23, f"Living World mood: {character.name} said {mood.label} {mood.score}, kept at {score}")
+                label = mood.label if abs(score - mood.score) <= 1 else moods.describe(score)
+                mood = moods.Mood(label, score)
         with self.store.transaction() as db:
             moods.save(db, npc_id, mood, now)
             stage = drink_state(db, npc_id, now).stage
@@ -642,6 +670,9 @@ class LivingWorld:
         text = self._moods_to_send.pop(speaker.ref_id, None)
         if text:
             keys[KEY_MOOD] = text
+        profiles = self._body_profiles()
+        if profiles:
+            keys[KEY_BODY] = profiles
         if self.guard and self.store is not None:     # each NPC line: joining or leaving can happen mid-conversation
             try:
                 scene = self._guard_scene()
@@ -698,6 +729,9 @@ class LivingWorld:
     def start_reply_keys(self) -> dict[str, Any]:
         """Extra keys for the conversation start reply."""
         keys: dict[str, Any] = {KEY_QUIET_CHATTER: True} if self.quiet_chatter else {}
+        keys[KEY_BODY_ON] = bool(self.body_language)
+        if self.body_language and self.store is not None:
+            self._body_for(self.store).forget_sent()   # the first NPC line sends every participant's profile again
         wanting = self._wants_a_word()
         if wanting:
             keys[KEY_WANTS_A_WORD] = wanting
@@ -721,6 +755,63 @@ class LivingWorld:
             self.errors += 1
             logger.exception("Living World: could not list who wants a word; leaving it out")
             return ""
+
+    # ---- body language (livingworld/bodylang) ----
+    def _body_for(self, store: WorldStore) -> BodyLanguage:
+        key = id(store)
+        if key not in self._body:
+            self._body[key] = BodyLanguage(store)
+        return self._body[key]
+
+    def _body_lines(self, npc_id: int, name: str, now: float) -> list[str]:
+        if not self.body_language or self.store is None:
+            return []
+        try:
+            return self._body_for(self.store).prompt_lines(npc_id, name, now)
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not tell what an NPC noticed of body language; leaving it out")
+            return []
+
+    def body_events(self, context: Any) -> list[str]:
+        """Body language noticed since the prompt was built, as in-game events on the player's next line.
+        Each observation is told once: here, or in the prompt when a conversation starts."""
+        if not self.body_language or self.store is None or context is None:
+            return []
+        try:
+            now = context.game_days
+            out = []
+            for c in context.npcs_in_conversation.get_all_characters():
+                if c.is_player_character:
+                    continue
+                npc_id = self._npc_ids.get(c.ref_id) or self._register(c, now)
+                lines = self._body_for(self.store).prompt_lines(npc_id, c.name, now)
+                out += [f"{c.name} noticed: {line}" if not line.startswith("Because of this") else line
+                        for line in lines]
+            if out:
+                logger.log(23, "Living World body language: " + " / ".join(out))
+            return out
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not add body language events; leaving them out")
+            return []
+
+    def _body_profiles(self) -> list[str]:
+        if not self.body_language or self.store is None or self._context is None:
+            return []
+        try:
+            now = self._context.game_days
+            player = self._context.npcs_in_conversation.get_player_character()
+            player_id = (self._npc_ids.get(player.ref_id) or self._register(player, now)) if player else None
+            people = {}
+            for c in self._context.npcs_in_conversation.get_all_characters():
+                if not c.is_player_character:
+                    people[self._npc_ids.get(c.ref_id) or self._register(c, now)] = c.name
+            return self._body_for(self.store).profiles(people, player_id, now)
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not work out body language profiles; the game keeps its last ones")
+            return []
 
     def _noticed(self, npc_id: int, name: str, now: float, present: dict[int, str]) -> list[str]:
         try:

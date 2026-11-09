@@ -8,6 +8,8 @@ identical. A hand-written seed file (``social/data/*.json``) wins for any trait 
 Traits the simulation reads: gossipy (passing news on), honest (how faithfully news is retold),
 trusting (how readily hearsay is believed), loyal (how hard harm to friends is taken), and the values
 law, family, wealth, honor, modesty (how much each area of someone's reputation matters to them).
+Body language (``livingworld/bodylang``) also reads warmth, reserve, anxiety, personal_space, dominance,
+bold and temper.
 """
 from __future__ import annotations
 
@@ -16,7 +18,7 @@ import json
 import re
 
 TRAITS = ("gossipy", "honest", "trusting", "loyal", "bold", "greedy", "temper", "law", "family", "wealth", "honor",
-          "modesty", "warmth", "reserve")
+          "modesty", "warmth", "reserve", "anxiety", "personal_space", "dominance")
 
 # (trait, change, words): each word found in the bio moves the trait by change (capped at +-0.35 per trait)
 RULES: tuple[tuple[str, float, tuple[str, ...]], ...] = (
@@ -48,6 +50,16 @@ RULES: tuple[tuple[str, float, tuple[str, ...]], ...] = (
     ("warmth", 0.2, ("kind", "friendly", "warm", "cheerful", "welcoming", "generous", "caring")),
     ("warmth", -0.2, ("cold", "rude", "surly", "bitter", "arrogant", "mean", "unfriendly")),
     ("reserve", 0.2, ("reserved", "quiet", "shy", "private", "aloof", "stoic")),
+    # body language (livingworld/bodylang): how easily someone is unsettled, how much room they want
+    # around them, and whether they hold their ground
+    ("anxiety", 0.2, ("nervous", "anxious", "worried", "fearful", "timid", "skittish", "jumpy", "paranoid", "shy")),
+    ("anxiety", -0.15, ("calm", "fearless", "confident", "steady", "stoic", "unflappable")),
+    ("personal_space", 0.2, ("reserved", "aloof", "private", "solitary", "loner", "cold", "proud", "noble",
+                             "suspicious", "wary", "guarded")),
+    ("personal_space", -0.15, ("friendly", "warm", "affectionate", "flirtatious", "outgoing", "cheerful")),
+    ("dominance", 0.2, ("proud", "commanding", "stern", "jarl", "captain", "leader", "domineering", "arrogant",
+                        "brash", "bold", "warrior", "housecarl")),
+    ("dominance", -0.2, ("meek", "timid", "shy", "submissive", "humble", "servant", "beggar")),
 )
 MAX_SHIFT = 0.35
 NUDGE = 0.06

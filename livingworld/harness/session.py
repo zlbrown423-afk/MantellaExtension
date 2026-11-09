@@ -156,14 +156,17 @@ class HeadlessSession:
             # npc_action and interrupted replies: the game just continues
         raise RuntimeError(f"No player turn after {max_steps} continue requests")
 
-    def say(self, text: str, game_days: float | None = None) -> list[SpokenLine]:
-        """Sends the player's line, then plays the NPC responses until it is the player's turn again."""
+    def say(self, text: str, game_days: float | None = None,
+            context_extra: dict[str, Any] | None = None) -> list[SpokenLine]:
+        """Sends the player's line, then plays the NPC responses until it is the player's turn again.
+        ``context_extra`` adds keys to the request's context, e.g. records the game queued meanwhile."""
         request: dict[str, Any] = {
             comm_consts.KEY_REQUESTTYPE: comm_consts.KEY_REQUESTTYPE_PLAYERINPUT,
             comm_consts.KEY_REQUESTTYPE_PLAYERINPUT: text,
         }
-        if game_days is not None:
-            request[comm_consts.KEY_CONTEXT] = {comm_consts.KEY_CONTEXT_GAMEDAYS: game_days}
+        if game_days is not None or context_extra:
+            context: dict[str, Any] = {comm_consts.KEY_CONTEXT_GAMEDAYS: game_days} if game_days is not None else {}
+            request[comm_consts.KEY_CONTEXT] = {**context, **(context_extra or {})}
         self.post(request)
         return self.continue_until_player_turn()
 

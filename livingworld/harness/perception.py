@@ -143,3 +143,19 @@ def watch(player_json: dict[str, Any], task: int, win: int, game_days: float, ta
         parts.append(f"target={actor_field(target_json)}")
     parts += [f"via={'approach' if target_json is not None else 'observe'}", f"win={win}", f"task={task}"]
     return "|".join(parts)
+
+
+def presence(target_json: dict[str, Any], what: str, game_days: float, player_json: dict[str, Any] | None = None,
+             distance_m: float | None = None, seconds: float | None = None, count: int = 1,
+             location: str = "Riverwood", key: str | None = None) -> str:
+    """A body language record (``livingworld/bodylang/presence.py``): what the player did near ``target``."""
+    from livingworld.harness import actors
+    parts = ["v=1", f"key={key or _key('presence')}", "type=presence", f"gt={game_days}", f"loc={location}",
+             f"actor={actor_field(player_json or actors.player('Torvar'))}", f"target={actor_field(target_json)}",
+             f"what={what}"]
+    if distance_m is not None:
+        parts.append(f"dist={distance_m}")
+    if seconds is not None:
+        parts.append(f"dur={seconds}")
+    parts.append(f"n={count}")
+    return "|".join(parts)
