@@ -3,7 +3,8 @@
 
 * ``minimal``: no hints. The player learns only by seeing things and by asking people.
 * ``balanced`` (default): at most one short hint per conversation start, only about the player or
-  someone the player knows well, phrased as hearsay ("You catch Riverwood folk murmuring about you.").
+  someone the player knows well, phrased as hearsay that names who was talking, so the player knows whom to ask
+  ("You catch Hilde murmuring about you.", "You overhear Hilde talking about Hod.").
 * ``informative``: up to three hints with names and the gist ("Hod has heard that you helped Gerdur."),
   plus one line on what the place thinks of the player in the first conversation after a game load.
 
@@ -98,8 +99,10 @@ def pick(db, timeline: int, player_id: int, community_keys: list[str], now_gt: f
     for c in candidates(db, player_id, community_keys, now_gt)[:MAX_HINTS[lvl]]:
         about_player = player_id in (c["subject_id"], c["object_id"])
         if lvl == "balanced":
-            text = (f"You catch {place} folk murmuring about you." if about_player
-                    else f"You hear {place} folk talking about {_name(db, c['subject_id'])}.")
+            # name who was talking, so the player has someone to ask; the gist stays theirs to find out
+            who = _name(db, c["holder_id"]) if c["holder_id"] != player_id else f"{place} folk"
+            text = (f"You catch {who} murmuring about you." if about_player
+                    else f"You overhear {who} talking about {_name(db, c['subject_id'])}.")
         else:
             said = claims.sentence(db, c, player_id, second_person=True)
             holder = _name(db, c["holder_id"])

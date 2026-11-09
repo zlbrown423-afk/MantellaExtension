@@ -287,6 +287,16 @@ def test_the_prompt_gives_clock_times_for_the_shift():
     assert P.clock(4.0) == "12:00 am"
 
 
+def test_the_prompt_says_times_in_words_so_mantella_does_not_split_on_the_colon():
+    from livingworld.guard import prompts as P
+    assert P.spoken_time(3 + 21 / 24 + 41 / 1440) == "a quarter to ten in the evening"
+    assert P.spoken_time(3 + 6 / 24) == "six in the morning"
+    assert P.spoken_time(3 + 13 / 24 + 30 / 1440) == "half past one in the afternoon"
+    assert P.spoken_time(4.0) == "midnight" and P.spoken_time(3.5) == "noon"
+    assert P.spoken_time(3 + 23 / 24 + 55 / 1440) == "midnight"
+    assert P.spoken_time(3 + 23 / 24 + 45 / 1440) == "a quarter to midnight"
+
+
 def test_caius_reminds_with_the_real_shift_times(tmp_path):
     enlisted(tmp_path)
     task = given_duty(tmp_path, DAY + 0.01)
@@ -299,7 +309,7 @@ def test_no_duty_at_night_is_said_plainly_and_not_invented(tmp_path):
     enlisted(tmp_path, day=3.05)                          # 1:12 am: nothing for a recruit until the 6 am drill
     prompt = talk(tmp_path, 3.06)
     assert "has no duty for Torvar right now (no duty for a Recruit at this hour)" in prompt
-    assert "starts at 6:00 am" in prompt and "does not invent a duty" in prompt
+    assert "starts at six in the morning" in prompt and "does not invent a duty" in prompt
     assert duties(tmp_path) == []
 
 

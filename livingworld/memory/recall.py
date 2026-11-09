@@ -12,6 +12,8 @@ from livingworld.store.world_store import WorldStore
 MAX_FACTS = 40
 MAX_MEMORIES = 8
 MAX_HEARD = 3
+MAX_SEEN = 3
+SEEN_DAYS = 30.0   # things they saw that left no memory row (village life: flirting, couples) stay this long
 FRESH_DAYS = 3.0   # a perceived event this recent, never yet recalled, may be raised unprompted
 
 
@@ -43,13 +45,14 @@ class Recall:
     last_spoke: str | None = None
     opinion: str | None = None                       # how they feel about the player right now
     heard: list[str] = field(default_factory=list)  # news other people told them
+    seen: list[str] = field(default_factory=list)   # village life they saw or took part in (no memory row)
     romance: list[str] = field(default_factory=list)  # their own love life (social/romance.py)
     beliefs: list[str] = field(default_factory=list)  # opinions they have formed (social/reputation.py)
     fresh_perceptions: int = 0   # things they saw or went through recently and have not had a chance to raise
 
     def text(self) -> str:
-        if not (self.facts or self.memories or self.last_spoke or self.opinion or self.heard or self.romance
-                or self.beliefs):
+        if not (self.facts or self.memories or self.last_spoke or self.opinion or self.heard or self.seen
+                or self.romance or self.beliefs):
             return ""
         parts = [f"What {self.name} knows and remembers (only {self.name} knows this; "
                  f"anything not listed here, {self.name} does not know):"]
@@ -57,6 +60,7 @@ class Recall:
             parts.append(f"- {self.last_spoke}")
         parts += [f"- {line}" for line in self.facts]
         parts += [f"- {line}" for line in self.memories]
+        parts += [f"- {line}" for line in self.seen]
         parts += [f"- {line}" for line in self.heard]
         parts += [f"- {line}" for line in self.romance]
         parts += [f"- {line}" for line in self.beliefs]
@@ -106,6 +110,7 @@ def recall_for(store: WorldStore, npc_id: int, now_gt: float, player_id: int | N
             player = store.scalar("SELECT display_name FROM npc WHERE npc_id = ?", (player_id,))
             recall.last_spoke = f"I last spoke with {player} {time_ago(now_gt - last)}."
 
+    _seen(store, recall, now_gt)
     _heard(store, recall, now_gt)
     from livingworld.social import romance
     if romance.romance_enabled():
@@ -153,6 +158,39 @@ def _heard(store: WorldStore, recall: Recall, now_gt: float) -> None:
             recall.know_ids.append(row["know_id"])
             recall.heard.append(f"({time_ago(now_gt - row['learned_gt'])}) {row['teller']} told me that {text}. "
                                 f"{doubt(row['believed'] or 0.0)} I did not see it myself.")
+
+
+def _seen(store: WorldStore, recall: Recall, now_gt: float) -> None:
+    """Claims this NPC holds because they were there, when the event left them no memory of their own.
+
+    Perceived events (a grab, a drink) already give each witness a memory, so those are skipped. Events the
+    village simulation makes up (Hod flirting with Hilde) only give the witnesses a claim, which they pass on
+    as gossip; without this, the one person the player could ask about it would know nothing."""
+    import json
+
+    from livingworld.social.claims import sentence
+    rows = store.query(
+        "SELECT k.*, e.type AS event_type, e.payload_json FROM v_claim_knowledge k"
+        " JOIN world_event e ON e.event_id = k.truth_event_id"
+        " WHERE k.holder_id = ? AND k.origin = 'witnessed' AND k.claim_gt <= ? AND k.claim_gt > ?"
+        " AND NOT EXISTS (SELECT 1 FROM v_visible_memory m WHERE m.owner_id = k.holder_id"
+        "                 AND m.event_id = k.truth_event_id)"
+        " ORDER BY k.claim_gt DESC, k.know_id DESC LIMIT ?",
+        (recall.npc_id, now_gt + 1e-9, now_gt - SEEN_DAYS, MAX_SEEN))
+    if not rows:
+        return
+    with store.reading() as db:
+        for row in reversed(rows):
+            claim = dict(row)
+            text = sentence(db, claim, recall.npc_id)
+            text = text[0].upper() + text[1:]
+            involved = recall.npc_id in (claim["subject_id"], claim["object_id"])
+            how = "it happened to me" if involved else "I saw it myself"
+            if claim["event_type"] == "romance.flirt" and claim["object_id"] == recall.npc_id:
+                returned = json.loads(claim["payload_json"] or "{}").get("returned")
+                text += ". I flirted back" if returned else ". I did not return it"
+            recall.know_ids.append(row["know_id"])
+            recall.seen.append(f"({time_ago(now_gt - claim['claim_gt'])}, {how}) {text}.")
 
 
 def opinion_line(store: WorldStore, npc_id: int, player_id: int) -> str | None:

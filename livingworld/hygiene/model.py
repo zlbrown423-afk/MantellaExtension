@@ -80,6 +80,9 @@ def state(db, npc_id: int, now: float, habits: Habits | None = None) -> HygieneS
 def _insert(db, npc_id: int, gt: float, cause: str, dirt: float = 0.0, blood: float = 0.0,
             game_key: str | None = None) -> bool:
     timeline = db.execute("SELECT timeline_id FROM timeline WHERE is_active = 1").fetchone()[0]
+    if game_key is not None and db.execute("SELECT 1 FROM v_hygiene_change WHERE game_key = ? LIMIT 1",
+                                           (game_key,)).fetchone():
+        return False   # the game sent it again after an older save was loaded; it already counts
     cur = db.execute("INSERT OR IGNORE INTO hygiene_change (timeline_id, npc_id, game_time, cause, dirt, blood, game_key)"
                      " VALUES (?,?,?,?,?,?,?)", (timeline, npc_id, gt, cause, dirt, blood, game_key))
     return cur.rowcount > 0

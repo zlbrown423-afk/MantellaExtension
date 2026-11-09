@@ -306,6 +306,21 @@ def test_informative_hints_name_who_has_heard_what(tmp_path, monkeypatch):
     assert not any("Faendal hit Hod" in h for k in spy2.keys if KEY_HINTS in k for h in k[KEY_HINTS])
 
 
+def test_balanced_hint_names_who_was_talking_so_the_player_can_ask_them(tmp_path):
+    meet_everyone(tmp_path)
+    other = actors.actor("Faendal", 0x00013480, 0x0001348D, 0, "WoodElf", "MaleYoungEager")
+    talk(tmp_path, [other], 3.2)
+    rec = hit(other, actors.hod(), 3.5, witnesses=[seen(actors.gerdur(), 4.0, rank_to_target=4)])
+    talk(tmp_path, [actors.hod()], 3.5, records=[rec])
+    spy = Spy()
+    for day in (4.0, 4.5, 5.0):   # Torvar gets to know Hod well
+        talk(tmp_path, [actors.hod()], day, spy=spy)
+    talk(tmp_path, [sigrid()], 9.0, spy=spy)
+    sent = [h for k in spy.keys if KEY_HINTS in k for h in k[KEY_HINTS]]
+    # Hod was hit by Faendal: Hod is the one talking, and the gist is still the player's to find out
+    assert sent == ["You overhear Hod talking about Faendal."], sent
+
+
 def test_minimal_level_shows_nothing(tmp_path, monkeypatch):
     monkeypatch.setenv("MANTELLA_LW_INFO_LEVEL", "minimal")
     meet_everyone(tmp_path)

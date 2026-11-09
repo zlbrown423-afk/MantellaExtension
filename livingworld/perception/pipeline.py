@@ -56,8 +56,12 @@ class PerceptionPipeline:
         if record.type in ("fight", "swim"):
             return self._hygiene(record)
         timeline = self.store.active_timeline_id()
-        existing = self.store.scalar("SELECT event_id FROM world_event WHERE timeline_id = ? AND game_key = ?",
-                                     (timeline, record.key))
+        # The game can send a record again after an older save is loaded (the save still has it queued).
+        # Look on every timeline the active one can see, not only the active one, or the NPCs get the
+        # same memory twice.
+        existing = self.store.scalar(
+            "SELECT e.event_id FROM world_event e JOIN v_timeline_scope s ON s.timeline_id = e.timeline_id"
+            " WHERE e.game_key = ? AND e.game_time <= s.cutoff_gt", (record.key,))
         if existing is not None:
             return Outcome(existing, duplicate=True)
 

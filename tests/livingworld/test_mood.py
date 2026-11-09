@@ -49,6 +49,13 @@ def test_tag_split_across_chunks():
     assert seen == [moods.Mood("amused", 7)]
 
 
+def test_a_colon_after_the_tag_or_at_the_start_is_not_spoken():
+    # 2026-11-08: Caius said "<mood wary 6>: What is it?", then ": I am here, speak your mind!"
+    assert feed_all(["<mood wary 6>", ":", " What is it?"]) == ("What is it?", [moods.Mood("wary", 6)])
+    assert feed_all([": I am here, ", "speak your mind!"])[0] == "I am here, speak your mind!"
+    assert feed_all(["Aye. Listen: ", "the gate."])[0] == "Aye. Listen: the gate."
+
+
 def test_other_angle_brackets_pass_through():
     text, seen = feed_all(["I <3 mead. ", "2 < 3 and 5 > 4."])
     assert text == "I <3 mead. 2 < 3 and 5 > 4."
