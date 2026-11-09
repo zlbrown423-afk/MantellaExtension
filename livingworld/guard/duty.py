@@ -509,9 +509,12 @@ class Record:
     commended: int
     reprimanded: int
     merit: float
+    helped: int = 0          # G2e: people dealt with on shift
 
     def words(self) -> str:
         parts = [f"{self.done} dut{'y' if self.done == 1 else 'ies'} done"]
+        if self.helped:
+            parts.append(f"{self.helped} {'person' if self.helped == 1 else 'people'} dealt with on shift")
         if self.missed:
             parts.append(f"{self.missed} missed")
         if self.false_reports:
@@ -540,5 +543,6 @@ def record(db, svc: S.Service) -> Record:
                          " AND t.created_gt >= ? AND EXISTS (SELECT 1 FROM v_task v WHERE v.task_id = t.task_id"
                          " AND v.assignee_id = ?)", (svc.joined_gt - 1e-9, svc.member_id)).fetchone()[0]
     failed = tasks("state = 'failed'")
+    from livingworld.guard import encounter as ENC
     return Record(tasks("state = 'completed'"), tasks("state = 'expired'"), false_n, failed - false_n,
-                  events("commended"), events("reprimanded"), svc.merit)
+                  events("commended"), events("reprimanded"), svc.merit, ENC.helped(db, svc))

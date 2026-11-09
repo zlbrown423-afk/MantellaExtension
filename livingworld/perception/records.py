@@ -49,6 +49,13 @@ Reputation (S2) adds three records, each about something the player did, with wi
     v=1|key=812345-9|type=hit|gt=4.1|loc=Riverwood|actor=<player>|target=<actor>|item=Iron Sword|via=assault
       |w=<witness>
 
+Guard careers (G2e) add a ``watch`` record when one of the player's watch windows on a guard shift comes
+due: ``via=approach`` when the game had a nearby NPC (``target``) come over, ``via=observe`` when nobody was
+near and the player noticed something instead; ``win`` is the window and ``task`` the duty (see
+``guard/encounter.py``)::
+
+    v=1|key=812345-10|type=watch|gt=4.2|loc=Whiterun|actor=<player>|target=<actor>|via=approach|win=1|task=17
+
 A ``gift`` is items the player handed to an NPC outside trading (``gold`` is their total value; the game
 folds several items given to one person within a few seconds into one record). A ``theft`` is sent when
 the game counts a theft or a picked pocket (``via=take`` or ``pickpocket``); ``owner`` is the owner's name
@@ -129,6 +136,8 @@ class PerceptionRecord:
     hp: float | None = None         # fight: the lowest share of health the actor fell to
     sex: str | None = None          # attire: 'male' | 'female', the actor's sex in game
     owner: str | None = None        # theft: the owner's name, when the game knows it
+    win: int | None = None          # watch: which watch window of the duty
+    task: int | None = None         # watch: the duty (task id) the window belongs to
     witnesses: list[Witness] = field(default_factory=list)
     raw: str = ""
 
@@ -183,7 +192,7 @@ def parse_record(text: str) -> PerceptionRecord:
         fields["cover"] = fields["cover"].strip().lower()
     if fields.get("payer"):
         fields["payer"] = fields["payer"].strip().lower()
-    if kind not in ("grab", "consume", "attire", "purchase", "fight", "swim", "gift", "theft", "hit"):
+    if kind not in ("grab", "consume", "attire", "purchase", "fight", "swim", "gift", "theft", "hit", "watch"):
         raise BadRecord(f"unknown event type {kind!r}")
     record = PerceptionRecord(
         key=fields["key"], type=kind, game_time=float(fields["gt"]), location=fields.get("loc") or None,
@@ -197,7 +206,10 @@ def parse_record(text: str) -> PerceptionRecord:
         gold=int(fields["gold"]) if fields.get("gold") else None, payer=fields.get("payer") or None,
         party=_actor(fields["party"]) if fields.get("party") else None,
         hp=_fraction(fields.get("hp")), sex=_sex(fields.get("sex")), owner=(fields.get("owner") or "").strip() or None,
+        win=int(fields["win"]) if fields.get("win") else None, task=int(fields["task"]) if fields.get("task") else None,
         witnesses=witnesses, raw=text)
+    if kind == "watch" and (record.via not in ("approach", "observe") or record.win is None or not record.task):
+        raise BadRecord("a watch record needs via=approach or observe, win and task")
     if kind == "grab" and record.target is None:
         raise BadRecord("a grab needs a target")
     if kind == "consume" and not record.item:

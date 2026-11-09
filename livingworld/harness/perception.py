@@ -132,3 +132,14 @@ def hit(attacker_json: dict[str, Any], victim_json: dict[str, Any], game_days: f
              f"via={via}", "trank=0"]
     parts += [f"w={w}" for w in witnesses or []]
     return "|".join(parts)
+
+
+def watch(player_json: dict[str, Any], task: int, win: int, game_days: float, target_json: dict[str, Any] | None = None,
+          location: str = "Whiterun", key: str | None = None) -> str:
+    """A watch window on the player's guard shift came due (G2e): someone came over (``target_json``), or not."""
+    parts = ["v=1", f"key={key or _key('watch')}", "type=watch", f"gt={game_days}", f"loc={location}",
+             f"actor={actor_field(player_json)}"]
+    if target_json is not None:
+        parts.append(f"target={actor_field(target_json)}")
+    parts += [f"via={'approach' if target_json is not None else 'observe'}", f"win={win}", f"task={task}"]
+    return "|".join(parts)

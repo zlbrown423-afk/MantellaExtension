@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from livingworld.guard import debug as D, duty as DU, incident as INC, orgs as O, prompts as P, profiles, recruit as R, store as S
+from livingworld.guard import debug as D, duty as DU, encounter as ENC, incident as INC, orgs as O, prompts as P, profiles, recruit as R, store as S
 from livingworld.guard.profiles import GuardFacts
 from livingworld.social import claims, processor
 from livingworld.store.minors import is_child
@@ -62,6 +62,9 @@ class Guard:
         self._assigned: set[int] = set()     # duties given in the conversation now running
         self.filed: DU.Report | None = None   # the report filed on coming back to the superior this conversation
         self.notices: list[str] = []          # on-screen notes for the player (shift started / over)
+        self.summary: ENC.Summary | None = None   # G2e: the shift summary filed with that report
+        self._encounters: dict[int, ENC.Encounter] = {}   # npc_id -> why they came over (this conversation)
+        self._watch_soon: tuple[int, float] | None = None   # "debug guard watch": (task id, when asked)
 
     def take_notices(self) -> list[str]:
         out, self.notices = self.notices, []
@@ -110,6 +113,9 @@ class Guard:
         out: list[str] = []
         player = scene.player_name
         svc = S.current(db, scene.player_id)
+        enc_line = self._encounter_line(db, npc_id, name, p, svc, scene)
+        if enc_line:
+            out.append(enc_line)
         if p is None:
             return out
         org = O.by_key(p.org_key)
@@ -137,6 +143,48 @@ class Guard:
                         scene.location, witnesses=[])
         return out
 
+    def _encounter_line(self, db, npc_id: int, name: str, p, svc: S.Service | None, scene: Scene) -> str | None:
+        """G2e: the reason this NPC came over to the player on their shift, if they did just now."""
+        if svc is None or not ENC.enabled():
+            return None
+        enc = ENC.fresh_for(db, npc_id, svc.member_id, scene.now)
+        org = O.by_key(svc.org_key)
+        if enc is None or org is None:
+            return None
+        self._encounters[npc_id] = enc
+        return P.encounter_line(name, scene.player_name, org, svc, enc,
+                                is_superior=npc_id == DU.superior_id(db, org, svc), is_guard=p is not None)
+
+    def player_spoke(self, scene: Scene) -> int:
+        """G2e: the player answered whoever came over; each such matter counts as dealt with (once)."""
+        if not self._encounters or scene.player_id is None:
+            return 0
+        n = 0
+        with self.store.transaction() as db:
+            for npc_id, enc in list(self._encounters.items()):
+                if npc_id in scene.present and ENC.answered(db, enc, scene.player_id, scene.now, scene.location):
+                    n += 1
+                    del self._encounters[npc_id]
+        return n
+
+    def watch_plan(self, scene: Scene) -> ENC.Plan | None:
+        """G2e: the watch windows still to come on the duty in hand, for the game (task 0 = none: clear)."""
+        if scene.player_id is None or not ENC.enabled():
+            return None
+        with self.store.transaction() as db:
+            svc = S.current(db, scene.player_id)
+            if svc is None:
+                return None
+            org = O.by_key(svc.org_key)
+            task = DU.in_hand(db, svc.member_id) if org else None
+            d = DU.duty_for(db, task) if task else None
+            if task is None or not ENC.wants_windows(d):
+                return ENC.Plan(0, 0.0, ())
+            plan = ENC.plan(db, org, task, d, DU.assigned_gt(db, task))
+            if self._watch_soon is not None and self._watch_soon[0] == task.task_id:
+                plan = ENC.soon(db, org, task, self._watch_soon[1], plan.end)
+            return plan
+
     def _duty_lines(self, db, npc_id: int, name: str, org: O.Org, svc: S.Service, scene: Scene) -> list[str]:
         """Duties, reports, pay and the record: from the member's superior; quarters and duty from anyone."""
         player = scene.player_name
@@ -154,7 +202,7 @@ class Guard:
                 out.append(P.report_to_line(name, player, person.name))
             return out
         if self.filed is not None and self.filed.task is not None:
-            out.append(P.filed_line(name, player, self.filed))
+            out.append(P.filed_line(name, player, self.filed, self.summary))
         checks = DU.checks(db, org, svc, scene.now) if task is None else []
         if task is None and all(c.ok for c in checks):
             prev = DU.last(db, svc.member_id)
@@ -193,6 +241,8 @@ class Guard:
                 done = DU.fought_count(db, task) if d.need == "fight" else DU.seen_count(db, task)
                 out.append(P.duty_line(name, player, task, d, DU.shift_end(db, task, d), scene.now,
                                        new=task.task_id in self._assigned, seen=done > 0))
+                if task.task_id in self._assigned and ENC.enabled() and ENC.wants_windows(d):
+                    out.append(P.watch_line(name, player))
         out.append(P.record_line(name, player, DU.record(db, svc)))
         if org.pay:
             out.append(P.pay_line(name, player, DU.pay(db, org, svc, scene.now)))
@@ -204,6 +254,8 @@ class Guard:
         self._assigned = set()
         self.notices = []
         self.filed = None
+        self.summary = None
+        self._encounters = {}
         with self.store.transaction() as db:
             svc = S.current(db, scene.player_id) if scene.player_id is not None else None
             org = O.by_key(svc.org_key) if svc else None
@@ -226,10 +278,15 @@ class Guard:
             d = DU.duty_for(db, held) if held is not None and org else None
             if d is not None and boss is not None and boss in scene.present and DU.ready(db, held, d, scene.now):
                 # coming back to the superior when the duty is done files the report: no action needed
+                witnesses = [i for i in scene.present if i != scene.player_id]
                 self.filed = DU.report(db, org, svc, boss, scene.now, scene.said, location=scene.location,
-                                       witnesses=[i for i in scene.present if i != scene.player_id])
+                                       witnesses=witnesses)
                 result["reported"] = [held.task_id]
-                self.notices.append(P.filed_notice(self._name(db, boss) or "your superior", self.filed, d))
+                if self.filed.outcome == "done" and ENC.enabled() and ENC.wants_windows(d):
+                    self.summary = ENC.file_summary(db, org, S.get(db, svc.service_id), self.filed.task, boss,
+                                                    scene.now, scene.location, witnesses)
+                self.notices.append(P.filed_notice(self._name(db, boss) or "your superior", self.filed, d,
+                                                   self.summary))
                 d = None
             if d is not None and d.incident_id is not None:
                 done = (DU.fought_count(db, held) if d.need == "fight" else DU.seen_count(db, held)) > 0
@@ -298,8 +355,14 @@ class Guard:
                 return "this NPC is not the player's superior", None
             witnesses = [i for i in scene.present if i != scene.player_id]
             if identifier == REPORT:
+                held = DU.in_hand(db, svc.member_id)
+                d = DU.duty_for(db, held) if held is not None else None
                 r = DU.report(db, org, svc, npc_id, scene.now, scene.said, location=scene.location,
                               witnesses=witnesses)
+                if r.outcome == "done" and ENC.enabled() and ENC.wants_windows(d):
+                    sm = ENC.file_summary(db, org, S.get(db, svc.service_id), r.task, npc_id, scene.now,
+                                          scene.location, witnesses)
+                    self.notices.append(f"Shift report: {sm.counts()}.")
                 processor.process(db, {"appraisal": claims.appraise})
                 if r.task is None:
                     return "no duty to report on", None
@@ -329,6 +392,21 @@ class Guard:
                     S.event(db, "bed_revoked", [scene.player_id], {"org": org.key}, scene.now, None, [])
                     return org.bed, False
         return None
+
+    def chest_due(self, scene: Scene) -> O.Item | None:
+        """The footlocker the game should place by the member's bunk: once per service, while serving."""
+        if scene.player_id is None:
+            return None
+        with self.store.transaction() as db:
+            svc = S.current(db, scene.player_id)
+            org = O.by_key(svc.org_key) if svc else None
+            if org is None or org.chest is None or org.bed is None or svc.status not in ("probation", "active"):
+                return None
+            given = S.last_event_gt(db, "chest_granted", scene.player_id, org.key)
+            if given is not None and given >= svc.joined_gt:
+                return None
+            S.event(db, "chest_granted", [scene.player_id], {"org": org.key}, scene.now, None, [])
+            return org.chest
 
     # ---- the game's approach step ----
     def wants_a_word(self, scene: Scene) -> list[int]:
@@ -374,6 +452,13 @@ class Guard:
             if org is None and svc is not None:
                 org = O.by_key(svc.org_key)
             org = org or O.orgs()[0]
+            if cmd.verb == "watch":
+                held = DU.in_hand(db, svc.member_id) if svc is not None else None
+                d = DU.duty_for(db, held) if held is not None else None
+                if not ENC.wants_windows(d):
+                    return "no routine duty in hand (watch windows come with routine duties)"
+                self._watch_soon = (held.task_id, scene.now)
+                return f"watch windows of duty {held.task_id} brought forward (sent with the next line)"
             return run(db, cmd, org, scene.player_id, scene.now, scene.location)
 
 

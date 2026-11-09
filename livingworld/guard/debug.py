@@ -11,6 +11,8 @@
 * "debug guard pay" / "debug guard record"              - show wages owed / the service record
 * "debug guard incident" / "... incident camp|road|brawl|theft" - open an incident now
 * "debug guard probation"                               - settle probation now as if it had run its course
+* "debug guard watch"                                   - bring the shift's watch windows forward: in a few
+                                                          game minutes two people come over, then you notice something
 
 "debug" (or "test") and "guard" must both be in the line, so normal speech never triggers it. The hold
 defaults to the hold of a guard leader or guard in the conversation, else the first configured hold.
@@ -24,7 +26,7 @@ from dataclasses import dataclass
 from livingworld.guard import orgs as O
 
 COMMANDS = ("enlist", "rank", "dismiss", "reinstate", "thane", "status", "duty", "seen", "report", "pay", "record",
-            "probation", "incident")
+            "probation", "incident", "watch")
 
 
 @dataclass(frozen=True)

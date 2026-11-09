@@ -69,6 +69,16 @@ KEY_GUARD_ISSUE_COUNTS = "mantella_lw_guard_issue_counts"    # ...and how many o
 KEY_GUARD_BED_ID = "mantella_lw_guard_bed_id"            # the barracks bunk: plugin-relative REFR id
 KEY_GUARD_BED_PLUGIN = "mantella_lw_guard_bed_plugin"
 KEY_GUARD_BED_OWN = "mantella_lw_guard_bed_own"          # True: make it the player's; False: unowned again
+KEY_GUARD_CHEST_ID = "mantella_lw_guard_chest_id"        # a footlocker (CONT base, plugin-relative id) to place by the bunk
+KEY_GUARD_CHEST_PLUGIN = "mantella_lw_guard_chest_plugin"
+# G2e shift encounters: the watch windows of the duty in hand (task 0 clears them), sent when they change
+KEY_GUARD_WATCH_TASK = "mantella_lw_guard_watch_task"    # int: the duty (task id); 0 = no windows
+KEY_GUARD_WATCH_END = "mantella_lw_guard_watch_end"      # float: game days (+1, like the records' gt) the shift ends
+KEY_GUARD_WATCH_AT = "mantella_lw_guard_watch_at"        # float[]: when each window falls due
+KEY_GUARD_WATCH_WIN = "mantella_lw_guard_watch_win"      # int[]: the window's number (sent back in the watch record)
+KEY_GUARD_WATCH_KIND = "mantella_lw_guard_watch_kind"    # int[]: 1 = someone comes over (else notice), 0 = notice
+KEY_GUARD_WATCH_OBS = "mantella_lw_guard_watch_obs"      # string[]: what the player notices if nobody comes over
+KEY_GUARD_WATCH_COOLDOWN = "mantella_lw_guard_watch_cooldown"   # float: days before the same person comes over again
 # Sent by the Living World build of Mantella-Spell (guard careers): per actor, and in the context
 KEY_IS_GUARD = "mantella_lw_is_guard"            # actor: Actor.IsGuard()
 KEY_CRIME_FACTION = "mantella_lw_crime_faction"  # actor: form ID of Actor.GetCrimeFaction()
@@ -134,6 +144,7 @@ class LivingWorld:
         self._guard_sent: set[int] = set()          # id(sentence) whose guard actions were handled
         self._guard_refreshed: int | None = None    # conv_id whose duties/probation were brought up to date
         self._player_said: str | None = None        # the player's last line (kept with a duty report)
+        self._watch_sent: tuple | None = None       # G2e: the watch plan last sent to the game this conversation
         self.hearing = enabled and hearing.hearing_enabled()   # catch misheard speech (MANTELLA_LW_HEARING=0 turns off)
         self.perf_monitor: PerfMonitor | None = None  # MANTELLA_LW_PERF=1 (see livingworld/perf)
         LivingWorld.latest = self
@@ -270,6 +281,7 @@ class LivingWorld:
         self._guard_sent = set()
         self._player_said = None
         self._hints_to_send = []
+        self._watch_sent = None
 
     @_never_raises
     def conversation_started(self, world_id: str, context: Any) -> None:
@@ -326,6 +338,10 @@ class LivingWorld:
         self._player_said = text.strip()
         if self.hygiene_debug:
             self._hygiene_debug(text, npc_id, context)
+        if self.guard:
+            scene = self._guard_scene()
+            if scene is not None and self._guard_for(self.store).player_spoke(scene):
+                logger.log(23, "Living World guard: the player answered someone who came over on shift")
         if self.guard_debug:
             scene = self._guard_scene()
             result = self._guard_for(self.store).debug(text, scene) if scene else None
@@ -636,15 +652,48 @@ class LivingWorld:
                     keys[KEY_GUARD_BED_PLUGIN] = bed.plugin
                     keys[KEY_GUARD_BED_OWN] = own
                     logger.log(23, f"Living World guard: barracks bunk {bed.form_id} {'given' if own else 'taken back'}")
+                chest = self._guard_for(self.store).chest_due(scene) if scene else None
+                if chest is not None:
+                    keys[KEY_GUARD_CHEST_ID] = int(chest.form_id, 16)
+                    keys[KEY_GUARD_CHEST_PLUGIN] = chest.plugin
+                    logger.log(23, f"Living World guard: footlocker {chest.form_id} to be placed by the bunk")
             except Exception:
                 self.errors += 1
                 logger.exception("Living World: could not check the barracks bunk; carrying on")
+        if self.guard and self.store is not None:
+            try:
+                keys.update(self._watch_keys())
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not send the guard watch windows; carrying on")
         if self.guard and self.store is not None:
             self._hints_to_send += self._guard_for(self.store).take_notices()   # shift started / over
         if self._hints_to_send:
             keys[KEY_HINTS] = self._hints_to_send
             self._hints_to_send = []
         return keys
+
+    def _watch_keys(self) -> dict[str, Any]:
+        """G2e: the duty's watch windows, sent with the first NPC line of a conversation and whenever they change."""
+        scene = self._guard_scene()
+        plan = self._guard_for(self.store).watch_plan(scene) if scene else None
+        if plan is None or plan.signature() == self._watch_sent:
+            return {}
+        self._watch_sent = plan.signature()
+        from livingworld.guard import encounter as ENC, orgs as O
+        cooldown = 3.0
+        if plan.task_id:
+            with self.store.transaction() as db:
+                from livingworld.guard import store as GS
+                svc = GS.current(db, scene.player_id)
+                org = O.by_key(svc.org_key) if svc else None
+                cooldown = ENC.config(org.key).npc_cooldown_days if org else cooldown
+            logger.log(23, f"Living World guard: watch windows for duty {plan.task_id}: " + ", ".join(
+                f"{w.win}@{w.at:.4f} {w.kind}" for w in plan.windows))
+        return {KEY_GUARD_WATCH_TASK: plan.task_id, KEY_GUARD_WATCH_END: plan.end,
+                KEY_GUARD_WATCH_AT: [w.at for w in plan.windows], KEY_GUARD_WATCH_WIN: [w.win for w in plan.windows],
+                KEY_GUARD_WATCH_KIND: [1 if w.kind == ENC.APPROACH else 0 for w in plan.windows],
+                KEY_GUARD_WATCH_OBS: [w.observation for w in plan.windows], KEY_GUARD_WATCH_COOLDOWN: cooldown}
 
     def start_reply_keys(self) -> dict[str, Any]:
         """Extra keys for the conversation start reply."""

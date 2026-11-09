@@ -55,6 +55,8 @@ class PerceptionPipeline:
             return AttireTracker(self).record(record)
         if record.type in ("fight", "swim"):
             return self._hygiene(record)
+        if record.type == "watch":
+            return self._guard_watch(record)
         timeline = self.store.active_timeline_id()
         # The game can send a record again after an older save is loaded (the save still has it queued).
         # Look on every timeline the active one can see, not only the active one, or the NPCs get the
@@ -170,6 +172,22 @@ class PerceptionPipeline:
         task = DU.mark_fought(db, actor_id, record.location, record.game_time)
         if task is not None:
             logger.log(23, f"Living World guard: fight at {record.location} counts for duty {task.task_id}")
+
+    def _guard_watch(self, record: PerceptionRecord) -> Outcome:
+        """G2e: a watch window on the player's guard shift came due (someone came over, or they noticed something)."""
+        from livingworld.guard import guard_enabled
+        if not guard_enabled():
+            return Outcome(None)
+        from livingworld.guard import encounter as ENC
+        gt = record.game_time
+        member_id = self.identities.ensure_npc(record.actor.identity(), gt)
+        npc_id = self.identities.ensure_npc(record.target.identity(), gt) if record.target else None
+        with self.store.transaction() as db:
+            event_id = ENC.record_watch(db, member_id, npc_id, record.task or 0, record.win or 0,
+                                        record.via or ENC.OBSERVE, gt, record.location)
+        logger.log(23, f"Living World guard: watch window {record.win} of duty {record.task} ({record.via}) -> "
+                       f"event {event_id}")
+        return Outcome(event_id, duplicate=event_id is None)
 
     # ---- internals ----
     def _child(self, npc_id: int | None) -> bool:
