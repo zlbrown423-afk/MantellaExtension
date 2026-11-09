@@ -60,6 +60,7 @@ class Guard:
     def __init__(self, store: WorldStore) -> None:
         self.store = store
         self._assigned: set[int] = set()     # duties given in the conversation now running
+        self.filed: DU.Report | None = None   # the report filed on coming back to the superior this conversation
         self.notices: list[str] = []          # on-screen notes for the player (shift started / over)
 
     def take_notices(self) -> list[str]:
@@ -152,6 +153,8 @@ class Guard:
             if person is not None:
                 out.append(P.report_to_line(name, player, person.name))
             return out
+        if self.filed is not None and self.filed.task is not None:
+            out.append(P.filed_line(name, player, self.filed))
         checks = DU.checks(db, org, svc, scene.now) if task is None else []
         if task is None and all(c.ok for c in checks):
             prev = DU.last(db, svc.member_id)
@@ -200,6 +203,7 @@ class Guard:
         """Missed duties, probation, and whether the player is at their post right now."""
         self._assigned = set()
         self.notices = []
+        self.filed = None
         with self.store.transaction() as db:
             svc = S.current(db, scene.player_id) if scene.player_id is not None else None
             org = O.by_key(svc.org_key) if svc else None
@@ -220,6 +224,13 @@ class Guard:
                         self.notices.append(f"On duty: seen at your post ({scene.location}).")
             held = DU.in_hand(db, svc.member_id) if svc is not None else None
             d = DU.duty_for(db, held) if held is not None and org else None
+            if d is not None and boss is not None and boss in scene.present and DU.ready(db, held, d, scene.now):
+                # coming back to the superior when the duty is done files the report: no action needed
+                self.filed = DU.report(db, org, svc, boss, scene.now, scene.said, location=scene.location,
+                                       witnesses=[i for i in scene.present if i != scene.player_id])
+                result["reported"] = [held.task_id]
+                self.notices.append(P.filed_notice(self._name(db, boss) or "your superior", self.filed, d))
+                d = None
             if d is not None and d.incident_id is not None:
                 done = (DU.fought_count(db, held) if d.need == "fight" else DU.seen_count(db, held)) > 0
                 if done:

@@ -121,6 +121,20 @@ def incidents_line(name: str, org: O.Org, incidents) -> str:
             f"it, without inventing details beyond it.")
 
 
+def filed_notice(boss: str, r, d) -> str:
+    gain = f" (+{d.merit:g} merit)" if r.outcome == "done" else ""
+    return f"Reported to {boss}: {r.task.title if r.task else d.title}, done{gain}." + (" Commended!" if r.commended else "")
+
+
+def filed_line(name: str, player: str, r) -> str:
+    out = (f"{player} has just come back to {name} from their duty ({r.task.title}), and the guard's record shows it "
+           f"was done properly; {name} takes the report now, may ask how it went, and acknowledges it in their own "
+           f"words. The report is already recorded: do not use {REPORT_KEY}.")
+    if r.commended:
+        out += f" {player} has earned a commendation for a run of good service; {name} tells them so."
+    return out
+
+
 def duty_line(name: str, player: str, task, d, shift_end: float, now: float, *, new: bool, seen: bool) -> str:
     if d.incident_id is not None:
         how = ("fighting the bandits there" if d.need == "fight" else "going there and dealing with it")

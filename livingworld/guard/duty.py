@@ -311,6 +311,13 @@ def _maybe_commend(db, org: O.Org, svc: S.Service, by: int | None, now: float, w
 
 # ---- reporting back ----
 
+def ready(db, task: T.Task, d: Duty, now: float) -> bool:
+    """Whether the duty is done and can be reported: dealt with (incident), or seen at the post and at least
+    half the shift gone (routine)."""
+    if d.incident_id is not None or d.need == "fight":
+        return (fought_count(db, task) if d.need == "fight" else seen_count(db, task)) > 0
+    return seen_count(db, task) > 0 and now >= assigned_gt(db, task) + d.shift_hours / 48.0 - 1e-9
+
 @dataclass
 class Report:
     outcome: str          # done | early | false | none

@@ -102,7 +102,7 @@ def test_an_honest_report_after_being_seen_at_the_post(tmp_path):
     assert service(db)["merit"] > 0
     mem = db.execute("SELECT content FROM memory WHERE owner_id = ? AND content LIKE '%reported back%'",
                      (npc_id(db, "Commander Caius"),)).fetchone()
-    assert mem and "the gate was quiet" in mem[0]
+    assert mem                                   # filed on arrival (his words come with an early ReportDuty)
 
 
 def test_reporting_without_being_seen_is_a_false_report(tmp_path):
@@ -392,3 +392,21 @@ def test_a_barracks_bunk_is_given_on_joining_and_taken_back_on_leaving(tmp_path)
     assert talk.beds == [(0xD46B7, False)]                     # on the next line after leaving
     talk(tmp_path, DAY + 0.3, npcs=[whiterun_guard()])
     assert talk.beds == []
+
+
+def test_coming_back_to_caius_files_the_report_by_itself(tmp_path):
+    enlisted(tmp_path)
+    given_duty(tmp_path, DAY + 0.01)
+    talk(tmp_path, DAY + 0.05, npcs=[whiterun_guard()])              # seen at the post
+    prompt = talk(tmp_path, DAY + 0.2)                                # just talking to Caius, no ReportDuty
+    assert duties(tmp_path)[-1]["state"] == "completed"
+    assert "has just come back to Commander Caius from their duty" in prompt and "do not use ReportDuty" in prompt
+    assert any(h.startswith("Reported to Commander Caius:") for h in talk.hints)
+
+
+def test_coming_back_too_soon_does_not_file_anything(tmp_path):
+    enlisted(tmp_path)
+    given_duty(tmp_path, DAY + 0.01)
+    talk(tmp_path, DAY + 0.02, npcs=[whiterun_guard()])
+    talk(tmp_path, DAY + 0.03)                                        # before half the shift: nothing filed
+    assert duties(tmp_path)[-1]["state"] == "in_progress"
