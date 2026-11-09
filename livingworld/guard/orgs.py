@@ -64,6 +64,7 @@ class Org:
     duty_file: str | None = None          # guard/data/<file> with this guard's duties
     pay: dict[str, Any] = field(default_factory=dict, compare=False, hash=False)
     quarters: str = ""                    # where a member sleeps and keeps their things
+    bed: Item | None = None               # the bed reference the game makes the member's own (a REFR, not a base form)
 
     @property
     def generic_rank(self) -> str:
@@ -135,7 +136,8 @@ def _org(raw: dict[str, Any]) -> Org:
                            for r in raw["ranks"]),
                probation_days=float(raw.get("probation_days", 7)), recruit=dict(raw.get("recruit") or {}),
                uniform=uniform, generic_rank_key=raw.get("generic_rank"), rank_note=raw.get("rank_note", ""),
-               duty_file=raw.get("duties"), pay=dict(raw.get("pay") or {}), quarters=raw.get("quarters", ""))
+               duty_file=raw.get("duties"), pay=dict(raw.get("pay") or {}), quarters=raw.get("quarters", ""),
+               bed=_bed(raw.get("bed")))
 
 
 @functools.lru_cache(maxsize=1)
@@ -146,6 +148,12 @@ def orgs() -> tuple[Org, ...]:
         for raw in json.loads(data.joinpath(name).read_text(encoding="utf-8"))["orgs"]:
             out.append(_org(raw))
     return tuple(out)
+
+
+def _bed(raw: dict | None) -> Item | None:
+    if not raw or not raw.get("ref"):
+        return None
+    return Item(raw.get("name", "bed"), raw.get("plugin", "Skyrim.esm"), local_id(raw["ref"]))
 
 
 def by_key(key: str | None) -> Org | None:

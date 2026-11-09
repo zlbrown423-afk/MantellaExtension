@@ -150,9 +150,22 @@ class PerceptionPipeline:
         with self.store.transaction() as db:
             if record.type == "fight":
                 added = hygiene.record_fight(db, actor_id, record.game_time, record.hp, record.key)
+                if added:
+                    self._guard_fight(db, actor_id, record)
             else:
                 added = hygiene.record_swim(db, actor_id, record.game_time, record.duration_s, record.key)
         return Outcome(None, duplicate=not added)
+
+    @staticmethod
+    def _guard_fight(db, actor_id: int, record: PerceptionRecord) -> None:
+        """G2d: a fight where the guard sent the player (bandits) counts toward that duty."""
+        from livingworld.guard import guard_enabled
+        if not guard_enabled():
+            return
+        from livingworld.guard import duty as DU
+        task = DU.mark_fought(db, actor_id, record.location, record.game_time)
+        if task is not None:
+            logger.log(23, f"Living World guard: fight at {record.location} counts for duty {task.task_id}")
 
     # ---- internals ----
     def _child(self, npc_id: int | None) -> bool:

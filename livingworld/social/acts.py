@@ -49,6 +49,8 @@ ACTS: dict[str, Act] = {
     "reinstated": Act("was taken back by", 0.35),
     "commended": Act("was commended by", 0.35, {"respect": 0.04, "trust": 0.02}),
     "reprimanded": Act("was reprimanded by", 0.4, {"respect": -0.03}),
+    "arrested": Act("arrested", 0.45, {"respect": 0.03}, domains={"standing": 0.1, "lawfulness": 0.1}),
+    "cleared": Act("drove off", 0.55, {"respect": 0.05}, domains={"standing": 0.15, "lawfulness": 0.1}),
     # reputation (S2): things the game reports the player doing (perception records gift, theft, hit)
     "gifted": Act("gave a gift to", 0.35, {"affinity": 0.05, "trust": 0.02}, domains={"generosity": 0.25}),
     "stole": Act("stole from", 0.7, {"trust": -0.25, "suspicion": 0.3}, harms_object=True,
@@ -63,7 +65,8 @@ ACTS: dict[str, Act] = {
 # the verb when nobody is named as having done it ("Torvar was promoted to Sergeant in the Whiterun Guard")
 NO_OBJECT = {"stole": "stole", "gifted": "gave a gift", "enlisted": "joined", "promoted": "was promoted", "demoted": "was demoted", "dismissed": "was dismissed",
              "reinstated": "was taken back",
-             "commended": "was commended", "reprimanded": "was reprimanded"}
+             "commended": "was commended", "reprimanded": "was reprimanded",
+             "arrested": "arrested", "cleared": "drove off"}
 
 SECONDHAND = 0.6        # hearing about something moves an opinion less than seeing it
 CLOSE_TO_OBJECT = 1.5   # ...unless it was done to someone you are close to
