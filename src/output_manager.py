@@ -341,7 +341,7 @@ class ChatManager:
                 while not has_text_response and retries < max_retries:
                     try:
                         start_time = time.time()
-                        async for item in active_client.streaming_call(messages=messages, is_multi_npc=is_multi_npc, tools=current_tools):
+                        async for item in active_client.streaming_call(messages=living_world.mood_messages(messages, active_character) if mood_filter else messages, is_multi_npc=is_multi_npc, tools=current_tools): # LIVINGWORLD PATCH: mood reminder
                             if self.__stop_generation.is_set():
                                 break
                             if not item:

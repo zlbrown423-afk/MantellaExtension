@@ -108,8 +108,12 @@ def grab_for_target(record: PerceptionRecord, to_actor: Bond) -> MemoryDraft:
     elif dur < BRIEF_S and not sensitive:
         interpretation = f"A stranger putting hands on me. Rude, at the least."
         valence, trust = -0.3, -0.05
-    elif dur >= LONG_S or sensitive:
+    elif dur >= LONG_S:
         interpretation = f"{actor} held on and would not let go. It felt threatening."
+        valence, trust = -0.6, -0.15
+    elif sensitive:
+        # a quick hand on the face or chest is not "holding on", but it is no less unwelcome
+        interpretation = f"{actor} put a hand on my {part.split(' ')[-1]} without asking. It felt threatening."
         valence, trust = -0.6, -0.15
     else:
         interpretation = f"{actor} grabbed me without asking. I did not like it."
