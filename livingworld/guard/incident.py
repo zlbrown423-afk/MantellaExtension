@@ -46,6 +46,9 @@ class Kind:
     complainants: tuple[str, ...]
     culprits: tuple[str, ...]
     camps: tuple[str, ...]
+    suspects: tuple[str, ...] = ()     # G2f: real local people who may be named as the culprit
+    suspect_chance: float = 0.0
+    charge: str | None = None          # G2f: what an arrest for it is for ('theft', 'brawling')
 
 
 @dataclass
@@ -67,6 +70,8 @@ class Incident:
     opened_gt: float
     expires_gt: float
     day: int
+    suspect: str | None = None         # G2f: a real person named as the culprit (arrest them for evidence)
+    charge: str | None = None
 
 
 @functools.lru_cache(maxsize=None)
@@ -79,7 +84,9 @@ def kinds(org_key: str) -> tuple[Kind, ...]:
                       k.get("need", "seen"), k.get("outcome", "arrested"), k.get("place", ""),
                       float(k.get("shift_hours", 4)), float(k.get("lasts_days", 1)), float(k.get("chance", 0.2)),
                       k.get("min_rank"), float(k.get("merit", 1.5)), tuple(k.get("complainants") or ()),
-                      tuple(k.get("culprits") or ()), tuple(k.get("camps") or ()))
+                      tuple(k.get("culprits") or ()), tuple(k.get("camps") or ()),
+                      suspects=tuple(k.get("suspects") or ()), suspect_chance=float(k.get("suspect_chance", 0.0)),
+                      charge=k.get("charge"))
                  for k in raw.get("incidents") or ())
 
 
@@ -92,7 +99,8 @@ def _row(row) -> Incident:
     return Incident(row["event_id"], p["org"], p["key"], p["title"], p.get("why", ""), p.get("instructions", ""),
                     tuple(p.get("where") or ()), p.get("need", "seen"), p.get("outcome", "arrested"), p.get("place", ""),
                     float(p.get("shift_hours", 4)), p.get("min_rank"), float(p.get("merit", 1.5)), p.get("culprit"),
-                    row["game_time"], float(p["expires_gt"]), int(p.get("day", int(row["game_time"]))))
+                    row["game_time"], float(p["expires_gt"]), int(p.get("day", int(row["game_time"]))),
+                    p.get("suspect"), p.get("charge"))
 
 
 def get(db, event_id: int) -> Incident | None:
@@ -167,10 +175,14 @@ def _open(db, org: O.Org, k: Kind, day: int, opened: float, seed: int) -> Incide
     title, why, place = (s.format(**fill) for s in (k.title, k.why, k.place))
     where = tuple(w.format(**fill) for w in k.where)
     culprit = pick(k.culprits, 40) or None
+    suspect = None
+    if k.suspects and ((seed >> 48) % 1000) / 1000 < k.suspect_chance:
+        suspect = culprit = pick(k.suspects, 56)
+        why += f". Word is it was {suspect}"
     payload = {"org": org.key, "key": k.key, "title": title, "why": why, "instructions": k.instructions.format(**fill),
                "where": list(where), "need": k.need, "outcome": k.outcome, "place": place,
                "shift_hours": k.shift_hours, "min_rank": k.min_rank, "merit": k.merit, "culprit": culprit,
-               "expires_gt": opened + k.lasts_days, "day": day}
+               "expires_gt": opened + k.lasts_days, "day": day, "suspect": suspect, "charge": k.charge}
     event_id = S.event(db, "incident", [], payload, opened, where[0] if where else org.hold, [])
     return get(db, event_id)
 

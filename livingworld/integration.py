@@ -76,6 +76,14 @@ KEY_GUARD_BED_PLUGIN = "mantella_lw_guard_bed_plugin"
 KEY_GUARD_BED_OWN = "mantella_lw_guard_bed_own"          # True: make it the player's; False: unowned again
 KEY_GUARD_CHEST_ID = "mantella_lw_guard_chest_id"        # a footlocker (CONT base, plugin-relative id) to place by the bunk
 KEY_GUARD_CHEST_PLUGIN = "mantella_lw_guard_chest_plugin"
+# G2f arrests: someone the player arrested (by name, as in the conversation) and what the rules decided they do
+KEY_GUARD_ARREST_NAME = "mantella_lw_guard_arrest_name"
+KEY_GUARD_ARREST_MODE = "mantella_lw_guard_arrest_mode"    # 'submit' (follows to the cells) | 'flee' | 'fight'
+KEY_GUARD_ARREST_ID = "mantella_lw_guard_arrest_id"        # int: the arrest (sent back on jail records as task=)
+KEY_GUARD_ARREST_DAYS = "mantella_lw_guard_arrest_days"    # float: game days in the cell
+KEY_GUARD_JAIL_ID = "mantella_lw_guard_jail_id"            # int: the prisoner marker (REFR, plugin-relative) in the cell
+KEY_GUARD_JAIL_PLUGIN = "mantella_lw_guard_jail_plugin"
+KEY_GUARD_RELEASE = "mantella_lw_guard_release"            # int[]: arrests whose prisoner is let out now
 # G2e shift encounters: the watch windows of the duty in hand (task 0 clears them), sent when they change
 KEY_GUARD_WATCH_TASK = "mantella_lw_guard_watch_task"    # int: the duty (task id); 0 = no windows
 KEY_GUARD_WATCH_END = "mantella_lw_guard_watch_end"      # float: game days (+1, like the records' gt) the shift ends
@@ -446,6 +454,14 @@ class LivingWorld:
         return "\n\n".join(blocks)
 
     @_never_raises
+    def guard_notes(self, text: str, context: Any) -> list[str]:
+        """G2f: notes for the AI on the player's line, such as what someone the player arrests does."""
+        if not self.guard or self.conv_id is None or context is not self._context or not text:
+            return []
+        scene = self._guard_scene()
+        return self._guard_for(self.store).arrest_turn(scene, text) if scene else []
+
+    @_never_raises
     def hearing_note(self, text: str, context: Any) -> str | None:
         """A narration note naming likely misheard words in the player's line, or None."""
         if not self.hearing or context is None:
@@ -709,6 +725,12 @@ class LivingWorld:
                 logger.exception("Living World: could not check the barracks bunk; carrying on")
         if self.guard and self.store is not None:
             try:
+                keys.update(self._arrest_keys())
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not send a guard arrest to the game; carrying on")
+        if self.guard and self.store is not None:
+            try:
                 keys.update(self._watch_keys())
             except Exception:
                 self.errors += 1
@@ -718,6 +740,25 @@ class LivingWorld:
         if self._hints_to_send:
             keys[KEY_HINTS] = self._hints_to_send
             self._hints_to_send = []
+        return keys
+
+    def _arrest_keys(self) -> dict[str, Any]:
+        """G2f: an arrest the rules decided on (one per line) and prisoners to let out."""
+        guard = self._guard_for(self.store)
+        orders, releases = guard.take_arrest_orders()
+        keys: dict[str, Any] = {}
+        if orders:
+            o = orders[0]
+            guard.arrest_orders = orders[1:] + guard.arrest_orders   # any others go with the next line
+            keys.update({KEY_GUARD_ARREST_NAME: o.name, KEY_GUARD_ARREST_MODE: o.mode, KEY_GUARD_ARREST_ID: o.arrest_id,
+                         KEY_GUARD_ARREST_DAYS: o.days})
+            if o.jail is not None and o.jail.form_id:
+                keys[KEY_GUARD_JAIL_ID] = int(o.jail.form_id, 16)
+                keys[KEY_GUARD_JAIL_PLUGIN] = o.jail.plugin
+            logger.log(23, f"Living World guard: arrest {o.arrest_id} sent to the game: {o.name} {o.mode}")
+        if releases:
+            keys[KEY_GUARD_RELEASE] = releases
+            logger.log(23, f"Living World guard: prisoners to let out: arrests {releases}")
         return keys
 
     def _watch_keys(self) -> dict[str, Any]:

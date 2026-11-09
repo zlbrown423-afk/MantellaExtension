@@ -197,7 +197,7 @@ def parse_record(text: str) -> PerceptionRecord:
         fields["cover"] = fields["cover"].strip().lower()
     if fields.get("payer"):
         fields["payer"] = fields["payer"].strip().lower()
-    if kind not in ("grab", "consume", "attire", "purchase", "fight", "swim", "gift", "theft", "hit", "watch", "react"):
+    if kind not in ("grab", "consume", "attire", "purchase", "fight", "swim", "gift", "theft", "hit", "watch", "react", "jail"):
         raise BadRecord(f"unknown event type {kind!r}")
     record = PerceptionRecord(
         key=fields["key"], type=kind, game_time=float(fields["gt"]), location=fields.get("loc") or None,
@@ -215,6 +215,8 @@ def parse_record(text: str) -> PerceptionRecord:
         witnesses=witnesses, raw=text)
     if kind == "watch" and (record.via not in ("approach", "observe") or record.win is None or not record.task):
         raise BadRecord("a watch record needs via=approach or observe, win and task")
+    if kind == "jail" and (record.via not in ("jailed", "released") or record.target is None or not record.task):
+        raise BadRecord("a jail record needs via=jailed or released, the prisoner as target and the arrest as task")
     if kind == "react" and (record.via not in ("victim", "guard") or record.target is None
                             or (record.via == "guard" and record.party is None)):
         raise BadRecord("a react record needs via=victim or guard, the player as target, and party for a guard")

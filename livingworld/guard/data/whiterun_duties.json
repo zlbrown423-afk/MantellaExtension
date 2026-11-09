@@ -153,7 +153,13 @@
         "a Dunmer sellsword named Teris Arvel",
         "a Breton tinker named Jonnet",
         "a Nord farmhand named Ulgar the Lean"
-      ]
+      ],
+      "suspects": [
+        "Brenuin",
+        "Mikael"
+      ],
+      "suspect_chance": 0.5,
+      "charge": "theft"
     },
     {
       "key": "tavern_brawl",
@@ -175,7 +181,14 @@
         "a drunk caravan guard named Bjorn Ale-Belly",
         "a farmhand from the Battle-Born fields named Gerdvald",
         "a sellsword named Kraldar the Loud"
-      ]
+      ],
+      "suspects": [
+        "Mikael",
+        "Jon Battle-Born",
+        "Uthgerd the Unbroken"
+      ],
+      "suspect_chance": 0.5,
+      "charge": "brawling"
     },
     {
       "key": "road_bandits",
@@ -579,5 +592,39 @@
         ]
       }
     ]
+  },
+  "arrest": {
+    "_note": "G2f arrests (livingworld/guard/arrest.py). Chances are shares of 1; days are game days.",
+    "submit_base": 0.45,
+    "submit_per_evidence": 0.35,
+    "submit_guards": 0.15,
+    "submit_per_rank": 0.04,
+    "submit_caught": 0.35,
+    "submit_wrongful": 0.85,
+    "tough_penalty": 0.2,
+    "fight_share": 0.35,
+    "fight_share_tough": 0.65,
+    "tough_words": [
+      "bandit",
+      "sellsword",
+      "mercenary",
+      "warrior",
+      "orc",
+      "berserker",
+      "uthgerd"
+    ],
+    "evidence_days": 10,
+    "escort_days": 1,
+    "caught_days": 2,
+    "insist_days": 0.05,
+    "merit_booked": 1.0,
+    "merit_suspect": 0.75,
+    "merit_wrongful": -1.5,
+    "sentences": {
+      "theft": 1,
+      "brawling": 1,
+      "assault": 2
+    },
+    "default_days": 1
   }
 }

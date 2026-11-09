@@ -145,6 +145,14 @@ def watch(player_json: dict[str, Any], task: int, win: int, game_days: float, ta
     return "|".join(parts)
 
 
+def jail(player_json: dict[str, Any], prisoner_json: dict[str, Any], arrest: int, via: str, game_days: float,
+         location: str = "Dragonsreach Dungeon", key: str | None = None) -> str:
+    """G2f: the game locked up (``jailed``) or let out (``released``) someone the player arrested."""
+    return "|".join(["v=1", f"key={key or _key('jail')}", "type=jail", f"gt={game_days}", f"loc={location}",
+                     f"actor={actor_field(player_json)}", f"target={actor_field(prisoner_json)}", f"via={via}",
+                     f"task={arrest}"])
+
+
 def presence(target_json: dict[str, Any], what: str, game_days: float, player_json: dict[str, Any] | None = None,
              distance_m: float | None = None, seconds: float | None = None, count: int = 1,
              location: str = "Riverwood", key: str | None = None) -> str:

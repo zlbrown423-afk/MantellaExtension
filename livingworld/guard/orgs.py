@@ -66,6 +66,7 @@ class Org:
     quarters: str = ""                    # where a member sleeps and keeps their things
     bed: Item | None = None               # the bed reference the game makes the member's own (a REFR, not a base form)
     chest: Item | None = None             # a container base (CONT, never respawns) the game places by that bed, once
+    jail: Item | None = None              # G2f: the prisoner marker inside a cell of the hold's jail (a REFR)
 
     @property
     def generic_rank(self) -> str:
@@ -138,7 +139,8 @@ def _org(raw: dict[str, Any]) -> Org:
                probation_days=float(raw.get("probation_days", 7)), recruit=dict(raw.get("recruit") or {}),
                uniform=uniform, generic_rank_key=raw.get("generic_rank"), rank_note=raw.get("rank_note", ""),
                duty_file=raw.get("duties"), pay=dict(raw.get("pay") or {}), quarters=raw.get("quarters", ""),
-               bed=_bed(raw.get("bed")), chest=_chest(raw.get("chest")))
+               bed=_bed(raw.get("bed")), chest=_chest(raw.get("chest")),
+               jail=_bed(raw.get("jail")))
 
 
 @functools.lru_cache(maxsize=1)
