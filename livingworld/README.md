@@ -222,6 +222,18 @@ Code: `dialogue/hearing.py`.
 | Rule | Each prompt tells the NPCs the player's words can arrive garbled. A line that makes no sense gets an in-character check ("Thane, you say?") or a request to say it again, not a literal answer. A clear line with one wrong word is just answered. |
 | Note | Each player line is checked against a list of commonly misheard Skyrim words ("stain of white run" -> "thane of Whiterun", "Kai's" -> "Caius", "yarl" -> "Jarl") and against near misses of the names of the people present ("Gerdar" -> "Gerdur"). Hits are added before the line as a narration note. The player's words are never rewritten. Add words to `MISHEARD`. |
 
+## Leads: ask about someone without saying their name
+
+On with `MANTELLA_LIVING_WORLD=1`. Switch off with `set MANTELLA_LW_LEADS=0`. No extra AI call.
+Code: `dialogue/leads.py`, table `player_lead` (migration 011).
+
+| Part | What it does |
+| --- | --- |
+| Learning | When the player asks after someone ("Do you know where vault is?"), a name in the NPC's answer that sounds like one of the player's words ("Vald? He owes Maven...") becomes a lead, spelled the way the NPC spelled it. Names the misheard list fixes in a question ("named Wald") count too, and so does a name said right that the NPC repeats. Kind (person, place, thing) comes from the name and the words around it. |
+| Phrases | "the man/woman/one I'm looking for" (newest person), "the place I'm looking for" (newest place), "what I'm after" / "my lead" (newest of any kind). The line carries a note: `When Torvar says "the man I'm looking for", they mean Vald, ...`. |
+| Hearing | In a question, the newest leads are matched more loosely than other names ("Where's vault hiding?" -> "Vald"). |
+| Saves | Rows carry the timeline: loading an older save forgets leads learned after it. The newest five are kept in play. |
+
 
 Both are on with `MANTELLA_LIVING_WORLD=1`. Switch either off with `set MANTELLA_LW_MOOD_METER=0` or
 `set MANTELLA_LW_QUIET_CHATTER=0`.
