@@ -165,6 +165,11 @@ def filed_line(name: str, player: str, r, summary=None) -> str:
             out += f" A quiet shift is rare; {name} may remark on it."
     if r.commended:
         out += f" {player} has earned a commendation for a run of good service; {name} tells them so."
+    if getattr(r, "trained", False):
+        out += (f" That was the last step of {player}'s recruit training: {name} tells them they have finished it "
+                f"(with no reprimand on their record, that also ends their probation).")
+    if not (r.task and r.task.template and r.task.template.startswith("duty:training:")):
+        out += " " + written_report_line(name, player)
     return out
 
 
@@ -184,6 +189,46 @@ def encounter_line(name: str, player: str, org: O.Org, svc: S.Service, enc, *, i
                 f"they remember of {player}. It is an everyday matter, not an emergency unless it says so.")
     return (head + f" {player} may help, send them elsewhere, or say they will take it to their superior; {name} "
             f"reacts as they would. {name} does not invent a crime, a fight or danger beyond this.")
+
+
+def training_line(name: str, player: str, d, step_no: int, steps: int, *, new: bool, seen: bool) -> str:
+    """G2g: a recruit training step (not the quiz, which has its own line)."""
+    how = {"fight": f"a sparring bout with fists against a fellow guard ({player} asks one; it is a brawl, not a "
+                    f"real fight)", "escort": "walking the patrol with a senior guard beside them",
+           "seen": "being seen at the drill"}.get(d.need, "doing it")
+    if new:
+        head = (f"{name} is training {player}, a new recruit (step {step_no} of {steps}): {d.title}. Why: {d.why}. "
+                f"What to do: {d.instructions} It is done by {how}. {name} explains it in their own words.")
+    else:
+        head = f"{name} set {player} a training step (step {step_no} of {steps}): {d.title}."
+        if seen:
+            head += f" There are signs {player} has done it."
+    return (head + f" When {player} comes back to report, {name} hears them out; then begin the reply with "
+            f"'{REPORT_KEY}:'. The guard's record shows whether it was really done.")
+
+
+def quiz_line(name: str, player: str, org: O.Org, questions, right: list[str], wrong: int, step_no: int, steps: int,
+              pass_right: int) -> str:
+    """G2g: the superior tests the recruit on the hold's law and the guard's orders, now."""
+    todo = [q for q in questions if q.key not in right]
+    items = " ".join(f"({i + 1}) {q.ask} (A good answer: {q.answer}.)" for i, q in enumerate(todo[:4]))
+    return (f"Training step {step_no} of {steps}: {name} is testing {player} on the law of {org.hold} and the guard's "
+            f"orders, now, in this conversation. {name} asks ONE question at a time from these, waits for the answer, "
+            f"says plainly whether it was right and gives the right answer if not: {items} So far {len(right)} right, "
+            f"{wrong} wrong; {pass_right} right answers pass. The guard's record keeps the score: {name} does not "
+            f"announce a pass or a fail by their own judgement, and does not use {REPORT_KEY}.")
+
+
+def written_report_line(name: str, player: str) -> str:
+    return (f"{name} asks {player} for their report in their own words: what happened, who came to them, what they "
+            f"saw and what still needs doing. It goes into the guard's ledger as {player}'s written report; {name} "
+            f"listens, asks about anything left out, and may remark on how thorough it is.")
+
+
+def reports_line(name: str, player: str, past: list[tuple[str, str]]) -> str:
+    """Recent written reports the superior can quote back."""
+    items = "; ".join(f"on '{title}': \"{text[:160]}\"" for title, text in past[:2])
+    return f"{name} remembers {player}'s recent written reports: {items}."
 
 
 def duty_line(name: str, player: str, task, d, shift_end: float, now: float, *, new: bool, seen: bool) -> str:

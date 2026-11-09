@@ -381,6 +381,14 @@ class LivingWorld:
             return
         if game_days is None and context is not None:
             game_days = context.game_days
+        if self.guard and self.store is not None:
+            try:
+                scene = self._guard_scene()
+                if scene is not None:
+                    self._guard_for(self.store).ended(scene)
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not file the written guard report; carrying on")
         self._close(game_days)
 
     @_never_raises
