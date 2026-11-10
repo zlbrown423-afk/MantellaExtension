@@ -74,7 +74,8 @@ ends; ``via=now`` is sent with every request, under the context key ``mantella_l
 running near the player. ``actor``, ``target`` and ``party`` are the people in it (the player first when they
 are in it), ``acts`` the OStim action types seen so far, ``touch`` and ``slap`` the player's hands and slaps
 on a partner that the game folded into the scene instead of sending them as grabs and hits, ``forced=1``
-an aggressive OStim scene, ``climax`` how often someone climaxed, ``dur`` seconds::
+an aggressive OStim scene, ``climax`` how often someone climaxed, ``dur`` seconds, ``psize`` the scale The New
+Gentleman gives the player's genitals when the player is a man in the scene (``intimacy/size.py``)::
 
     v=1|key=812345-11|type=scene|gt=4.3|loc=Whiterun|via=end|thread=0|scene=<OStim scene id>|actor=<player>
       |target=<actor>|acts=kissing,vaginalsex,spanking|touch=14|slap=3|forced=0|climax=1|dur=420.5|w=<witness>
@@ -160,6 +161,7 @@ class PerceptionRecord:
     forced: bool = False            # scene: OStim played it as an aggressive scene
     climax: int = 0                 # scene: how many times someone in it climaxed
     scene_id: str | None = None     # scene: OStim scene id (the last one, on an end record)
+    player_size: float | None = None  # scene: TNG's scale of the player's "NPC GenitalsBase" bone (intimacy/size.py)
     witnesses: list[Witness] = field(default_factory=list)
     raw: str = ""
 
@@ -233,6 +235,7 @@ def parse_record(text: str) -> PerceptionRecord:
         thread=int(fields["thread"]) if fields.get("thread") else None, acts=_acts(fields.get("acts")),
         touches=_count(fields.get("touch")), slaps=_count(fields.get("slap")), forced=fields.get("forced") == "1",
         climax=_count(fields.get("climax")), scene_id=(fields.get("scene") or "").strip() or None,
+        player_size=_scale(fields.get("psize")),
         witnesses=witnesses, raw=text)
     if kind == "scene" and (record.via not in ("end", "now") or record.target is None):
         raise BadRecord("a scene record needs via=end or now and at least two people (actor and target)")
@@ -272,6 +275,14 @@ def _acts(text: str | None) -> list[str]:
         if word and re.fullmatch(r"[a-z0-9_]{1,40}", word) and word not in acts:
             acts.append(word)
     return acts
+
+
+def _scale(text: str | None) -> float | None:
+    try:
+        value = float(text) if text else None
+    except ValueError:
+        return None
+    return value if value is not None and 0.05 < value <= 5.0 else None
 
 
 def _count(text: str | None) -> int:

@@ -178,3 +178,41 @@ def test_grabs_and_hits_outside_a_scene_are_unchanged(tmp_path):
     db = open_db(tmp_path)
     kinds = {r[0] for r in db.execute("SELECT type FROM world_event")}
     assert {"physical_interaction", "violence"} <= kinds
+
+
+# ---- the player's size (The New Gentleman) ----------------------------------------------------------
+
+def test_size_rule_five_inches_or_less_is_unimpressive(monkeypatch):
+    from livingworld.intimacy import size
+    monkeypatch.delenv("MANTELLA_LW_TNG_LENGTH_IN", raising=False)
+    monkeypatch.delenv("MANTELLA_LW_TNG_GIRTH_IN", raising=False)
+    assert size.from_scale(0.8).length_in == 4.8 and not size.from_scale(0.8).impressive    # XS
+    assert size.from_scale(0.9).verdict() == "impressive"                                   # S: 5.4 in
+    assert size.from_scale(1.4).verdict() == "impressive, and thick"                        # XL: 8.4 x 6.7
+    monkeypatch.setenv("MANTELLA_LW_TNG_LENGTH_IN", "5")
+    assert size.from_scale(1.0).verdict() == "unimpressive"                                 # exactly 5 is not
+    monkeypatch.setenv("MANTELLA_LW_TNG_GIRTH_IN", "4")
+    assert size.from_scale(1.0).verdict() == "unimpressive, and thin"
+    assert size.from_scale(None) is None
+
+
+def test_a_woman_in_the_scene_remembers_and_notices_his_size(tmp_path):
+    talk(tmp_path, [actors.gerdur()], 3.4)       # she is known (and known to be a woman) from an earlier talk
+    rec = scene([PLAYER, actors.gerdur()], 3.5, acts=("vaginalsex",), player_size=1.2)
+    talk(tmp_path, [actors.gerdur()], 3.51, events=[rec])
+    db = open_db(tmp_path)
+    mem = memories(db, "Gerdur")[-1]
+    assert "Torvar was about 7.2 inches long and 5.7 inches around; I found him impressive, and thick." in mem["content"]
+    live = [scene([PLAYER, actors.gerdur()], 3.6, via="now", acts=("vaginalsex",), player_size=0.8)]
+    prompt, _ = talk(tmp_path, [actors.gerdur()], 3.6, live=live)
+    assert "Gerdur has seen Torvar's manhood up close: about 4.8 inches long and 3.8 inches around." in prompt
+    assert "finds it unimpressive, and thin" in prompt
+
+
+def test_men_and_forced_scenes_get_no_size_line(tmp_path):
+    talk(tmp_path, [actors.hod()], 3.4)
+    talk(tmp_path, [actors.hod()], 3.51, events=[scene([PLAYER, actors.hod()], 3.5, player_size=1.2)])
+    talk(tmp_path, [actors.gerdur()], 3.52)
+    talk(tmp_path, [actors.gerdur()], 3.53, events=[scene([PLAYER, actors.gerdur()], 3.525, forced=True, player_size=1.2)])
+    db = open_db(tmp_path)
+    assert all("inches" not in m["content"] for m in memories(db, "Hod") + memories(db, "Gerdur"))

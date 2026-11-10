@@ -184,7 +184,7 @@ def react(actor_json: dict[str, Any], player_json: dict[str, Any], game_days: fl
 def scene(people: list[dict[str, Any]], game_days: float, acts: list[str] | tuple[str, ...] = (), via: str = "end",
           seconds: float = 300.0, touches: int = 0, slaps: int = 0, forced: bool = False, climax: int = 0,
           thread: int = 0, scene_id: str = "OStimStandingKissMF", location: str = "Whiterun",
-          witnesses: list[str] | None = None, key: str | None = None) -> str:
+          witnesses: list[str] | None = None, key: str | None = None, player_size: float | None = None) -> str:
     """An OStim scene (``intimacy/``): the player first when they are in it. ``via=now`` is the live snapshot."""
     parts = ["v=1", f"key={key or _key('scene')}", "type=scene", f"gt={game_days}", f"loc={location}", f"via={via}",
              f"thread={thread}", f"scene={scene_id}", f"actor={actor_field(people[0])}",
@@ -193,5 +193,7 @@ def scene(people: list[dict[str, Any]], game_days: float, acts: list[str] | tupl
         parts.append(f"party={actor_field(people[2])}")
     parts += [f"acts={','.join(acts)}", f"touch={touches}", f"slap={slaps}", f"forced={1 if forced else 0}",
               f"climax={climax}", f"dur={seconds}"]
+    if player_size is not None:
+        parts.append(f"psize={player_size}")
     parts += [f"w={w}" for w in witnesses or []]
     return "|".join(parts)

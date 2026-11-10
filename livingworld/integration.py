@@ -897,8 +897,12 @@ class LivingWorld:
 
     def _noticed(self, npc_id: int, name: str, now: float, present: dict[int, str]) -> list[str]:
         try:
-            scene_lines = intimate_scenes.lines_for(npc_id, name, self._scenes_now, present) if self.intimacy else []
             with self.store.transaction() as db:
+                scene_lines = []
+                if self.intimacy and self._scenes_now:
+                    from livingworld.perception.attire import sex_of
+                    scene_lines = intimate_scenes.lines_for(npc_id, name, self._scenes_now, present,
+                                                            is_woman=sex_of(db, npc_id) == "female")
                 return scene_lines + awareness.lines_for(db, npc_id, name, now, present, self._attire_now,
                                                          hygiene=self.hygiene)
         except Exception:

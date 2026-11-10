@@ -323,5 +323,7 @@ on anyone who is not the player's partner in it, are handled exactly as before.
 | Forced scenes | `intimacy/scenes.py` | A scene an animation pack tags `aggressive` is remembered by the person it was done to as being forced (large loss of trust); bystanders remember an assault (claim `forced`). Stock OStim has no such scenes |
 | Dialogue | `integration.py` | While a scene runs, each NPC in it is told what is going on and that touching, slaps and rough play are part of it (and that they can still say if something is too much); bystanders who can see it are told so |
 
+| The player's size | `intimacy/size.py` | When the player is a man with The New Gentleman, the game sends the scale TNG gives his genitals; women in the scene with him notice it (5 inches or less unimpressive, more impressive, and thin under 4.25 around or thick from 5.25) in the scene's prompt and remember it. `MANTELLA_LW_TNG_LENGTH_IN` (default 6.0) and `MANTELLA_LW_TNG_GIRTH_IN` (default 4.75) say what TNG's medium size measures with your BodySlide build |
+
 `MANTELLA_LW_INTIMACY=0` turns it off (the game hears it with the conversation start reply, and then sends
 grabs and hits as before). Children are never part of any of it.

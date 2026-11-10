@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 
 from src import utils
 
+from livingworld.intimacy import size as sizes
 from livingworld.perception import formation, intoxication
 from livingworld.perception.formation import Bond, MemoryDraft, Perception
 from livingworld.perception.records import PerceptionRecord
@@ -178,7 +179,7 @@ def record_scene(pipeline, record: PerceptionRecord):
     etype = EVENT_FORCED if record.forced else EVENT_SCENE
     payload = {"acts": record.acts, "act_words": act_words(record.acts), "touches": record.touches,
                "slaps": record.slaps, "climax": record.climax, "thread": record.thread, "scene": record.scene_id,
-               "place_name": record.location, "forced": record.forced, "names": list(people.values()),
+               "place_name": record.location, "forced": record.forced, "player_size": record.player_size, "names": list(people.values()),
                "nearby_but_unseen": unseen}
     outcome = Outcome(None, unseen=unseen)
     with store.transaction() as db:
@@ -218,6 +219,14 @@ def record_scene(pipeline, record: PerceptionRecord):
                 close = any(pipeline._bond(db, npc_id, i).close for i in ids)
                 drafts[npc_id] = (shared_for_witness(record, list(people.values()), seen, close), [])
 
+        player_size = sizes.from_scale(record.player_size) if record.actor.is_player and not record.forced else None
+        if player_size is not None:
+            from livingworld.perception.attire import sex_of
+            for npc_id in ids:
+                if npc_id in drafts and sex_of(db, npc_id) == "female":
+                    draft = drafts[npc_id][0]
+                    draft.content += sizes.memory_line(record.actor.name, player_size)
+                    draft.valence = round(draft.valence + (0.1 if player_size.impressive else -0.1), 2)
         for npc_id, (draft, towards) in drafts.items():
             intoxication.hazy(draft, intoxication.drink_state(db, npc_id, gt).stage)
             about = [i for i in ids if i != npc_id]
@@ -249,6 +258,8 @@ class SceneNow:
     acts: list[str]
     forced: bool = False
     seen_by: set[int] = field(default_factory=set)
+    player_id: int | None = None             # the player, when they are in it
+    player_size: sizes.Size | None = None    # TNG size, when the player is a man in it
 
 
 def snapshot(records: list[PerceptionRecord], ids: dict[int, int]) -> list[SceneNow]:
@@ -265,7 +276,9 @@ def snapshot(records: list[PerceptionRecord], ids: dict[int, int]) -> list[Scene
             continue
         seen_by = {ids[w.actor.ref_id] for w in record.witnesses
                    if w.actor.ref_id in ids and formation.perceives(w) is not None}
-        scenes.append(SceneNow(people, record.acts, record.forced, seen_by))
+        player_id = ids.get(record.actor.ref_id) if record.actor.is_player else None
+        scenes.append(SceneNow(people, record.acts, record.forced, seen_by, player_id,
+                               sizes.from_scale(record.player_size) if player_id is not None else None))
     return scenes
 
 
@@ -273,8 +286,9 @@ def in_scene(scenes: list[SceneNow], npc_id: int) -> bool:
     return any(npc_id in s.people for s in scenes)
 
 
-def lines_for(npc_id: int, name: str, scenes: list[SceneNow], present: dict[int, str]) -> list[str]:
-    """Prompt lines for ``npc_id`` about scenes running right now."""
+def lines_for(npc_id: int, name: str, scenes: list[SceneNow], present: dict[int, str],
+              is_woman: bool = False) -> list[str]:
+    """Prompt lines for ``npc_id`` about scenes running right now. ``is_woman``: she reacts to the player's size."""
     lines = []
     for scene in scenes:
         acts = act_words(scene.acts)
@@ -293,6 +307,8 @@ def lines_for(npc_id: int, name: str, scenes: list[SceneNow], present: dict[int,
                          f" are off for it.")
             lines.append(f"Touching, grabbing, slaps and rough play between {name} and {others} right now are part of"
                          f" this scene, not an attack or an insult. {name} can still say if something is too much.")
+            if is_woman and scene.player_size is not None and scene.player_id is not None and scene.player_id != npc_id:
+                lines.append(sizes.prompt_line(name, scene.people[scene.player_id], scene.player_size))
         elif npc_id in scene.seen_by:
             names = _list(list(scene.people.values()))
             if scene.forced:
