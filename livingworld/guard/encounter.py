@@ -155,7 +155,7 @@ class Plan:
 
 def wants_windows(d) -> bool:
     """Routine duties get watch windows; trouble (incidents) is its own activity."""
-    return d is not None and d.incident_id is None and d.need == "seen"
+    return d is not None and d.incident_id is None and d.need == "seen" and not d.training
 
 
 def windows(org: O.Org, task_id: int, start: float, shift_hours: float) -> list[Window]:

@@ -318,3 +318,48 @@ Mantella-Spell's `MantellaRepository.psc` holds the game side.
 | Loop guards | `bodylang/__init__.py`, `harness/bodysim.py` | NPCs never react to each other's body language; an NPC's own step back never counts as you leaving; cooldowns and a per-minute cap. `tests/livingworld/test_bodylang.py` checks a model of the game's rules settles |
 
 `MANTELLA_LW_BODY_LANGUAGE=0` turns all of it off (the game hears it with the conversation start reply).
+
+## Intimate scenes (OStim)
+
+NPCs know when an OStim scene is running, who is in it and what is happening in it (kissing, sex, spanking
+and so on, from OStim's own action types), and remember it afterwards as a scene. While the player is in a
+scene with someone, Mantella-Spell counts the player's hands on that partner (HIGGS grabs) and slaps on them
+into the scene instead of sending them as grabs and hits: no "pulls away" reaction, no guard, no grab or
+assault gossip, no drop in how decent or gentle they think the player is. Grabs and hits outside a scene, or
+on anyone who is not the player's partner in it, are handled exactly as before.
+
+| Piece | File | What it does |
+| --- | --- | --- |
+| Records | `perception/records.py` | `type=scene`: `via=end` once per finished scene, `via=now` in the `mantella_lw_scene` snapshot with every request |
+| Memories | `intimacy/scenes.py` | Each NPC in it remembers it as shared ("the grabbing and the slaps were part of it, not violence"); a little intimacy and affinity, never trust or attraction. Bystanders who saw it remember it, and the claim is `caught_with`, so a partner reacts as to an affair. Clothes coming off for it (`attire` with `via=scene`) make no "naked" memories |
+| Forced scenes | `intimacy/scenes.py` | A scene an animation pack tags `aggressive` is remembered by the person it was done to as being forced (large loss of trust); bystanders remember an assault (claim `forced`). Stock OStim has no such scenes |
+| Dialogue | `integration.py` | While a scene runs, each NPC in it is told what is going on and that touching, slaps and rough play are part of it (and that they can still say if something is too much); bystanders who can see it are told so |
+| The player's size | `intimacy/size.py` | When the player is a man with The New Gentleman, the game sends the scale TNG gives his genitals; women in the scene with him notice it (5 inches or less unimpressive, more impressive, and thin under 4.25 around or thick from 5.25) in the scene's prompt and remember it. `MANTELLA_LW_TNG_LENGTH_IN` (default 6.0) and `MANTELLA_LW_TNG_GIRTH_IN` (default 4.75) say what TNG's medium size measures with your BodySlide build |
+
+| Witnesses | Mantella-Spell `LwSceneSample` | Every 4 s while any followed scene runs (the player's or one between NPCs), the adults near it are looked at and the best view each had is kept, so someone who walked in and out still saw it. Uses Papyrus Extender's `FindAllReferencesWithKeyword` (falls back to Mantella's five nearest) |
+| Betrayal | `intimacy/scenes.py`, `intimacy/common.py` | A witness whose spouse or partner (seeded spouse, or a romance bond short of an affair) is in the scene with someone else remembers it as a betrayal, loses trust in the partner and liking for the other; live, they are told it is their own partner |
+| Climax | `intimacy/climax.py` | `type=climax` from OStim's `ostim_actor_orgasm`, with the scene's acts at that moment: where a man's climax landed (face, chest, inside, body; the way OCum places it, guessed, not read from OCum). Remembered by both, and by bystanders who saw it. Afterwards, for up to 4 game hours or until that person bathes or swims, people around notice it where it shows (the face always; the rest only on someone with nothing on) |
+| Arousal | `intimacy/arousal.py` | Rapid taps of the arousal key raise the player's erection with The New Gentleman's own `SOSBend` animation events; one lone tap lets it go down; it fades by itself after 2 minutes. Seen only when the player has nothing on the body: witnesses remember it, and in a conversation each NPC notices it; women also take in his size, and how anyone reacts is their own. Noticing it never makes anyone more willing. `MANTELLA_LW_AROUSAL_KEY` (DirectX scan code, default 76 = NumPad 5, 0 off) |
+| Covered eyes | `intimacy/arousal.py`, Mantella-Spell `Tools/LWCoverEyes` | The LWCoverEyes power darkens the player's screen (sound plays on) and sends `LivingWorld_EyesCovered`; NPCs around know the player cannot see but can hear |
+
+`MANTELLA_LW_INTIMACY=0` turns it off (the game hears it with the conversation start reply, and then sends
+grabs and hits as before). Children are never part of any of it: not in a scene, not as a witness.
+
+## Memory when talking again
+
+Each conversation is turned into each NPC's own memories and facts by a background extraction call. Before
+this, that call used the spoken-reply settings (`max_tokens` 250 and the `#` stop sequence in
+`llm_params`), so its JSON was often cut off, and memories written as plain sentences were thrown away:
+across 127 conversations NPCs kept 8 memories of what was said. Recall also showed only the 8 newest
+memories, so a run of grabs pushed every memory of what was said out of the prompt.
+
+| Piece | File | What it does |
+| --- | --- | --- |
+| Reply length | `src/llm/client_base.py` (`background_request_call`), `integration.py` | Extraction gets its own `max_tokens` (`MANTELLA_LW_EXTRACT_MAX_TOKENS`, default 1500), low temperature, JSON mode (asked again without it if the service refuses), no stop sequence, and does not wait on the dialogue lock, so it never delays an NPC's reply |
+| Mending | `memory/extraction.py` | A cut-off or sloppy reply keeps every complete entry; memories as plain sentences are kept; an unusable reply is asked for once more straight away; a fact given the wrong line number is matched to the line by that speaker that really holds it (nothing unsaid is accepted); memories come first in the reply and are asked to be specific |
+| Recall | `memory/recall.py` | Six slots for memories of what was said and six for things seen or done, by importance and recency; the same thing repeated is shown once with a count ("18 times, most recently yesterday") |
+| Recap | `memory/recall.py` | When the player talked to this NPC in the last 2 game days, the last 8 lines of that conversation go into the prompt word for word, so talking again picks up where it stopped, even before extraction has run |
+| Backfill | `memory/backfill.py` | Past conversations (in the current timeline, up to 60) that left no memory of what was said are extracted once more at start-up, each only once. They add memories and facts, never gossip, and never replace a fact learned later. `MANTELLA_LW_MEMORY_BACKFILL=0` skips it |
+
+`MANTELLA_LW_MEMORY_BOOST=0` turns the reply-length, retry, line-matching, recall and recap changes off. The
+reply mending stays on: it only keeps what the old code threw away.

@@ -13,6 +13,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from livingworld.memory.settings import memory_boost_enabled
 from livingworld.store.world_store import WorldStore
 from src import utils
 
@@ -25,8 +26,8 @@ SYSTEM_PROMPT = """You maintain the memory of one character in Skyrim, {owner}.
 You read a conversation {owner} took part in and record only what {owner} now knows or remembers.
 
 Return JSON only, with this shape:
-{{"facts": [{{"about": "<name>", "predicate": "<short_snake_case>", "value": "<short value>", "said_by": "<name>", "line": <line number>}}],
- "memories": [{{"text": "<one sentence, first person, as {owner}>", "importance": <0.0 to 1.0>}}],
+{{"memories": [{{"text": "<one sentence, first person, as {owner}>", "importance": <0.0 to 1.0>}}],
+ "facts": [{{"about": "<name>", "predicate": "<short_snake_case>", "value": "<short value>", "said_by": "<name>", "line": <line number>}}],
  "reports": [{{"about": "<name>", "did": "<short past-tense phrase>", "valence": <-1.0 to 1.0>, "said_by": "<name>", "line": <line number>}}]}}
 
 Rules:
@@ -35,7 +36,9 @@ Rules:
 - Only record facts that were actually stated. Never guess. A question is not a fact.
 - "about" must be one of: {names}.
 - Facts {owner} states about themselves count too (about = said_by = {owner}).
-- Memories are what {owner} would remember about this conversation, at most 3.
+- Memories are what {owner} would remember about this conversation, at most 3. Be specific: names, places,
+  promises, plans, requests, what was agreed and how {owner} felt ("Titus promised to bring me timber tomorrow",
+  not "we had a conversation"). Importance: 0.2 small talk, 0.5 useful, 0.8 something {owner} will not forget.
 - A report is someone other than {owner} telling {owner} what a person did: a past action, not an opinion or a plan.
   "did" continues the person's name, e.g. "helped Gerdur carry timber" or "stole a sweetroll from Lucan".
   "valence" is how well it reflects on that person (-1 very badly, 1 very well). "about" may be anyone named,
@@ -72,19 +75,99 @@ def normalize_predicate(predicate: str) -> str:
 
 
 def parse_reply(reply: str | None) -> dict[str, Any]:
-    """Pull the JSON object out of a model reply (tolerates code fences and chatter around it)."""
+    """Pull the JSON object out of a model reply (tolerates code fences and chatter around it).
+
+    A reply cut off part way (a length limit) or with trailing commas is mended where it can be: everything
+    up to the last complete entry is kept, so one cut-off memory does not throw away the whole reply."""
     if not reply:
         raise ValueError("empty extraction reply")
     start, end = reply.find("{"), reply.rfind("}")
-    if start < 0 or end < start:
+    if start < 0:
         raise ValueError(f"no JSON object in extraction reply: {reply[:200]!r}")
-    data = json.loads(reply[start:end + 1])
+    data = None
+    if end > start:
+        try:
+            data = json.loads(reply[start:end + 1])
+        except json.JSONDecodeError:
+            data = None
+    if data is None:
+        data = _mend(reply[start:])
+        if data is None:
+            raise ValueError(f"extraction reply is not valid JSON: {reply[:200]!r}")
+        logger.log(23, "Living World: mended a cut-off or malformed extraction reply")
     if not isinstance(data, dict):
         raise ValueError("extraction reply is not a JSON object")
-    data.setdefault("facts", [])
-    data.setdefault("memories", [])
-    data.setdefault("reports", [])
+    for key in ("facts", "memories", "reports"):
+        if not isinstance(data.get(key), list):
+            data[key] = []
+    # some models give memories as plain sentences instead of {"text": ...}
+    data["memories"] = [{"text": m} if isinstance(m, str) else m for m in data["memories"]]
     return data
+
+
+def _mend(text: str) -> Any:
+    """Best effort for a broken JSON object: drop trailing commas, then cut back to the last complete
+    value and close whatever is still open."""
+    text = re.sub(r",\s*([}\]])", r"\1", text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    # walk the text once, remembering where each value inside a container ended and what was open there
+    stack: list[str] = []
+    cuts: list[tuple[int, str]] = []
+    in_string = escaped = False
+    for i, ch in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch in "{[":
+            stack.append("}" if ch == "{" else "]")
+        elif ch in "}]":
+            if not stack:
+                break
+            stack.pop()
+            if not stack:
+                try:
+                    return json.loads(text[:i + 1])
+                except json.JSONDecodeError:
+                    break
+            cuts.append((i + 1, "".join(reversed(stack))))
+    for cut, closing in reversed(cuts[-60:]):
+        candidate = re.sub(r",\s*([}\]])", r"\1", text[:cut] + closing)
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+def _as_int(value: Any) -> int | None:
+    try:
+        return int(str(value).strip().strip("[]"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _line_saying(heard: list[Line], speaker_id: int, value: str, claimed: Any) -> Line | None:
+    """The model gave the wrong line number: find a line by that speaker that actually holds the value
+    (nearest to the line it named). Nothing is accepted that the speaker did not say."""
+    words = [w for w in re.findall(r"[a-z0-9']+", value.lower()) if len(w) > 2 or w.isdigit()]
+    if not words:
+        return None
+    near = _as_int(claimed)
+    matches = [l for l in heard if l.speaker_id == speaker_id
+               and all(re.search(rf"\b{re.escape(w)}", l.text.lower()) for w in words)]
+    if not matches:
+        return None
+    return min(matches, key=lambda l: abs(l.seq - near) if near is not None else 0)
 
 
 class Extractor:
@@ -113,7 +196,7 @@ class Extractor:
         return [l for l in lines if l.seq > joined and (left is None or l.seq <= left)]
 
     # ---- one NPC ----
-    def extract_for(self, conv_id: int, owner_id: int) -> ExtractionResult:
+    def extract_for(self, conv_id: int, owner_id: int, backfill: bool = False) -> ExtractionResult:
         all_lines = self.lines(conv_id)
         people = self.participants(conv_id)
         names = {npc_id: name for npc_id, name, _ in people}
@@ -126,11 +209,21 @@ class Extractor:
 
         transcript = "\n".join(f"[{l.seq}] {l.speaker}: {l.text}" for l in heard)
         name_list = ", ".join(names.values())
-        reply = self.complete(
-            SYSTEM_PROMPT.format(owner=owner, names=name_list),
-            USER_PROMPT.format(location=location, names=name_list, transcript=transcript, owner=owner),
-        )
-        data = parse_reply(reply)
+        system = SYSTEM_PROMPT.format(owner=owner, names=name_list)
+        user = USER_PROMPT.format(location=location, names=name_list, transcript=transcript, owner=owner)
+        reply = self.complete(system, user)
+        try:
+            data = parse_reply(reply)
+        except ValueError as e:
+            if not memory_boost_enabled():
+                raise
+            # ask once more straight away instead of waiting for the job retry, which would get the same reply
+            logger.log(23, f"Living World: extraction reply for {owner} was not usable ({e}); asking again")
+            reply = self.complete(system, user + "\n\nYour last reply was not valid JSON. Reply with one short,"
+                                                  " complete JSON object only, with no other text.")
+            data = parse_reply(reply)
+        if backfill:
+            data["reports"] = []   # old news is not passed on again as if it were fresh gossip
         return self.apply(conv_id, owner_id, data, heard, names, location, game_time)
 
     # ---- writing what the model returned, after checking it ----
@@ -148,13 +241,15 @@ class Extractor:
                     said_by = by_name.get(str(fact.get("said_by", "")).strip().lower())
                     predicate = normalize_predicate(str(fact.get("predicate", "")))
                     value = str(fact.get("value", "")).strip()
-                    line = by_seq.get(int(fact.get("line")))
-                except (TypeError, ValueError):
+                    line = by_seq.get(_as_int(fact.get("line")))
+                except (TypeError, ValueError, AttributeError):
                     result.rejected.append(f"malformed: {fact}")
                     continue
                 if about is None or said_by is None or not predicate or not value:
                     result.rejected.append(f"unknown person or empty field: {fact}")
                     continue
+                if (line is None or line.speaker_id != said_by) and said_by is not None and memory_boost_enabled():
+                    line = _line_saying(heard, said_by, value, fact.get("line"))
                 if line is None or line.speaker_id != said_by:
                     result.rejected.append(f"not said on that line by {fact.get('said_by')}: {fact}")
                     continue
@@ -173,10 +268,13 @@ class Extractor:
                         (told_by, about, predicate)).fetchone()
                     parent = row[0] if row else None
                 existing = db.execute(
-                    "SELECT know_id, value FROM knowledge WHERE holder_id = ? AND subject_id = ? AND predicate = ?"
+                    "SELECT know_id, value, learned_gt FROM knowledge WHERE holder_id = ? AND subject_id = ? AND predicate = ?"
                     " AND superseded_by IS NULL AND timeline_id = ?", (owner_id, about, predicate, timeline)).fetchone()
                 if existing and existing[1].lower() == value.lower():
                     result.facts_skipped += 1
+                    continue
+                if existing and existing[2] is not None and game_time is not None and existing[2] > game_time:
+                    result.facts_skipped += 1   # an older conversation (a late or backfilled job) never overrides newer news
                     continue
                 cur = db.execute(
                     "INSERT INTO knowledge (timeline_id, holder_id, subject_id, predicate, value, origin, told_by_id,"
@@ -187,7 +285,7 @@ class Extractor:
                 result.facts_added += 1
 
             for memory in (data.get("memories") or [])[:3]:
-                text = str(memory.get("text", "")).strip() if isinstance(memory, dict) else ""
+                text = str(memory.get("text") or memory.get("memory") or memory.get("content") or "").strip() if isinstance(memory, dict) else ""
                 if not text:
                     continue
                 duplicate = db.execute(
@@ -267,12 +365,12 @@ class Extractor:
         return rows[0][0] if len(rows) == 1 else None
 
     # ---- the whole conversation ----
-    def extract_conversation(self, conv_id: int) -> dict[str, ExtractionResult]:
+    def extract_conversation(self, conv_id: int, backfill: bool = False) -> dict[str, ExtractionResult]:
         results = {}
         for npc_id, name, is_player in self.participants(conv_id):
             if is_player or self._is_child(npc_id):
                 continue   # children are left out of Living World memory
-            results[name] = self.extract_for(conv_id, npc_id)
+            results[name] = self.extract_for(conv_id, npc_id, backfill)
             r = results[name]
             logger.log(23, f"Living World: {name} learned {r.facts_added} facts and {r.memories_added} memories"
                            f" from conversation {conv_id}")

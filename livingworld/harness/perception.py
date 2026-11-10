@@ -60,15 +60,23 @@ def consume(actor_json: dict[str, Any], item: str, game_days: float, is_food: bo
 
 def attire(actor_json: dict[str, Any], cover: str, game_days: float, body: str = "", location: str = "Riverwood",
            witnesses: list[str] | None = None, key: str | None = None, via: str | None = None,
-           sex: str | None = None) -> str:
+           sex: str | None = None, erect: bool = False, eyes_covered: bool = False,
+           player_size: float | None = None) -> str:
     """What ``actor_json`` wears in the body slot: cover is 'clothing', 'armor' or 'none'.
-    The game lists witnesses only when cover is 'none'. ``via='action'``: the NPC chose it (Undress / Dress)."""
+    The game lists witnesses only when cover is 'none'. ``via='action'``: the NPC chose it (Undress / Dress).
+    The player's record also says when he is visibly aroused (``erect``) or has his eyes covered."""
     parts = ["v=1", f"key={key or _key('attire')}", "type=attire", f"gt={game_days}", f"loc={location}",
              f"actor={actor_field(actor_json)}", f"body={body}", f"cover={cover}"]
     if via:
         parts.append(f"via={via}")
     if sex:
         parts.append(f"sex={sex}")
+    if player_size is not None:
+        parts.append(f"psize={player_size}")
+    if erect:
+        parts.append("erect=1")
+    if eyes_covered:
+        parts.append("eyes=1")
     parts += [f"w={w}" for w in witnesses or []]
     return "|".join(parts)
 
@@ -145,6 +153,14 @@ def watch(player_json: dict[str, Any], task: int, win: int, game_days: float, ta
     return "|".join(parts)
 
 
+def jail(player_json: dict[str, Any], prisoner_json: dict[str, Any], arrest: int, via: str, game_days: float,
+         location: str = "Dragonsreach Dungeon", key: str | None = None) -> str:
+    """G2f: the game locked up (``jailed``) or let out (``released``) someone the player arrested."""
+    return "|".join(["v=1", f"key={key or _key('jail')}", "type=jail", f"gt={game_days}", f"loc={location}",
+                     f"actor={actor_field(player_json)}", f"target={actor_field(prisoner_json)}", f"via={via}",
+                     f"task={arrest}"])
+
+
 def presence(target_json: dict[str, Any], what: str, game_days: float, player_json: dict[str, Any] | None = None,
              distance_m: float | None = None, seconds: float | None = None, count: int = 1,
              location: str = "Riverwood", key: str | None = None) -> str:
@@ -170,4 +186,55 @@ def react(actor_json: dict[str, Any], player_json: dict[str, Any], game_days: fl
              f"area={area}", f"dur={seconds}"]
     if victim_json is not None:
         parts.append(f"party={actor_field(victim_json)}")
+    return "|".join(parts)
+
+
+def scene(people: list[dict[str, Any]], game_days: float, acts: list[str] | tuple[str, ...] = (), via: str = "end",
+          seconds: float = 300.0, touches: int = 0, slaps: int = 0, forced: bool = False, climax: int = 0,
+          thread: int = 0, scene_id: str = "OStimStandingKissMF", location: str = "Whiterun",
+          witnesses: list[str] | None = None, key: str | None = None, player_size: float | None = None) -> str:
+    """An OStim scene (``intimacy/``): the player first when they are in it. ``via=now`` is the live snapshot."""
+    parts = ["v=1", f"key={key or _key('scene')}", "type=scene", f"gt={game_days}", f"loc={location}", f"via={via}",
+             f"thread={thread}", f"scene={scene_id}", f"actor={actor_field(people[0])}",
+             f"target={actor_field(people[1])}"]
+    if len(people) > 2:
+        parts.append(f"party={actor_field(people[2])}")
+    parts += [f"acts={','.join(acts)}", f"touch={touches}", f"slap={slaps}", f"forced={1 if forced else 0}",
+              f"climax={climax}", f"dur={seconds}"]
+    if player_size is not None:
+        parts.append(f"psize={player_size}")
+    parts += [f"w={w}" for w in witnesses or []]
+    return "|".join(parts)
+
+
+def climax(actor_json: dict[str, Any], partner_json: dict[str, Any], game_days: float, acts: tuple[str, ...] = (),
+           sex: str = "m", location: str = "Whiterun", witnesses: list[str] | None = None, thread: int = 0,
+           key: str | None = None) -> str:
+    """Someone in a followed OStim scene climaxed (``intimacy/climax.py``); ``acts`` the scene's acts right then."""
+    parts = ["v=1", f"key={key or _key('climax')}", "type=climax", f"gt={game_days}", f"loc={location}",
+             f"thread={thread}", "scene=OStimTest", f"actor={actor_field(actor_json)}",
+             f"target={actor_field(partner_json)}", f"acts={','.join(acts)}", f"sex={sex}"]
+    parts += [f"w={w}" for w in witnesses or []]
+    return "|".join(parts)
+
+
+def arousal(player_json: dict[str, Any], game_days: float, erect: bool = True, cover: str = "none", level: int = 2,
+            player_size: float | None = None, location: str = "Riverwood", witnesses: list[str] | None = None,
+            key: str | None = None) -> str:
+    """The player's erection crossing "visibly aroused" (``intimacy/arousal.py``)."""
+    parts = ["v=1", f"key={key or _key('arousal')}", "type=arousal", f"gt={game_days}", f"loc={location}",
+             f"via={'erect' if erect else 'soft'}", f"actor={actor_field(player_json)}", f"cover={cover}",
+             f"level={level}"]
+    if player_size is not None:
+        parts.append(f"psize={player_size}")
+    parts += [f"w={w}" for w in witnesses or []]
+    return "|".join(parts)
+
+
+def eyes(player_json: dict[str, Any], game_days: float, covered: bool = True, location: str = "Riverwood",
+         witnesses: list[str] | None = None, key: str | None = None) -> str:
+    """The player covering (or uncovering) their eyes with the LWCoverEyes power."""
+    parts = ["v=1", f"key={key or _key('eyes')}", "type=eyes", f"gt={game_days}", f"loc={location}",
+             f"via={'covered' if covered else 'uncovered'}", f"actor={actor_field(player_json)}"]
+    parts += [f"w={w}" for w in witnesses or []]
     return "|".join(parts)

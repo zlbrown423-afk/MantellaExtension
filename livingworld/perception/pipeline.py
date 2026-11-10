@@ -68,6 +68,12 @@ class PerceptionPipeline:
             return self._guard_watch(record)
         if record.type == "react":
             return self._reaction(record)
+        if record.type == "jail":
+            return self._guard_jail(record)
+        if record.type == "scene":
+            return self._scene(record)
+        if record.type in ("climax", "arousal", "eyes"):
+            return self._intimacy(record)
         if record.type == "hit" and harmless_spell(record.item):
             # an animation, expression or test spell cast on someone is not an attack
             logger.log(23, f"Living World: hit record {record.key} is a harmless spell ({record.item}); not stored")
@@ -204,6 +210,17 @@ class PerceptionPipeline:
                        f"event {event_id}")
         return Outcome(event_id, duplicate=event_id is None)
 
+    def _guard_jail(self, record: PerceptionRecord) -> Outcome:
+        """G2f: the game locked up someone the player arrested, or let them out (``task`` = the arrest)."""
+        from livingworld.guard import guard_enabled
+        if not guard_enabled():
+            return Outcome(None)
+        from livingworld.guard import arrest as AR
+        with self.store.transaction() as db:
+            event_id = AR.record_jail(db, record.task, record.via, record.game_time, record.location)
+        logger.log(23, f"Living World guard: arrest {record.task} {record.via} -> event {event_id}")
+        return Outcome(event_id, duplicate=event_id is None)
+
     def _reaction(self, record: PerceptionRecord) -> Outcome:
         """Someone reacted on the spot to the player's hands on them (``react`` record). Kept as a world event so a
         guard knows whether colleagues have already had to step in (see ``guard/peace.py``)."""
@@ -229,6 +246,25 @@ class PerceptionPipeline:
         logger.log(23, f"Living World: {record.actor.name} reacts ({record.via}) to {record.target.name}'s grab"
                        f" -> event {event_id}")
         return Outcome(event_id)
+
+    def _scene(self, record: PerceptionRecord) -> Outcome:
+        """An OStim scene ended (``intimacy/``). A live snapshot (``via=now``) is never stored."""
+        from livingworld.intimacy import intimacy_enabled
+        if record.via != "end" or not intimacy_enabled():
+            return Outcome(None)
+        from livingworld.intimacy import scenes
+        return scenes.record_scene(self, record)
+
+    def _intimacy(self, record: PerceptionRecord) -> Outcome:
+        """A climax, the player's arousal, or the player covering their eyes (``intimacy/``)."""
+        from livingworld.intimacy import intimacy_enabled
+        if not intimacy_enabled():
+            return Outcome(None)
+        if record.type == "climax":
+            from livingworld.intimacy.climax import record_climax
+            return record_climax(self, record)
+        from livingworld.intimacy import arousal
+        return arousal.record_arousal(self, record) if record.type == "arousal" else arousal.record_eyes(self, record)
 
     # ---- internals ----
     def _child(self, npc_id: int | None) -> bool:

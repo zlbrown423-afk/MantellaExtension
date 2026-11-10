@@ -33,6 +33,9 @@ ACTS: dict[str, Act] = {
     "flirted": Act("flirted with", 0.45),
     "spent_night": Act("spent the night with", 0.8),
     "caught_with": Act("was caught in bed with", 0.9),
+    # an aggressive OStim scene (livingworld/intimacy)
+    "forced": Act("forced themselves on", 0.95, {"trust": -0.4, "fear": 0.2, "affinity": -0.3}, harms_object=True,
+                  domains={"gentleness": -0.5, "decency": -0.5, "lawfulness": -0.3}),
     "is_courting": Act("is courting", 0.5),
     "is_seeing": Act("is seeing", 0.45),
     "together": Act("is now with", 0.45),

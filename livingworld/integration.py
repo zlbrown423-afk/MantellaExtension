@@ -18,12 +18,15 @@ from typing import Any, Callable
 
 from livingworld.memory.extraction import Extractor
 from livingworld.memory.jobs import JobQueue, JobWorker
+from livingworld.memory import backfill
+from livingworld.memory import settings as memory_settings
 from livingworld.memory.recall import recall_for
 from livingworld import mood as moods
 from livingworld.bodylang import body_language_enabled
 from livingworld.bodylang.presence import is_presence
 from livingworld.bodylang.service import BodyLanguage
 from livingworld.dialogue import hearing, leads as player_leads
+from livingworld.dialogue import promises
 from livingworld.perception import awareness
 from livingworld.perception.intoxication import drink_state
 from livingworld.perception.pipeline import PerceptionPipeline
@@ -31,6 +34,9 @@ from livingworld.social.traits import seed_traits_from_bio
 from livingworld.social.world import SocialWorld
 from livingworld.work import tasks_enabled
 from livingworld.guard import guard_debug_enabled, guard_enabled
+from livingworld.intimacy import intimacy_enabled
+from livingworld.store.minors import is_child
+from livingworld.intimacy import scenes as intimate_scenes
 from livingworld.guard.profiles import GuardFacts
 from livingworld.guard.service import ACTIONS as GUARD_ACTIONS, ENLIST as GUARD_ENLIST, Guard, Scene as GuardScene
 from livingworld.work.service import ACTIONS as TASK_ACTIONS, Scene as WorkScene, Work
@@ -76,6 +82,14 @@ KEY_GUARD_BED_PLUGIN = "mantella_lw_guard_bed_plugin"
 KEY_GUARD_BED_OWN = "mantella_lw_guard_bed_own"          # True: make it the player's; False: unowned again
 KEY_GUARD_CHEST_ID = "mantella_lw_guard_chest_id"        # a footlocker (CONT base, plugin-relative id) to place by the bunk
 KEY_GUARD_CHEST_PLUGIN = "mantella_lw_guard_chest_plugin"
+# G2f arrests: someone the player arrested (by name, as in the conversation) and what the rules decided they do
+KEY_GUARD_ARREST_NAME = "mantella_lw_guard_arrest_name"
+KEY_GUARD_ARREST_MODE = "mantella_lw_guard_arrest_mode"    # 'submit' (follows to the cells) | 'flee' | 'fight'
+KEY_GUARD_ARREST_ID = "mantella_lw_guard_arrest_id"        # int: the arrest (sent back on jail records as task=)
+KEY_GUARD_ARREST_DAYS = "mantella_lw_guard_arrest_days"    # float: game days in the cell
+KEY_GUARD_JAIL_ID = "mantella_lw_guard_jail_id"            # int: the prisoner marker (REFR, plugin-relative) in the cell
+KEY_GUARD_JAIL_PLUGIN = "mantella_lw_guard_jail_plugin"
+KEY_GUARD_RELEASE = "mantella_lw_guard_release"            # int[]: arrests whose prisoner is let out now
 # G2e shift encounters: the watch windows of the duty in hand (task 0 clears them), sent when they change
 KEY_GUARD_WATCH_TASK = "mantella_lw_guard_watch_task"    # int: the duty (task id); 0 = no windows
 KEY_GUARD_WATCH_END = "mantella_lw_guard_watch_end"      # float: game days (+1, like the records' gt) the shift ends
@@ -150,6 +164,7 @@ class LivingWorld:
         self._guard_refreshed: int | None = None    # conv_id whose duties/probation were brought up to date
         self._player_said: str | None = None        # the player's last line (kept with a duty report)
         self._watch_sent: tuple | None = None       # G2e: the watch plan last sent to the game this conversation
+        self.keep_promises = enabled and promises.promises_enabled()   # NPCs do what they say (MANTELLA_LW_KEEP_PROMISES=0 turns off)
         self.hearing = enabled and hearing.hearing_enabled()   # catch misheard speech (MANTELLA_LW_HEARING=0 turns off)
         self.leads = enabled and player_leads.leads_enabled()  # ask about a lead without its name (MANTELLA_LW_LEADS=0 turns off)
         self._lead_ask: str | None = None           # the player's last line, while it asks after someone
@@ -157,6 +172,8 @@ class LivingWorld:
         self.perf_monitor: PerfMonitor | None = None  # MANTELLA_LW_PERF=1 (see livingworld/perf)
         self.body_language = enabled and body_language_enabled()   # MANTELLA_LW_BODY_LANGUAGE=0 turns off
         self._body: dict[int, BodyLanguage] = {}    # id(store) -> body language for that world
+        self.intimacy = enabled and intimacy_enabled()   # OStim scenes (livingworld/intimacy); MANTELLA_LW_INTIMACY=0 off
+        self._scenes_now: list[intimate_scenes.SceneNow] = []   # scenes running near the player, from the game's snapshot
         LivingWorld.latest = self
 
     @classmethod
@@ -188,6 +205,11 @@ class LivingWorld:
         def complete(system: str, user: str) -> str | None:
             messages = message_thread(config, system)
             messages.add_message(VerbatimUserMessage(config, user))
+            background = getattr(client, "background_request_call", None)
+            if background is not None and memory_settings.memory_boost_enabled():
+                # its own reply length and JSON mode: the spoken-reply cap (often 250 tokens) cut extraction off
+                return background(messages, {"max_tokens": memory_settings.extract_max_tokens(), "temperature": 0.2},
+                                  json_mode=True)
             return client.request_call(messages)
         self.complete = complete
 
@@ -224,6 +246,9 @@ class LivingWorld:
         for marker in perf_markers:   # the game's own timing summaries go to the performance monitor only
             PERF.add_marker(marker)
         attire_raw = records_from_context(context_json, KEY_ATTIRE)
+        if self.intimacy and self.store is not None and isinstance(context_json, dict) \
+                and intimate_scenes.KEY_SCENE in context_json:
+            self._scenes_now = self._scene_snapshot(records_from_context(context_json, intimate_scenes.KEY_SCENE))
         body_raw = [r for r in raw if is_presence(r)]   # body language records never reach the event pipeline
         raw = [r for r in raw if not is_presence(r)]
         if body_raw and self.store is not None and self.body_language:
@@ -249,6 +274,22 @@ class LivingWorld:
             kinds["attire_snapshot"] = len(attire_raw)
         PERF.records_ingested(kinds, (time.perf_counter() - started) * 1000)
         return stored
+
+    def _scene_snapshot(self, scene_raw: list[str]) -> list[intimate_scenes.SceneNow]:
+        """OStim scenes running near the player right now (an empty list when the game says none are)."""
+        identities = IdentityRegistry(self.store)
+        records, ids = [], {}
+        for raw in scene_raw:
+            try:
+                record = parse_record(raw)
+            except (BadRecord, ValueError) as e:
+                logger.error(f"Living World: scene snapshot skipped ({e}): {raw[:200]}")
+                continue
+            records.append(record)
+            for actor in [record.actor, record.target, record.party] + [w.actor for w in record.witnesses]:
+                if actor is not None and actor.ref_id not in ids:
+                    ids[actor.ref_id] = identities.ensure_npc(actor.identity(), record.game_time)
+        return intimate_scenes.snapshot(records, ids)
 
     def _attire_snapshot(self, attire_raw: list[str], pipeline: PerceptionPipeline) -> dict[int, awareness.AttireNow]:
         records = []
@@ -294,6 +335,7 @@ class LivingWorld:
         self._context = context
         self._pending = True
         self._attire_now = {}
+        self._scenes_now = []
         self._moods_shown = {}
         self._moods_to_send = {}
         self._guard_sent = set()
@@ -396,6 +438,14 @@ class LivingWorld:
             return
         if game_days is None and context is not None:
             game_days = context.game_days
+        if self.guard and self.store is not None:
+            try:
+                scene = self._guard_scene()
+                if scene is not None:
+                    self._guard_for(self.store).ended(scene)
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not file the written guard report; carrying on")
         self._close(game_days)
 
     @_never_raises
@@ -422,7 +472,7 @@ class LivingWorld:
             npc_id = self._npc_ids.get(character.ref_id) or self._register(character, now)
             key = (self.conv_id, npc_id)
             recall = recall_for(store, npc_id, now, player_id, mark_rehearsed=key not in self._rehearsed,
-                                about_ids=list(present))
+                                about_ids=list(present), current_conv_id=self.conv_id)
             self._rehearsed.add(key)
             self._last_recall[npc_id] = (recall.know_ids, recall.mem_ids)
             text = recall.text()
@@ -451,6 +501,14 @@ class LivingWorld:
                 rule = hearing.prompt_lines(npcs, player.name)
                 blocks.append(f"Hearing {player.name}:\n" + "\n".join(f"- {line}" for line in rule))
         return "\n\n".join(blocks)
+
+    @_never_raises
+    def guard_notes(self, text: str, context: Any) -> list[str]:
+        """G2f: notes for the AI on the player's line, such as what someone the player arrests does."""
+        if not self.guard or self.conv_id is None or context is not self._context or not text:
+            return []
+        scene = self._guard_scene()
+        return self._guard_for(self.store).arrest_turn(scene, text) if scene else []
 
     @_never_raises
     def hearing_note(self, text: str, context: Any) -> str | None:
@@ -741,6 +799,12 @@ class LivingWorld:
                 logger.exception("Living World: could not check the barracks bunk; carrying on")
         if self.guard and self.store is not None:
             try:
+                keys.update(self._arrest_keys())
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not send a guard arrest to the game; carrying on")
+        if self.guard and self.store is not None:
+            try:
                 keys.update(self._watch_keys())
             except Exception:
                 self.errors += 1
@@ -750,6 +814,25 @@ class LivingWorld:
         if self._hints_to_send:
             keys[KEY_HINTS] = self._hints_to_send
             self._hints_to_send = []
+        return keys
+
+    def _arrest_keys(self) -> dict[str, Any]:
+        """G2f: an arrest the rules decided on (one per line) and prisoners to let out."""
+        guard = self._guard_for(self.store)
+        orders, releases = guard.take_arrest_orders()
+        keys: dict[str, Any] = {}
+        if orders:
+            o = orders[0]
+            guard.arrest_orders = orders[1:] + guard.arrest_orders   # any others go with the next line
+            keys.update({KEY_GUARD_ARREST_NAME: o.name, KEY_GUARD_ARREST_MODE: o.mode, KEY_GUARD_ARREST_ID: o.arrest_id,
+                         KEY_GUARD_ARREST_DAYS: o.days})
+            if o.jail is not None and o.jail.form_id:
+                keys[KEY_GUARD_JAIL_ID] = int(o.jail.form_id, 16)
+                keys[KEY_GUARD_JAIL_PLUGIN] = o.jail.plugin
+            logger.log(23, f"Living World guard: arrest {o.arrest_id} sent to the game: {o.name} {o.mode}")
+        if releases:
+            keys[KEY_GUARD_RELEASE] = releases
+            logger.log(23, f"Living World guard: prisoners to let out: arrests {releases}")
         return keys
 
     def _watch_keys(self) -> dict[str, Any]:
@@ -778,6 +861,10 @@ class LivingWorld:
         """Extra keys for the conversation start reply."""
         keys: dict[str, Any] = {KEY_QUIET_CHATTER: True} if self.quiet_chatter else {}
         keys[KEY_BODY_ON] = bool(self.body_language)
+        keys[intimate_scenes.KEY_INTIMACY_ON] = bool(self.intimacy)
+        if self.intimacy:
+            from livingworld.intimacy import arousal
+            keys[arousal.KEY_AROUSAL_KEY] = arousal.arousal_key()
         if self.body_language and self.store is not None:
             self._body_for(self.store).forget_sent()   # the first NPC line sends every participant's profile again
         wanting = self._wants_a_word()
@@ -864,7 +951,20 @@ class LivingWorld:
     def _noticed(self, npc_id: int, name: str, now: float, present: dict[int, str]) -> list[str]:
         try:
             with self.store.transaction() as db:
-                return awareness.lines_for(db, npc_id, name, now, present, self._attire_now, hygiene=self.hygiene)
+                scene_lines = []
+                if self.intimacy and self._scenes_now:
+                    from livingworld.perception.attire import sex_of
+                    from livingworld.intimacy.common import partners_of
+                    scene_lines = intimate_scenes.lines_for(npc_id, name, self._scenes_now, present,
+                                                            is_woman=sex_of(db, npc_id) == "female",
+                                                            partners=partners_of(db, npc_id, self._scenes_now))
+                if self.intimacy and not is_child(db, npc_id):
+                    from livingworld.intimacy import arousal, climax
+                    with_player = any(npc_id in s.people and s.player_id is not None for s in self._scenes_now)
+                    scene_lines += arousal.lines_for(db, npc_id, name, present, self._attire_now, with_player)
+                    scene_lines += climax.lines_for(db, npc_id, name, now, present, self._attire_now)
+                return scene_lines + awareness.lines_for(db, npc_id, name, now, present, self._attire_now,
+                                                         hygiene=self.hygiene)
         except Exception:
             self.errors += 1
             logger.exception("Living World: could not work out what an NPC notices; leaving it out")
@@ -921,6 +1021,12 @@ class LivingWorld:
                 " VALUES (?,?,?,?,?,?,?,?,?)",
                 (timeline, "dialogue", str(model or "unknown"), npc_id, self.conv_id, trace, latency_ms, status, error))
 
+    def promise_parser(self, actions: list) -> Any:
+        """A reply parser that starts Sit / Drink when the NPC says they are about to (dialogue/promises.py)."""
+        if not self.keep_promises:
+            return None
+        return promises.make_parser(actions)
+
     def voice_allowed(self, character: Any) -> bool:
         """False if this NPC's bound voice differs from the voice Mantella is about to use."""
         if not self.enabled or self.store is None or character.is_player_character:
@@ -958,6 +1064,13 @@ class LivingWorld:
             self._stores[world_id] = store
             worker = JobWorker(store, lambda kind, payload, store=store: self._run_job(store, kind, payload))
             self._workers[world_id] = worker
+            try:   # conversations whose extraction learned nothing (the old reply cap) get one more go
+                queued = backfill.queue_backfill(store)
+                if queued:
+                    logger.log(23, f"Living World: queued {queued} past conversations to extract memories from again")
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not queue the memory backfill; carrying on")
             if self.start_workers:
                 worker.start()
         return self._stores[world_id]
@@ -967,7 +1080,7 @@ class LivingWorld:
             raise ValueError(f"unknown job kind {kind}")
         if self.complete is None:
             raise RuntimeError("no LLM attached for extraction")
-        Extractor(store, self.complete).extract_conversation(payload["conv_id"])
+        Extractor(store, self.complete).extract_conversation(payload["conv_id"], bool(payload.get("backfill")))
 
     def _close(self, game_days: float | None) -> None:
         if game_days is None:
