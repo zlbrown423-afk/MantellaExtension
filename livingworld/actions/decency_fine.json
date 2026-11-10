@@ -1,0 +1,27 @@
+{
+    "identifier": "mantella_lw_decency_fine",
+    "name": "PayFine",
+    "description": "Use only when the NPC is a guard who has just fined the player for walking about naked in public, and the player agrees to pay that fine on the spot. The server checks a fine is owed and the game takes the gold from the player. Never for a thane, never for a first warning, and not if the player refuses (then the guard may use ReportCrime instead).",
+    "note": "Living World public decency (MANTELLA_LIVING_WORLD=1). Handled by the Living World server (livingworld/guard/decency.py); the game only takes the gold the server names.",
+    "key": "PayFine",
+    "parameters": {
+        "source": {
+            "type": "string",
+            "description": "The guard collecting the fine.",
+            "scope": "conversation"
+        }
+    },
+    "required": [
+        "source"
+    ],
+    "prompt": "If you are a guard who fined the player for public nakedness and they agree to pay it now, begin your response with '{key}:'",
+    "allowed_games": [
+        "skyrim"
+    ],
+    "requires_response": false,
+    "is-interrupting": false,
+    "allow_repeat": true,
+    "one-on-one": true,
+    "multi-npc": true,
+    "radiant": false
+}
