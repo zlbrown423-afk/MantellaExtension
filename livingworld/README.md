@@ -332,3 +332,22 @@ on anyone who is not the player's partner in it, are handled exactly as before.
 
 `MANTELLA_LW_INTIMACY=0` turns it off (the game hears it with the conversation start reply, and then sends
 grabs and hits as before). Children are never part of any of it: not in a scene, not as a witness.
+
+## Memory when talking again
+
+Each conversation is turned into each NPC's own memories and facts by a background extraction call. Before
+this, that call used the spoken-reply settings (`max_tokens` 250 and the `#` stop sequence in
+`llm_params`), so its JSON was often cut off, and memories written as plain sentences were thrown away:
+across 127 conversations NPCs kept 8 memories of what was said. Recall also showed only the 8 newest
+memories, so a run of grabs pushed every memory of what was said out of the prompt.
+
+| Piece | File | What it does |
+| --- | --- | --- |
+| Reply length | `src/llm/client_base.py` (`background_request_call`), `integration.py` | Extraction gets its own `max_tokens` (`MANTELLA_LW_EXTRACT_MAX_TOKENS`, default 1500), low temperature, JSON mode (asked again without it if the service refuses), no stop sequence, and does not wait on the dialogue lock, so it never delays an NPC's reply |
+| Mending | `memory/extraction.py` | A cut-off or sloppy reply keeps every complete entry; memories as plain sentences are kept; an unusable reply is asked for once more straight away; a fact given the wrong line number is matched to the line by that speaker that really holds it (nothing unsaid is accepted); memories come first in the reply and are asked to be specific |
+| Recall | `memory/recall.py` | Six slots for memories of what was said and six for things seen or done, by importance and recency; the same thing repeated is shown once with a count ("18 times, most recently yesterday") |
+| Recap | `memory/recall.py` | When the player talked to this NPC in the last 2 game days, the last 8 lines of that conversation go into the prompt word for word, so talking again picks up where it stopped, even before extraction has run |
+| Backfill | `memory/backfill.py` | Past conversations (in the current timeline, up to 60) that left no memory of what was said are extracted once more at start-up, each only once. They add memories and facts, never gossip, and never replace a fact learned later. `MANTELLA_LW_MEMORY_BACKFILL=0` skips it |
+
+`MANTELLA_LW_MEMORY_BOOST=0` turns the reply-length, retry, line-matching, recall and recap changes off. The
+reply mending stays on: it only keeps what the old code threw away.

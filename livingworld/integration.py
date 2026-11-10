@@ -18,6 +18,8 @@ from typing import Any, Callable
 
 from livingworld.memory.extraction import Extractor
 from livingworld.memory.jobs import JobQueue, JobWorker
+from livingworld.memory import backfill
+from livingworld.memory import settings as memory_settings
 from livingworld.memory.recall import recall_for
 from livingworld import mood as moods
 from livingworld.bodylang import body_language_enabled
@@ -200,6 +202,11 @@ class LivingWorld:
         def complete(system: str, user: str) -> str | None:
             messages = message_thread(config, system)
             messages.add_message(VerbatimUserMessage(config, user))
+            background = getattr(client, "background_request_call", None)
+            if background is not None and memory_settings.memory_boost_enabled():
+                # its own reply length and JSON mode: the spoken-reply cap (often 250 tokens) cut extraction off
+                return background(messages, {"max_tokens": memory_settings.extract_max_tokens(), "temperature": 0.2},
+                                  json_mode=True)
             return client.request_call(messages)
         self.complete = complete
 
@@ -450,7 +457,7 @@ class LivingWorld:
             npc_id = self._npc_ids.get(character.ref_id) or self._register(character, now)
             key = (self.conv_id, npc_id)
             recall = recall_for(store, npc_id, now, player_id, mark_rehearsed=key not in self._rehearsed,
-                                about_ids=list(present))
+                                about_ids=list(present), current_conv_id=self.conv_id)
             self._rehearsed.add(key)
             self._last_recall[npc_id] = (recall.know_ids, recall.mem_ids)
             text = recall.text()
@@ -1017,6 +1024,13 @@ class LivingWorld:
             self._stores[world_id] = store
             worker = JobWorker(store, lambda kind, payload, store=store: self._run_job(store, kind, payload))
             self._workers[world_id] = worker
+            try:   # conversations whose extraction learned nothing (the old reply cap) get one more go
+                queued = backfill.queue_backfill(store)
+                if queued:
+                    logger.log(23, f"Living World: queued {queued} past conversations to extract memories from again")
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not queue the memory backfill; carrying on")
             if self.start_workers:
                 worker.start()
         return self._stores[world_id]
@@ -1026,7 +1040,7 @@ class LivingWorld:
             raise ValueError(f"unknown job kind {kind}")
         if self.complete is None:
             raise RuntimeError("no LLM attached for extraction")
-        Extractor(store, self.complete).extract_conversation(payload["conv_id"])
+        Extractor(store, self.complete).extract_conversation(payload["conv_id"], bool(payload.get("backfill")))
 
     def _close(self, game_days: float | None) -> None:
         if game_days is None:
