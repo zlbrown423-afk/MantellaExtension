@@ -290,6 +290,7 @@ class SceneNow:
     seen_by: set[int] = field(default_factory=set)
     player_id: int | None = None             # the player, when they are in it
     player_size: sizes.Size | None = None    # TNG size, when the player is a man in it
+    seer_names: dict[int, str] = field(default_factory=dict)   # npc_id -> name of each person who can see it
 
 
 def snapshot(records: list[PerceptionRecord], ids: dict[int, int]) -> list[SceneNow]:
@@ -304,11 +305,11 @@ def snapshot(records: list[PerceptionRecord], ids: dict[int, int]) -> list[Scene
                 people.setdefault(ids[actor.ref_id], actor.name)
         if len(people) < 2:
             continue
-        seen_by = {ids[w.actor.ref_id] for w in record.witnesses
-                   if w.actor.ref_id in ids and formation.perceives(w) is not None}
+        seers = {ids[w.actor.ref_id]: w.actor.name for w in record.witnesses
+                 if w.actor.ref_id in ids and formation.perceives(w) is not None and ids[w.actor.ref_id] not in people}
         player_id = ids.get(record.actor.ref_id) if record.actor.is_player else None
-        scenes.append(SceneNow(people, record.acts, record.forced, seen_by, player_id,
-                               sizes.from_scale(record.player_size) if player_id is not None else None))
+        scenes.append(SceneNow(people, record.acts, record.forced, set(seers), player_id,
+                               sizes.from_scale(record.player_size) if player_id is not None else None, seers))
     return scenes
 
 
@@ -317,9 +318,12 @@ def in_scene(scenes: list[SceneNow], npc_id: int) -> bool:
 
 
 def lines_for(npc_id: int, name: str, scenes: list[SceneNow], present: dict[int, str],
-              is_woman: bool = False, partners: set[int] | None = None) -> list[str]:
+              is_woman: bool = False, partners: set[int] | None = None, confront: bool = False,
+              watched_by: set[int] | None = None) -> list[str]:
     """Prompt lines for ``npc_id`` about scenes running right now. ``is_woman``: she reacts to the player's size.
-    ``partners``: the people ``npc_id`` is with (spouse, partner, courting), to see a betrayal for what it is."""
+    ``partners``: the people ``npc_id`` is with (spouse, partner, courting), to see a betrayal for what it is.
+    ``confront`` (``confront.py``): a partner who sees it speaks up, and ``watched_by`` (the people who are with
+    ``npc_id`` and can see their scene) tells the one in the scene who is watching."""
     lines = []
     for scene in scenes:
         acts = act_words(scene.acts)
@@ -338,6 +342,10 @@ def lines_for(npc_id: int, name: str, scenes: list[SceneNow], present: dict[int,
                          f" are off for it.")
             lines.append(f"Touching, grabbing, slaps and rough play between {name} and {others} right now are part of"
                          f" this scene, not an attack or an insult. {name} can still say if something is too much.")
+            caught_by = [n for i, n in scene.seer_names.items() if watched_by and i in watched_by]
+            if confront and caught_by:
+                lines.append(f"{_list(caught_by)}, {name}'s own partner, has walked in and can see this. {name} has"
+                             f" been caught: how {name} answers is {name}'s own (ashamed, defiant, pleading, cold).")
             if is_woman and scene.player_size is not None and scene.player_id is not None and scene.player_id != npc_id:
                 lines.append(sizes.prompt_line(name, scene.people[scene.player_id], scene.player_size))
         elif npc_id in scene.seen_by:
@@ -348,8 +356,14 @@ def lines_for(npc_id: int, name: str, scenes: list[SceneNow], present: dict[int,
                 mine = [n for i, n in scene.people.items() if partners and i in partners]
                 if mine:
                     others = _list([n for i, n in scene.people.items() if n not in mine])
-                    lines.append(f"{name} can see {_list(mine)}, {name}'s own partner, being intimate with {others}"
-                                 f" close by, right now{what}. {name} reacts as {name} would to that.")
+                    if confront:
+                        lines.append(f"{name} has just walked in on {_list(mine)}, {name}'s own partner, being intimate"
+                                     f" with {others} right now{what}. {name} does not stay silent: {name} confronts"
+                                     f" them about it now, in {name}'s own way (anger, hurt, demanding answers, or"
+                                     f" turning cold and walking out).")
+                    else:
+                        lines.append(f"{name} can see {_list(mine)}, {name}'s own partner, being intimate with {others}"
+                                     f" close by, right now{what}. {name} reacts as {name} would to that.")
                 else:
                     lines.append(f"{name} can see {names} being intimate close by{what}.")
     return lines

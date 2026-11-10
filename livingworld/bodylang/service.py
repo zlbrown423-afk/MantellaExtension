@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from src import utils
 
+from livingworld.bodylang import peek as glances
 from livingworld.bodylang import presence as P
 from livingworld.bodylang import state
 from livingworld.perception.records import BadRecord
@@ -26,6 +27,7 @@ class Noticed:
 @dataclass
 class BodyLanguage:
     store: WorldStore
+    peek: bool = False                                                 # women's glances (peek.py) on
     _seen_keys: set[str] = field(default_factory=set)
     _noticed: dict[int, list[Noticed]] = field(default_factory=dict)   # npc_id -> not yet told to the model
     _sent: dict[int, str] = field(default_factory=dict)                # npc_id -> profile the game last got
@@ -76,14 +78,16 @@ class BodyLanguage:
         return lines
 
     def profiles(self, people: dict[int, str], player_id: int | None, now: float) -> list[str]:
-        """Expression profiles that changed since the game last got them (``Name|comfort|gaze|guard|step``)."""
+        """Expression profiles that changed since the game last got them (``Name|comfort|gaze|guard|step|peek``)."""
         out = []
         with self.store.transaction() as db:
             for npc_id, name in people.items():
                 if npc_id == player_id or is_child(db, npc_id):
                     continue
                 bond = P.bond_of(db, npc_id, player_id) if player_id is not None else P.Bond()
-                wire = P.profile(name, traits_of(db, npc_id), bond, state.load(db, npc_id, now)).wire()
+                traits, feelings = traits_of(db, npc_id), state.load(db, npc_id, now)
+                glance = glances.for_npc(db, npc_id, player_id, traits, feelings, now) if self.peek else 0.0
+                wire = P.profile(name, traits, bond, feelings, glance).wire()
                 if self._sent.get(npc_id) != wire:
                     self._sent[npc_id] = wire
                     out.append(wire)

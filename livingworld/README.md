@@ -345,6 +345,18 @@ on anyone who is not the player's partner in it, are handled exactly as before.
 `MANTELLA_LW_INTIMACY=0` turns it off (the game hears it with the conversation start reply, and then sends
 grabs and hits as before). Children are never part of any of it: not in a scene, not as a witness.
 
+### Caught in the act, decency, wandering eyes
+
+| Piece | File | What it does |
+| --- | --- | --- |
+| Walking in | `intimacy/confront.py`, `intimacy/scenes.py`, Mantella-Spell `LwConfront` | The start reply lists every couple (`mantella_lw_couples`, "Hod\|Gerdur": spouses and courting, dating, partners or betrothed bonds; vanilla lovers count too in game). A witness with a clear view of their own partner in a scene, within 10 m, confronts them: they join the running conversation, or one starts with them, the couple and the player (when near). Once per scene, at most once every 2 minutes. The witness is told they walked in and do not stay silent; the partner in the scene is told who caught them. How either reacts is their own. Forced scenes are not confrontations |
+| Not letting it go | `intimacy/confront.py` | For 4 game days after, the witness's prompt says what they saw; within the first day, with their partner or the other person present, they bring it up |
+| Decency | `guard/decency.py`, Mantella-Spell `LwDecencyTick` | The player has had nothing on the body slot for 20 s outside water, a scene or their own house, no conversation is running, and a guard within 20 m can see them: the guard walks over (`react` record `via=decency`) and a conversation starts. The first time in two days a warning; after that they may fine the player 20 gold with ReportCrime. At most once every 3 minutes |
+| Wandering eyes | `bodylang/peek.py`, Mantella-Spell `LwBodyPeek` | A sixth field in each woman's body-language profile: how readily her eyes drift to a naked player (attraction, liking, familiarity, her mood, bold or reserved nature; fear, dislike and irritation stop it). The game makes her glance at his groin for about 1.5 s now and then while he is naked, has TNG's bone and is within 6 m, also mid-conversation, and sends `presence` `what=peek` so her next line knows she looked (no feelings change). Never makes anyone more willing |
+
+Off switches: `MANTELLA_LW_CONFRONT=0`, `MANTELLA_LW_DECENCY=0`, `MANTELLA_LW_PEEK=0` (peek is also off with body
+language off). Each reaches the game with the conversation start reply.
+
 ## Memory when talking again
 
 Each conversation is turned into each NPC's own memories and facts by a background extraction call. Before
