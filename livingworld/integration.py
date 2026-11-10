@@ -24,6 +24,7 @@ from livingworld.bodylang import body_language_enabled
 from livingworld.bodylang.presence import is_presence
 from livingworld.bodylang.service import BodyLanguage
 from livingworld.dialogue import hearing
+from livingworld.dialogue import promises
 from livingworld.perception import awareness
 from livingworld.perception.intoxication import drink_state
 from livingworld.perception.pipeline import PerceptionPipeline
@@ -158,6 +159,7 @@ class LivingWorld:
         self._guard_refreshed: int | None = None    # conv_id whose duties/probation were brought up to date
         self._player_said: str | None = None        # the player's last line (kept with a duty report)
         self._watch_sent: tuple | None = None       # G2e: the watch plan last sent to the game this conversation
+        self.keep_promises = enabled and promises.promises_enabled()   # NPCs do what they say (MANTELLA_LW_KEEP_PROMISES=0 turns off)
         self.hearing = enabled and hearing.hearing_enabled()   # catch misheard speech (MANTELLA_LW_HEARING=0 turns off)
         self.perf_monitor: PerfMonitor | None = None  # MANTELLA_LW_PERF=1 (see livingworld/perf)
         self.body_language = enabled and body_language_enabled()   # MANTELLA_LW_BODY_LANGUAGE=0 turns off
@@ -929,6 +931,12 @@ class LivingWorld:
                 "INSERT INTO llm_request (timeline_id, task, model, npc_id, conv_id, trace_id, latency_ms, status, error)"
                 " VALUES (?,?,?,?,?,?,?,?,?)",
                 (timeline, "dialogue", str(model or "unknown"), npc_id, self.conv_id, trace, latency_ms, status, error))
+
+    def promise_parser(self, actions: list) -> Any:
+        """A reply parser that starts Sit / Drink when the NPC says they are about to (dialogue/promises.py)."""
+        if not self.keep_promises:
+            return None
+        return promises.make_parser(actions)
 
     def voice_allowed(self, character: Any) -> bool:
         """False if this NPC's bound voice differs from the voice Mantella is about to use."""
