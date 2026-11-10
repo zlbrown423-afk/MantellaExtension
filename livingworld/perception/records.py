@@ -80,6 +80,19 @@ Gentleman gives the player's genitals when the player is a man in the scene (``i
     v=1|key=812345-11|type=scene|gt=4.3|loc=Whiterun|via=end|thread=0|scene=<OStim scene id>|actor=<player>
       |target=<actor>|acts=kissing,vaginalsex,spanking|touch=14|slap=3|forced=0|climax=1|dur=420.5|w=<witness>
 
+The same scenes add a ``climax`` record each time someone in one climaxes (OStim's ``ostim_actor_orgasm``;
+OCum draws it): ``actor`` climaxed, ``target`` is the partner, ``acts`` the OStim action types of the scene
+at that moment (they tell where it landed, ``intimacy/climax.py``), ``sex`` the actor's sex::
+
+    v=1|key=812345-12|type=climax|gt=4.31|loc=Whiterun|thread=0|scene=<id>|actor=<actor>|target=<actor>
+      |acts=blowjob,kissing|sex=m|w=<witness>
+
+An ``arousal`` record is the player's erection (The New Gentleman) crossing "visibly aroused": ``via=erect``
+or ``soft``, ``cover`` as on an attire record, ``level`` TNG's bend (-10 soft .. 9), ``psize`` as above;
+witnesses only when the player has nothing on the body. An ``eyes`` record is the player covering
+(``via=covered``) or uncovering their eyes (the LWCoverEyes power). The player's own attire record also
+carries ``erect=1`` while visibly aroused and ``eyes=1`` while their eyes are covered.
+
 ``<actor>`` is ``ref^base^ref_plugin^base_plugin^is_player^name`` and ``<witness>`` is
 ``distance_m^had_los^rank_to_actor^rank_to_target^`` followed by an actor. Ranks are the game's own
 ``GetRelationshipRank`` (4 lover .. 0 acquaintance .. -4 archnemesis); ``trank`` is the target's rank
@@ -162,6 +175,9 @@ class PerceptionRecord:
     climax: int = 0                 # scene: how many times someone in it climaxed
     scene_id: str | None = None     # scene: OStim scene id (the last one, on an end record)
     player_size: float | None = None  # scene: TNG's scale of the player's "NPC GenitalsBase" bone (intimacy/size.py)
+    erect: bool = False             # attire (the player): visibly aroused right now
+    eyes_covered: bool = False      # attire (the player): their eyes are covered right now
+    level: int | None = None        # arousal: TNG's bend, -10 (soft) .. 9
     witnesses: list[Witness] = field(default_factory=list)
     raw: str = ""
 
@@ -217,7 +233,7 @@ def parse_record(text: str) -> PerceptionRecord:
     if fields.get("payer"):
         fields["payer"] = fields["payer"].strip().lower()
     if kind not in ("grab", "consume", "attire", "purchase", "fight", "swim", "gift", "theft", "hit", "watch", "react", "jail",
-                    "scene"):
+                    "scene", "climax", "arousal", "eyes"):
         raise BadRecord(f"unknown event type {kind!r}")
     record = PerceptionRecord(
         key=fields["key"], type=kind, game_time=float(fields["gt"]), location=fields.get("loc") or None,
@@ -235,10 +251,17 @@ def parse_record(text: str) -> PerceptionRecord:
         thread=int(fields["thread"]) if fields.get("thread") else None, acts=_acts(fields.get("acts")),
         touches=_count(fields.get("touch")), slaps=_count(fields.get("slap")), forced=fields.get("forced") == "1",
         climax=_count(fields.get("climax")), scene_id=(fields.get("scene") or "").strip() or None,
-        player_size=_scale(fields.get("psize")),
+        player_size=_scale(fields.get("psize")), erect=fields.get("erect") == "1", eyes_covered=fields.get("eyes") == "1",
+        level=_level(fields.get("level")),
         witnesses=witnesses, raw=text)
     if kind == "scene" and (record.via not in ("end", "now") or record.target is None):
         raise BadRecord("a scene record needs via=end or now and at least two people (actor and target)")
+    if kind == "climax" and record.target is None:
+        raise BadRecord("a climax record needs the partner as target")
+    if kind == "arousal" and record.via not in ("erect", "soft"):
+        raise BadRecord("an arousal record needs via=erect or soft")
+    if kind == "eyes" and record.via not in ("covered", "uncovered"):
+        raise BadRecord("an eyes record needs via=covered or uncovered")
     if kind == "watch" and (record.via not in ("approach", "observe") or record.win is None or not record.task):
         raise BadRecord("a watch record needs via=approach or observe, win and task")
     if kind == "jail" and (record.via not in ("jailed", "released") or record.target is None or not record.task):
@@ -275,6 +298,13 @@ def _acts(text: str | None) -> list[str]:
         if word and re.fullmatch(r"[a-z0-9_]{1,40}", word) and word not in acts:
             acts.append(word)
     return acts
+
+
+def _level(text: str | None) -> int | None:
+    try:
+        return max(-10, min(9, int(float(text)))) if text else None
+    except ValueError:
+        return None
 
 
 def _scale(text: str | None) -> float | None:

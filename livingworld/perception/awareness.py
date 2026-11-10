@@ -35,6 +35,9 @@ class AttireNow:
     seen_by: set[int] = field(default_factory=set)   # npc_ids who can see this person right now
     sex: str | None = None                            # as the game reported it, if it did
     size: object | None = None                        # intimacy.size.Size: a man with The New Gentleman (the player)
+    is_player: bool = False
+    erect: bool = False                               # the player: visibly aroused (intimacy/arousal.py)
+    eyes_covered: bool = False                        # the player: eyes covered (LWCoverEyes)
 
 
 def snapshot(records: list[PerceptionRecord], ids: dict[int, int], witness_ids: dict[int, int]) -> dict[int, AttireNow]:
@@ -46,7 +49,8 @@ def snapshot(records: list[PerceptionRecord], ids: dict[int, int], witness_ids: 
                    if w.actor.ref_id in witness_ids and formation.perceives(w) is not None}
         from livingworld.intimacy import size as sizes
         size = sizes.from_scale(record.player_size) if record.actor.is_player else None
-        result[npc_id] = AttireNow(npc_id, record.actor.name, record.cover != "none", seen_by, record.sex, size)
+        result[npc_id] = AttireNow(npc_id, record.actor.name, record.cover != "none", seen_by, record.sex, size,
+                                   record.actor.is_player, record.erect, record.eyes_covered)
     return result
 
 
@@ -109,6 +113,7 @@ def privacy_line(db, present: dict[int, str], attire: dict[int, AttireNow]) -> s
         return None         # no snapshot from the game: say nothing rather than guess
     others = sorted({a.name for i, a in attire.items() if i not in present and not is_child(db, i)})
     if not others:
-        return "No one else is nearby; only the people in this conversation are here."
+        # the game counts people within 25 m; Mantella's own "nearby" list reaches further, so say "close by"
+        return "No one else is close by; anyone further off cannot see or overhear this conversation."
     return "Also nearby, not part of this conversation: " + ", ".join(others) + "."
 

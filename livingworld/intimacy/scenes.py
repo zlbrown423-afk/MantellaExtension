@@ -120,6 +120,20 @@ def shared_for_witness(record: PerceptionRecord, names: list[str], seen: Percept
         valence=-0.05, intensity=0.4, confidence=seen.confidence, source_kind="witnessed", deltas_to_actor={})
 
 
+BETRAYED_TO_PARTNER = {"trust": -0.4, "affinity": -0.3}
+BETRAYED_TO_RIVAL = {"affinity": -0.35, "trust": -0.15}
+
+
+def betrayal_for_witness(record: PerceptionRecord, names: list[str], partner: str, seen: Perception) -> MemoryDraft:
+    """A witness who saw their own spouse or partner in a scene with someone else."""
+    hedge = "I saw" if seen.confidence >= 0.8 else "I think I saw"
+    others = [n for n in names if n != partner]
+    return MemoryDraft(
+        content=f"{hedge} {partner} being intimate with {_list(others)}{_place(record)}.",
+        interpretation=f"{partner} is mine. I will not forget this.", importance=0.95, valence=-0.85,
+        intensity=0.9, confidence=seen.confidence, source_kind="witnessed", deltas_to_actor=dict(BETRAYED_TO_PARTNER))
+
+
 def forced_for_victim(record: PerceptionRecord, aggressor: str) -> MemoryDraft:
     return MemoryDraft(
         content=f"{aggressor} forced themselves on me{_place(record)}.",
@@ -198,6 +212,7 @@ def record_scene(pipeline, record: PerceptionRecord):
             outcome.witnesses[npc_id] = seen.how
 
         drafts: dict[int, tuple[MemoryDraft, list[int]]] = {}   # npc_id -> (memory, who the deltas are towards)
+        betrayals: list[tuple[int, list[int], MemoryDraft]] = []  # (witness, the partner's lovers, their deltas)
         aggressor = people[aggressor_id]
         victims = [n for i, n in people.items() if i != aggressor_id]
         for npc_id, name in people.items():
@@ -216,6 +231,16 @@ def record_scene(pipeline, record: PerceptionRecord):
             if record.forced:
                 drafts[npc_id] = (forced_for_witness(record, aggressor, victims, seen), [aggressor_id])
             else:
+                from livingworld.intimacy.common import partner_in
+                partner = partner_in(db, npc_id, ids)
+                if partner is not None:
+                    # their own spouse or partner with someone else: hurt by the partner, angry at the other
+                    drafts[npc_id] = (betrayal_for_witness(record, list(people.values()), people[partner], seen), [partner])
+                    rivals = [i for i in ids if i != partner and i != npc_id]
+                    rival_draft = MemoryDraft("", f"was intimate with {people[partner]}", 0, 0, 0, 1.0, "witnessed",
+                                              dict(BETRAYED_TO_RIVAL))
+                    betrayals.append((npc_id, rivals, rival_draft))
+                    continue
                 close = any(pipeline._bond(db, npc_id, i).close for i in ids)
                 drafts[npc_id] = (shared_for_witness(record, list(people.values()), seen, close), [])
 
@@ -243,6 +268,11 @@ def record_scene(pipeline, record: PerceptionRecord):
                 for other in towards:
                     if other != npc_id:
                         pipeline._relationship_change(db, timeline, npc_id, other, draft, mem_id, event_id, gt)
+        for npc_id, rivals, rival_draft in betrayals:
+            mem_id = outcome.memories.get(npc_id)
+            for rival in rivals:
+                if mem_id is not None and not pipeline._is_player(db, npc_id):
+                    pipeline._relationship_change(db, timeline, npc_id, rival, rival_draft, mem_id, event_id, gt)
     logger.log(23, f"Living World: stored {etype} event {event_id} ({record.key}): {', '.join(people.values())};"
                    f" acts {', '.join(record.acts) or 'none'}; touches {record.touches}, slaps {record.slaps};"
                    f" memories for {len(outcome.memories)} NPC(s)")
@@ -287,8 +317,9 @@ def in_scene(scenes: list[SceneNow], npc_id: int) -> bool:
 
 
 def lines_for(npc_id: int, name: str, scenes: list[SceneNow], present: dict[int, str],
-              is_woman: bool = False) -> list[str]:
-    """Prompt lines for ``npc_id`` about scenes running right now. ``is_woman``: she reacts to the player's size."""
+              is_woman: bool = False, partners: set[int] | None = None) -> list[str]:
+    """Prompt lines for ``npc_id`` about scenes running right now. ``is_woman``: she reacts to the player's size.
+    ``partners``: the people ``npc_id`` is with (spouse, partner, courting), to see a betrayal for what it is."""
     lines = []
     for scene in scenes:
         acts = act_words(scene.acts)
@@ -314,5 +345,11 @@ def lines_for(npc_id: int, name: str, scenes: list[SceneNow], present: dict[int,
             if scene.forced:
                 lines.append(f"{name} can see {names} close by: it looks like someone is being forced.")
             else:
-                lines.append(f"{name} can see {names} being intimate close by{what}.")
+                mine = [n for i, n in scene.people.items() if partners and i in partners]
+                if mine:
+                    others = _list([n for i, n in scene.people.items() if n not in mine])
+                    lines.append(f"{name} can see {_list(mine)}, {name}'s own partner, being intimate with {others}"
+                                 f" close by, right now{what}. {name} reacts as {name} would to that.")
+                else:
+                    lines.append(f"{name} can see {names} being intimate close by{what}.")
     return lines
