@@ -36,7 +36,9 @@ An ``attire`` record also carries ``sex`` (``m`` or ``f``), the actor's sex in g
 A ``react`` record is someone reacting on the spot to the player's hands on them, outside any conversation:
 ``actor`` is who reacts, ``target`` the player, ``via`` is ``victim`` (the person grabbed speaks up) or ``guard``
 (a guard who saw it steps in, and ``party`` is the person grabbed); ``area`` and ``dur`` are the grab's. The game
-starts a conversation with them right after sending it.
+starts a conversation with them right after sending it. ``via=decency`` is a guard who saw the player walking
+about naked in public coming over about it (``dur`` is how long the player had been naked; see
+``guard/decency.py``).
 
 A ``purchase`` record is an NPC (``actor``) buying a round from a bartender (``target``) with the
 Living World OrderDrinks action: ``gold`` paid in total, ``payer`` is ``player`` or ``npc`` (the buyer),
@@ -266,9 +268,9 @@ def parse_record(text: str) -> PerceptionRecord:
         raise BadRecord("a watch record needs via=approach or observe, win and task")
     if kind == "jail" and (record.via not in ("jailed", "released") or record.target is None or not record.task):
         raise BadRecord("a jail record needs via=jailed or released, the prisoner as target and the arrest as task")
-    if kind == "react" and (record.via not in ("victim", "guard") or record.target is None
+    if kind == "react" and (record.via not in ("victim", "guard", "decency") or record.target is None
                             or (record.via == "guard" and record.party is None)):
-        raise BadRecord("a react record needs via=victim or guard, the player as target, and party for a guard")
+        raise BadRecord("a react record needs via=victim, guard or decency, the player as target, and party for a guard")
     if kind == "grab" and record.target is None:
         raise BadRecord("a grab needs a target")
     if kind == "consume" and not record.item:

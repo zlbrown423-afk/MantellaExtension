@@ -14,8 +14,10 @@ The game sends one ``type=presence`` record per meaningful moment, never per tic
 - ``weapon``: the player drew a weapon or readied a spell within 6 m of the NPC
 - ``stare``: the player kept facing the NPC from within 2 m for several seconds (head direction only:
   there is no eye tracking, so this is worded as "facing", never as "eyes")
+- ``peek``: the naked player is within a few metres and the NPC (a woman) glanced down at him (``peek.py``).
+  This one is the NPC's own glance, sent only so her next line may know it; it changes no feelings.
 
-Only the player's behaviour is ever a percept (see the loop guards in ``__init__``).
+Apart from ``peek``, only the player's behaviour is ever a percept (see the loop guards in ``__init__``).
 """
 from __future__ import annotations
 
@@ -25,7 +27,7 @@ from livingworld.bodylang.state import Feelings
 from livingworld.perception.records import RECORD_VERSION, BadRecord, GameActor, _actor
 
 KIND = "presence"
-WHATS = ("approach", "crowd", "backed_off", "weapon", "stare")
+WHATS = ("approach", "crowd", "backed_off", "weapon", "stare", "peek")
 OBSERVATION_MINUTES = 15.0   # older observations are not worth telling the dialogue model
 MAX_OBSERVATIONS = 3
 FELT_LINE_AT = 0.3           # a feeling this strong gets a line in the prompt
@@ -153,6 +155,9 @@ def observation(p: Presence, player_name: str) -> str:
         return f"{player_name} drew a weapon or readied a spell {dist} away."
     if p.what == "stare":
         return f"{player_name} kept facing them from {dist} away for several seconds."
+    if p.what == "peek":
+        return (f"{p.target.name}'s eyes went down to naked {player_name}'s manhood for a moment, {dist} away."
+                f" Whether {player_name} noticed, and whether {p.target.name} owns up to it, is hers to play.")
     return ""
 
 
@@ -182,16 +187,18 @@ class Profile:
     gaze: float          # 0 looks away, 0.5 glances, 1 holds the player's gaze
     guard: float         # 0 open, 1 arms folded and closed off
     steps_back: bool     # False: holds their ground when crowded
+    peek: float = 0.0    # a woman glancing down at the naked player now and then (``peek.py``); 0 never
 
     def wire(self) -> str:
-        return f"{self.name}|{self.comfort_m:.2f}|{self.gaze:.2f}|{self.guard:.2f}|{1 if self.steps_back else 0}"
+        return (f"{self.name}|{self.comfort_m:.2f}|{self.gaze:.2f}|{self.guard:.2f}|{1 if self.steps_back else 0}"
+                f"|{self.peek:.2f}")
 
 
 def _clamp(value: float, low: float, high: float) -> float:
     return round(max(low, min(high, value)), 2)
 
 
-def profile(name: str, traits: dict[str, float], bond: Bond, feelings: Feelings) -> Profile:
+def profile(name: str, traits: dict[str, float], bond: Bond, feelings: Feelings, peek: float = 0.0) -> Profile:
     t = lambda trait: _t(traits, trait)
     f = feelings.get
     comfort = 0.9 * (0.6 + 0.8 * t("personal_space")) * (1.0 + 0.3 * (t("reserve") - 0.5))
@@ -202,7 +209,8 @@ def profile(name: str, traits: dict[str, float], bond: Bond, feelings: Feelings)
     guard = 0.2 + 0.6 * f("irritation") + 0.5 * f("fear") + 0.3 * f("unease") + 0.2 * (t("reserve") - 0.5)
     guard -= 0.2 * max(bond.affinity, 0.0)
     holds_ground = t("dominance") >= 0.7 and t("bold") >= 0.6 and f("fear") < 0.3
-    return Profile(name, _clamp(comfort, 0.5, 2.0), _clamp(gaze, 0.0, 1.0), _clamp(guard, 0.0, 1.0), not holds_ground)
+    return Profile(name, _clamp(comfort, 0.5, 2.0), _clamp(gaze, 0.0, 1.0), _clamp(guard, 0.0, 1.0), not holds_ground,
+                   _clamp(peek, 0.0, 1.0))
 
 
 def clamp_mood_score(new_score: int, previous: int | None, feelings: Feelings) -> int:

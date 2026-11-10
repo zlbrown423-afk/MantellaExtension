@@ -243,7 +243,8 @@ class PerceptionPipeline:
                 (timeline, "reaction", record.location, json.dumps([reactor, player, victim]),
                  json.dumps({"role": record.via, "area": record.area}), "game", gt, record.key,
                  datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"), record.duration_s, 1.0)).lastrowid
-        logger.log(23, f"Living World: {record.actor.name} reacts ({record.via}) to {record.target.name}'s grab"
+        what = "being naked in public" if record.via == "decency" else "grab"
+        logger.log(23, f"Living World: {record.actor.name} reacts ({record.via}) to {record.target.name}'s {what}"
                        f" -> event {event_id}")
         return Outcome(event_id)
 

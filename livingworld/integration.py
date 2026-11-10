@@ -39,6 +39,9 @@ from livingworld.guard import guard_debug_enabled, guard_enabled
 from livingworld.intimacy import intimacy_enabled
 from livingworld.store.minors import is_child
 from livingworld.intimacy import scenes as intimate_scenes
+from livingworld.intimacy import confront
+from livingworld.guard import decency
+from livingworld.bodylang.peek import KEY_PEEK_ON, peek_enabled
 from livingworld.guard.profiles import GuardFacts
 from livingworld.guard.service import ACTIONS as GUARD_ACTIONS, ENLIST as GUARD_ENLIST, Guard, Scene as GuardScene
 from livingworld.work.service import ACTIONS as TASK_ACTIONS, Scene as WorkScene, Work
@@ -176,6 +179,9 @@ class LivingWorld:
         self._body: dict[int, BodyLanguage] = {}    # id(store) -> body language for that world
         self.intimacy = enabled and intimacy_enabled()   # OStim scenes (livingworld/intimacy); MANTELLA_LW_INTIMACY=0 off
         self._scenes_now: list[intimate_scenes.SceneNow] = []   # scenes running near the player, from the game's snapshot
+        self.confront = self.intimacy and confront.enabled()   # partners who catch each other speak up; MANTELLA_LW_CONFRONT=0 off
+        self.decency = enabled and decency.enabled()   # guards tell a naked player to cover up; MANTELLA_LW_DECENCY=0 off
+        self.peek = enabled and peek_enabled()   # women's eyes drift to a naked player; MANTELLA_LW_PEEK=0 off
         self.fog = enabled and fog.fog_enabled()    # names and places unknown until told (livingworld/fog); MANTELLA_LW_FOG=0 off
         self._fog_labels: dict[str, str | None] = {}   # Mantella's 6-digit ref id -> what the game shows while unknown
         self._fog_reveal: list[str] = []            # real names the player learned, for the next NPC line
@@ -498,7 +504,8 @@ class LivingWorld:
                 blocks.append(text)
             if fog_lines:
                 blocks.append(f"Names, for {character.name}:\n" + "\n".join(f"- {line}" for line in fog_lines))
-            noticed = self._noticed(npc_id, character.name, now, present)
+            noticed = self._noticed(npc_id, character.name, now, present, player_id,
+                                    player.name if player is not None else None)
             if noticed:
                 blocks.append(f"What {character.name} notices right now:\n" + "\n".join(f"- {line}" for line in noticed))
             body = self._body_lines(npc_id, character.name, now)
@@ -888,6 +895,16 @@ class LivingWorld:
         keys: dict[str, Any] = {KEY_QUIET_CHATTER: True} if self.quiet_chatter else {}
         keys[KEY_BODY_ON] = bool(self.body_language)
         keys[intimate_scenes.KEY_INTIMACY_ON] = bool(self.intimacy)
+        keys[confront.KEY_CONFRONT_ON] = bool(self.confront)
+        keys[decency.KEY_DECENCY_ON] = bool(self.decency)
+        keys[KEY_PEEK_ON] = bool(self.peek and self.body_language)
+        if self.confront and self.store is not None:
+            try:
+                with self.store.reading() as db:
+                    keys[confront.KEY_COUPLES] = confront.couples(db)
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not list the couples for the game; carrying on")
         if self.intimacy:
             from livingworld.intimacy import arousal
             keys[arousal.KEY_AROUSAL_KEY] = arousal.arousal_key()
@@ -1013,7 +1030,7 @@ class LivingWorld:
     def _body_for(self, store: WorldStore) -> BodyLanguage:
         key = id(store)
         if key not in self._body:
-            self._body[key] = BodyLanguage(store)
+            self._body[key] = BodyLanguage(store, peek=bool(self.peek))
         return self._body[key]
 
     def _body_lines(self, npc_id: int, name: str, now: float) -> list[str]:
@@ -1039,7 +1056,8 @@ class LivingWorld:
                     continue
                 npc_id = self._npc_ids.get(c.ref_id) or self._register(c, now)
                 lines = self._body_for(self.store).prompt_lines(npc_id, c.name, now)
-                out += [f"{c.name} noticed: {line}" if not line.startswith("Because of this") else line
+                out += [f"{c.name} noticed: {line}"
+                        if not (line.startswith("Because of this") or line.startswith(c.name)) else line
                         for line in lines]
             if out:
                 logger.log(23, "Living World body language: " + " / ".join(out))
@@ -1066,16 +1084,29 @@ class LivingWorld:
             logger.exception("Living World: could not work out body language profiles; the game keeps its last ones")
             return []
 
-    def _noticed(self, npc_id: int, name: str, now: float, present: dict[int, str]) -> list[str]:
+    def _noticed(self, npc_id: int, name: str, now: float, present: dict[int, str], player_id: int | None = None,
+                 player_name: str | None = None) -> list[str]:
         try:
             with self.store.transaction() as db:
                 scene_lines = []
+                if self.decency and player_id is not None and npc_id != player_id:
+                    told = decency.line(db, npc_id, name, player_id, player_name or "the player", now)
+                    if told:
+                        scene_lines.append(told)
                 if self.intimacy and self._scenes_now:
                     from livingworld.perception.attire import sex_of
-                    from livingworld.intimacy.common import partners_of
+                    from livingworld.intimacy.common import partner_in, partners_of
+                    watched_by = set()
+                    if self.confront:
+                        for s in self._scenes_now:
+                            if npc_id in s.people:
+                                watched_by |= {w for w in s.seen_by if partner_in(db, w, [npc_id]) == npc_id}
                     scene_lines = intimate_scenes.lines_for(npc_id, name, self._scenes_now, present,
                                                             is_woman=sex_of(db, npc_id) == "female",
-                                                            partners=partners_of(db, npc_id, self._scenes_now))
+                                                            partners=partners_of(db, npc_id, self._scenes_now),
+                                                            confront=self.confront, watched_by=watched_by)
+                if self.confront and not is_child(db, npc_id):
+                    scene_lines += confront.grievance_lines(db, npc_id, name, now, present)
                 if self.intimacy and not is_child(db, npc_id):
                     from livingworld.intimacy import arousal, climax
                     with_player = any(npc_id in s.people and s.player_id is not None for s in self._scenes_now)
