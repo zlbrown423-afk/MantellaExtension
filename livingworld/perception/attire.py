@@ -168,7 +168,8 @@ class AttireTracker:
                     " game_key, real_time, confidence) VALUES (?,?,?,?,?,?,?,?,?,?)",
                     (timeline, EVENT_TYPE, record.location, json.dumps([actor_id]),
                      json.dumps({"covered": covered, "cover": record.cover, "body": record.body,
-                                 "chosen": chosen(record), "nearby_but_unseen": unseen}),
+                                 "chosen": chosen(record), "scene": record.via == "scene",
+                                 "nearby_but_unseen": unseen}),
                      "game", gt, record.key, datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"), 1.0)
                 ).lastrowid
                 new_state = True
@@ -176,7 +177,8 @@ class AttireTracker:
                 event_id = previous.event_id                  # still undressed: add whoever newly sees it
                 new_state = False
             outcome = Outcome(event_id, duplicate=not new_state)
-            if covered:
+            if covered or record.via == "scene":
+                # clothes off for an intimate scene (OStim undressing): the scene's own memory covers it
                 return outcome
 
             already = {row[0] for row in db.execute("SELECT npc_id FROM event_witness WHERE event_id = ?", (event_id,))}

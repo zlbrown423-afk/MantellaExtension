@@ -69,6 +69,16 @@ player striking an NPC who was not an enemy (``item`` is the weapon or spell, em
 ``via`` is ``assault`` when the game counted it as a crime, ``conversation`` when the NPC was talking
 with the player).
 
+Intimate scenes (OStim, see ``intimacy/``) add a ``scene`` record. ``via=end`` is queued once when a scene
+ends; ``via=now`` is sent with every request, under the context key ``mantella_lw_scene``, for each scene
+running near the player. ``actor``, ``target`` and ``party`` are the people in it (the player first when they
+are in it), ``acts`` the OStim action types seen so far, ``touch`` and ``slap`` the player's hands and slaps
+on a partner that the game folded into the scene instead of sending them as grabs and hits, ``forced=1``
+an aggressive OStim scene, ``climax`` how often someone climaxed, ``dur`` seconds::
+
+    v=1|key=812345-11|type=scene|gt=4.3|loc=Whiterun|via=end|thread=0|scene=<OStim scene id>|actor=<player>
+      |target=<actor>|acts=kissing,vaginalsex,spanking|touch=14|slap=3|forced=0|climax=1|dur=420.5|w=<witness>
+
 ``<actor>`` is ``ref^base^ref_plugin^base_plugin^is_player^name`` and ``<witness>`` is
 ``distance_m^had_los^rank_to_actor^rank_to_target^`` followed by an actor. Ranks are the game's own
 ``GetRelationshipRank`` (4 lover .. 0 acquaintance .. -4 archnemesis); ``trank`` is the target's rank
@@ -143,6 +153,13 @@ class PerceptionRecord:
     owner: str | None = None        # theft: the owner's name, when the game knows it
     win: int | None = None          # watch: which watch window of the duty
     task: int | None = None         # watch: the duty (task id) the window belongs to
+    thread: int | None = None       # scene: the OStim thread id (0 = the player's own)
+    acts: list[str] = field(default_factory=list)   # scene: OStim action types seen ('kissing', 'spanking')
+    touches: int = 0                # scene: the player's hands on a partner during it (HIGGS grabs, folded in)
+    slaps: int = 0                  # scene: slaps and spanks during it (hits on a partner, OStim spank events)
+    forced: bool = False            # scene: OStim played it as an aggressive scene
+    climax: int = 0                 # scene: how many times someone in it climaxed
+    scene_id: str | None = None     # scene: OStim scene id (the last one, on an end record)
     witnesses: list[Witness] = field(default_factory=list)
     raw: str = ""
 
@@ -197,7 +214,8 @@ def parse_record(text: str) -> PerceptionRecord:
         fields["cover"] = fields["cover"].strip().lower()
     if fields.get("payer"):
         fields["payer"] = fields["payer"].strip().lower()
-    if kind not in ("grab", "consume", "attire", "purchase", "fight", "swim", "gift", "theft", "hit", "watch", "react", "jail"):
+    if kind not in ("grab", "consume", "attire", "purchase", "fight", "swim", "gift", "theft", "hit", "watch", "react", "jail",
+                    "scene"):
         raise BadRecord(f"unknown event type {kind!r}")
     record = PerceptionRecord(
         key=fields["key"], type=kind, game_time=float(fields["gt"]), location=fields.get("loc") or None,
@@ -212,7 +230,12 @@ def parse_record(text: str) -> PerceptionRecord:
         party=_actor(fields["party"]) if fields.get("party") else None,
         hp=_fraction(fields.get("hp")), sex=_sex(fields.get("sex")), owner=(fields.get("owner") or "").strip() or None,
         win=int(fields["win"]) if fields.get("win") else None, task=int(fields["task"]) if fields.get("task") else None,
+        thread=int(fields["thread"]) if fields.get("thread") else None, acts=_acts(fields.get("acts")),
+        touches=_count(fields.get("touch")), slaps=_count(fields.get("slap")), forced=fields.get("forced") == "1",
+        climax=_count(fields.get("climax")), scene_id=(fields.get("scene") or "").strip() or None,
         witnesses=witnesses, raw=text)
+    if kind == "scene" and (record.via not in ("end", "now") or record.target is None):
+        raise BadRecord("a scene record needs via=end or now and at least two people (actor and target)")
     if kind == "watch" and (record.via not in ("approach", "observe") or record.win is None or not record.task):
         raise BadRecord("a watch record needs via=approach or observe, win and task")
     if kind == "jail" and (record.via not in ("jailed", "released") or record.target is None or not record.task):
@@ -238,6 +261,24 @@ def parse_record(text: str) -> PerceptionRecord:
     if kind == "hit" and record.target is None:
         raise BadRecord("a hit needs a target")
     return record
+
+
+def _acts(text: str | None) -> list[str]:
+    """OStim action types, lowercased, each once, in the order first seen. Anything that is not a plain id is
+    dropped, so a garbled record can never put odd words into a memory."""
+    acts: list[str] = []
+    for part in (text or "").split(","):
+        word = part.strip().lower()
+        if word and re.fullmatch(r"[a-z0-9_]{1,40}", word) and word not in acts:
+            acts.append(word)
+    return acts
+
+
+def _count(text: str | None) -> int:
+    try:
+        return max(0, int(float(text))) if text else 0
+    except ValueError:
+        return 0
 
 
 def _fraction(text: str | None) -> float | None:

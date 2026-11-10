@@ -31,6 +31,8 @@ from livingworld.social.traits import seed_traits_from_bio
 from livingworld.social.world import SocialWorld
 from livingworld.work import tasks_enabled
 from livingworld.guard import guard_debug_enabled, guard_enabled
+from livingworld.intimacy import intimacy_enabled
+from livingworld.intimacy import scenes as intimate_scenes
 from livingworld.guard.profiles import GuardFacts
 from livingworld.guard.service import ACTIONS as GUARD_ACTIONS, ENLIST as GUARD_ENLIST, Guard, Scene as GuardScene
 from livingworld.work.service import ACTIONS as TASK_ACTIONS, Scene as WorkScene, Work
@@ -162,6 +164,8 @@ class LivingWorld:
         self.perf_monitor: PerfMonitor | None = None  # MANTELLA_LW_PERF=1 (see livingworld/perf)
         self.body_language = enabled and body_language_enabled()   # MANTELLA_LW_BODY_LANGUAGE=0 turns off
         self._body: dict[int, BodyLanguage] = {}    # id(store) -> body language for that world
+        self.intimacy = enabled and intimacy_enabled()   # OStim scenes (livingworld/intimacy); MANTELLA_LW_INTIMACY=0 off
+        self._scenes_now: list[intimate_scenes.SceneNow] = []   # scenes running near the player, from the game's snapshot
         LivingWorld.latest = self
 
     @classmethod
@@ -229,6 +233,9 @@ class LivingWorld:
         for marker in perf_markers:   # the game's own timing summaries go to the performance monitor only
             PERF.add_marker(marker)
         attire_raw = records_from_context(context_json, KEY_ATTIRE)
+        if self.intimacy and self.store is not None and isinstance(context_json, dict) \
+                and intimate_scenes.KEY_SCENE in context_json:
+            self._scenes_now = self._scene_snapshot(records_from_context(context_json, intimate_scenes.KEY_SCENE))
         body_raw = [r for r in raw if is_presence(r)]   # body language records never reach the event pipeline
         raw = [r for r in raw if not is_presence(r)]
         if body_raw and self.store is not None and self.body_language:
@@ -254,6 +261,22 @@ class LivingWorld:
             kinds["attire_snapshot"] = len(attire_raw)
         PERF.records_ingested(kinds, (time.perf_counter() - started) * 1000)
         return stored
+
+    def _scene_snapshot(self, scene_raw: list[str]) -> list[intimate_scenes.SceneNow]:
+        """OStim scenes running near the player right now (an empty list when the game says none are)."""
+        identities = IdentityRegistry(self.store)
+        records, ids = [], {}
+        for raw in scene_raw:
+            try:
+                record = parse_record(raw)
+            except (BadRecord, ValueError) as e:
+                logger.error(f"Living World: scene snapshot skipped ({e}): {raw[:200]}")
+                continue
+            records.append(record)
+            for actor in [record.actor, record.target, record.party] + [w.actor for w in record.witnesses]:
+                if actor is not None and actor.ref_id not in ids:
+                    ids[actor.ref_id] = identities.ensure_npc(actor.identity(), record.game_time)
+        return intimate_scenes.snapshot(records, ids)
 
     def _attire_snapshot(self, attire_raw: list[str], pipeline: PerceptionPipeline) -> dict[int, awareness.AttireNow]:
         records = []
@@ -299,6 +322,7 @@ class LivingWorld:
         self._context = context
         self._pending = True
         self._attire_now = {}
+        self._scenes_now = []
         self._moods_shown = {}
         self._moods_to_send = {}
         self._guard_sent = set()
@@ -787,6 +811,7 @@ class LivingWorld:
         """Extra keys for the conversation start reply."""
         keys: dict[str, Any] = {KEY_QUIET_CHATTER: True} if self.quiet_chatter else {}
         keys[KEY_BODY_ON] = bool(self.body_language)
+        keys[intimate_scenes.KEY_INTIMACY_ON] = bool(self.intimacy)
         if self.body_language and self.store is not None:
             self._body_for(self.store).forget_sent()   # the first NPC line sends every participant's profile again
         wanting = self._wants_a_word()
@@ -872,8 +897,10 @@ class LivingWorld:
 
     def _noticed(self, npc_id: int, name: str, now: float, present: dict[int, str]) -> list[str]:
         try:
+            scene_lines = intimate_scenes.lines_for(npc_id, name, self._scenes_now, present) if self.intimacy else []
             with self.store.transaction() as db:
-                return awareness.lines_for(db, npc_id, name, now, present, self._attire_now, hygiene=self.hygiene)
+                return scene_lines + awareness.lines_for(db, npc_id, name, now, present, self._attire_now,
+                                                         hygiene=self.hygiene)
         except Exception:
             self.errors += 1
             logger.exception("Living World: could not work out what an NPC notices; leaving it out")
