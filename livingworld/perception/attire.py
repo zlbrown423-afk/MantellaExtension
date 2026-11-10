@@ -193,13 +193,18 @@ class AttireTracker:
                 outcome.witnesses[npc_id] = seen.how
 
             drafts: dict[int, MemoryDraft] = {}
-            nude = is_nude(sex_of(db, actor_id, record.sex))
+            nude = record.player_size is not None or is_nude(sex_of(db, actor_id, record.sex))   # TNG: men are nude too
             if new_state and not self.pipeline._is_player(db, actor_id):
                 drafts[actor_id] = uncovered_for_self(record, [name for name, _ in seers.values()], nude)
             for npc_id, (_, seen) in new_seers.items():
                 if not self.pipeline._is_player(db, npc_id):
                     drafts[npc_id] = uncovered_for_witness(record, seen, self.pipeline._bond(db, npc_id, actor_id),
                                                            nude)
+                    if record.actor.is_player and sex_of(db, npc_id) == "female":
+                        from livingworld.intimacy import size as sizes
+                        size = sizes.from_scale(record.player_size) if sizes.size_enabled() else None
+                        if size is not None:
+                            drafts[npc_id].content += sizes.seen_memory(record.actor.name, size)
             for npc_id, draft in drafts.items():
                 intoxication.hazy(draft, intoxication.drink_state(db, npc_id, gt).stage)
                 about = [] if npc_id == actor_id else [actor_id]

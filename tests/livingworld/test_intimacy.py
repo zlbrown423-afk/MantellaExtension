@@ -216,3 +216,23 @@ def test_men_and_forced_scenes_get_no_size_line(tmp_path):
     talk(tmp_path, [actors.gerdur()], 3.53, events=[scene([PLAYER, actors.gerdur()], 3.525, forced=True, player_size=1.2)])
     db = open_db(tmp_path)
     assert all("inches" not in m["content"] for m in memories(db, "Hod") + memories(db, "Gerdur"))
+
+
+def test_outside_a_scene_she_remembers_his_size_and_may_bring_it_up(tmp_path):
+    talk(tmp_path, [actors.gerdur()], 3.4)
+    talk(tmp_path, [actors.gerdur()], 3.51, events=[scene([PLAYER, actors.gerdur()], 3.5, player_size=1.2)])
+    prompt, _ = talk(tmp_path, [actors.gerdur()], 4.2)     # the next day, dressed, an ordinary conversation
+    assert ("Gerdur has been intimate with Torvar and remembers his size: about 7.2 inches long and 5.7 inches"
+            " around, which she found impressive, and thick.") in prompt
+    hod_prompt, _ = talk(tmp_path, [actors.hod()], 4.3)
+    assert "remembers his size" not in hod_prompt
+
+
+def test_a_woman_who_sees_him_naked_notices_and_remembers(tmp_path):
+    talk(tmp_path, [actors.gerdur()], 3.4)
+    naked = attire(PLAYER, "none", 3.5, witnesses=[seen(actors.gerdur(), 3.0)]) + "|psize=0.8"
+    prompt, _ = talk(tmp_path, [actors.gerdur()], 3.5, events=[naked], snapshot=[naked])
+    assert "Torvar has no clothes or armor on, naked." in prompt
+    assert "Gerdur can see Torvar's manhood: about 4.8 inches long and 3.8 inches around. Gerdur finds it unimpressive, and thin" in prompt
+    db = open_db(tmp_path)
+    assert "He was about 4.8 inches long and 3.8 inches around; I found him unimpressive, and thin." in memories(db, "Gerdur")[-1]["content"]
