@@ -19,6 +19,9 @@ class LivingWorldMemory(Remembering):
 
     def get_prompt_text(self, characters, world_id: str) -> str:
         base = self.inner.get_prompt_text(characters, world_id)
+        hide = getattr(self.living_world, "fog_summary", None)
+        if hide is not None and base:
+            base = hide(characters, base) or base
         recalled = self.living_world.recall_text(characters, world_id) or ""
         return "\n\n".join(part for part in (base, recalled) if part)
 

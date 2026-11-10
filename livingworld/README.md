@@ -351,3 +351,20 @@ memories, so a run of grabs pushed every memory of what was said out of the prom
 
 `MANTELLA_LW_MEMORY_BOOST=0` turns the reply-length, retry, line-matching, recall and recap changes off. The
 reply mending stays on: it only keeps what the old code threw away.
+
+## Fog: names and places unknown until told
+
+On with `MANTELLA_LIVING_WORLD=1` and the matching Mantella-Spell build (`LivingWorldFog.psc`). Switch off with
+`set MANTELLA_LW_FOG=0` (the game then shows every name again). No extra AI call. Code in `livingworld/fog/`,
+tables in migration 012 (`name_known`, `place_known`, `npc.stranger_label`), all on the save timeline.
+
+| Part | Where | What it does |
+|---|---|---|
+| Strangers | game (`LivingWorldFog.psc`) | A named adult NPC the player has not met shows as "Nord woman" over the crosshair and in subtitles (`SetDisplayName`). Generic NPCs and children never change. Everything sent to the server uses the real name, so memory and actions still work |
+| Learning names | `fog/names.py`, `fog/service.py` | The player learns a name when the NPC says it in a line, when someone in the conversation names a person who is there, or when the player says it. An NPC learns the player's name when the player introduces themselves ("my name is", "call me Wolf": an alias is kept as what that NPC calls them), when someone present who knows it says it, or through gossip about the player |
+| Prompts | `integration.py` | Each NPC is told whether the player knows their name (introduce yourself when it fits) and whether they know the player's (never say it until told). Names learned mid-conversation reach the model as notes with the player's next line. Memories and Mantella summaries read "the stranger" for an NPC who was never told the player's name |
+| Hints | `social/hints.py`, `social/claims.py` | Overheard hints call people the player has not met "a Nord woman"; what an NPC heard about the player calls them "a stranger" until they know the name |
+| Places | `fog/places.py`, `fog/data/map_markers.json` | A place an NPC names gets its map marker added for the player (not visited), once per timeline. The list comes from the game's own masters via `fog/extract_map_markers.py`; names shared by several markers are left out |
+| Existing saves | migration 012 | Everyone the player already talked to through Mantella counts as met, both ways |
+
+An older game build sends no descriptions, and then nothing changes: no prompts about names, no hidden names.

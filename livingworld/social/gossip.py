@@ -17,6 +17,7 @@ import random
 import time
 from dataclasses import dataclass
 
+from livingworld.fog.service import gossip_carries_name
 from livingworld.social import acts, claims, reputation
 from livingworld.social.traits import traits_of
 
@@ -228,6 +229,9 @@ def _tell(db, timeline: int, location: str | None, teller: int, listener: int, c
                (event_id, teller, event_id, listener))
     claims.hear(db, timeline, listener, teller, dict(claim), claim["know_id"], claim["believed"], told, t,
                 event_id=event_id)
+    for subject in (claim["subject_id"], claim["object_id"]):   # fog: gossip about the player carries their name
+        if subject is not None:
+            gossip_carries_name(db, teller, listener, subject, t)
 
 
 def _corrections(db, timeline: int, location: str | None, witness: int, members: list[int],
