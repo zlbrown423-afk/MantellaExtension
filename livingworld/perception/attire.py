@@ -168,7 +168,8 @@ class AttireTracker:
                     " game_key, real_time, confidence) VALUES (?,?,?,?,?,?,?,?,?,?)",
                     (timeline, EVENT_TYPE, record.location, json.dumps([actor_id]),
                      json.dumps({"covered": covered, "cover": record.cover, "body": record.body,
-                                 "chosen": chosen(record), "nearby_but_unseen": unseen}),
+                                 "chosen": chosen(record), "scene": record.via == "scene",
+                                 "nearby_but_unseen": unseen}),
                      "game", gt, record.key, datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"), 1.0)
                 ).lastrowid
                 new_state = True
@@ -176,7 +177,8 @@ class AttireTracker:
                 event_id = previous.event_id                  # still undressed: add whoever newly sees it
                 new_state = False
             outcome = Outcome(event_id, duplicate=not new_state)
-            if covered:
+            if covered or record.via == "scene":
+                # clothes off for an intimate scene (OStim undressing): the scene's own memory covers it
                 return outcome
 
             already = {row[0] for row in db.execute("SELECT npc_id FROM event_witness WHERE event_id = ?", (event_id,))}
@@ -191,13 +193,18 @@ class AttireTracker:
                 outcome.witnesses[npc_id] = seen.how
 
             drafts: dict[int, MemoryDraft] = {}
-            nude = is_nude(sex_of(db, actor_id, record.sex))
+            nude = record.player_size is not None or is_nude(sex_of(db, actor_id, record.sex))   # TNG: men are nude too
             if new_state and not self.pipeline._is_player(db, actor_id):
                 drafts[actor_id] = uncovered_for_self(record, [name for name, _ in seers.values()], nude)
             for npc_id, (_, seen) in new_seers.items():
                 if not self.pipeline._is_player(db, npc_id):
                     drafts[npc_id] = uncovered_for_witness(record, seen, self.pipeline._bond(db, npc_id, actor_id),
                                                            nude)
+                    if record.actor.is_player and sex_of(db, npc_id) == "female":
+                        from livingworld.intimacy import size as sizes
+                        size = sizes.from_scale(record.player_size) if sizes.size_enabled() else None
+                        if size is not None:
+                            drafts[npc_id].content += sizes.seen_memory(record.actor.name, size)
             for npc_id, draft in drafts.items():
                 intoxication.hazy(draft, intoxication.drink_state(db, npc_id, gt).stage)
                 about = [] if npc_id == actor_id else [actor_id]

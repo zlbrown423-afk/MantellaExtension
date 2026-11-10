@@ -306,3 +306,24 @@ Mantella-Spell's `MantellaRepository.psc` holds the game side.
 | Loop guards | `bodylang/__init__.py`, `harness/bodysim.py` | NPCs never react to each other's body language; an NPC's own step back never counts as you leaving; cooldowns and a per-minute cap. `tests/livingworld/test_bodylang.py` checks a model of the game's rules settles |
 
 `MANTELLA_LW_BODY_LANGUAGE=0` turns all of it off (the game hears it with the conversation start reply).
+
+## Intimate scenes (OStim)
+
+NPCs know when an OStim scene is running, who is in it and what is happening in it (kissing, sex, spanking
+and so on, from OStim's own action types), and remember it afterwards as a scene. While the player is in a
+scene with someone, Mantella-Spell counts the player's hands on that partner (HIGGS grabs) and slaps on them
+into the scene instead of sending them as grabs and hits: no "pulls away" reaction, no guard, no grab or
+assault gossip, no drop in how decent or gentle they think the player is. Grabs and hits outside a scene, or
+on anyone who is not the player's partner in it, are handled exactly as before.
+
+| Piece | File | What it does |
+| --- | --- | --- |
+| Records | `perception/records.py` | `type=scene`: `via=end` once per finished scene, `via=now` in the `mantella_lw_scene` snapshot with every request |
+| Memories | `intimacy/scenes.py` | Each NPC in it remembers it as shared ("the grabbing and the slaps were part of it, not violence"); a little intimacy and affinity, never trust or attraction. Bystanders who saw it remember it, and the claim is `caught_with`, so a partner reacts as to an affair. Clothes coming off for it (`attire` with `via=scene`) make no "naked" memories |
+| Forced scenes | `intimacy/scenes.py` | A scene an animation pack tags `aggressive` is remembered by the person it was done to as being forced (large loss of trust); bystanders remember an assault (claim `forced`). Stock OStim has no such scenes |
+| Dialogue | `integration.py` | While a scene runs, each NPC in it is told what is going on and that touching, slaps and rough play are part of it (and that they can still say if something is too much); bystanders who can see it are told so |
+
+| The player's size | `intimacy/size.py` | When the player is a man with The New Gentleman, the game sends the scale TNG gives his genitals; women in the scene with him notice it (5 inches or less unimpressive, more impressive, and thin under 4.25 around or thick from 5.25) in the scene's prompt and remember it. `MANTELLA_LW_TNG_LENGTH_IN` (default 6.0) and `MANTELLA_LW_TNG_GIRTH_IN` (default 4.75) say what TNG's medium size measures with your BodySlide build |
+
+`MANTELLA_LW_INTIMACY=0` turns it off (the game hears it with the conversation start reply, and then sends
+grabs and hits as before). Children are never part of any of it.

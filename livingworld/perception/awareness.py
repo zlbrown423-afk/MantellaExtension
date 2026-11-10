@@ -34,6 +34,7 @@ class AttireNow:
     covered: bool
     seen_by: set[int] = field(default_factory=set)   # npc_ids who can see this person right now
     sex: str | None = None                            # as the game reported it, if it did
+    size: object | None = None                        # intimacy.size.Size: a man with The New Gentleman (the player)
 
 
 def snapshot(records: list[PerceptionRecord], ids: dict[int, int], witness_ids: dict[int, int]) -> dict[int, AttireNow]:
@@ -43,12 +44,14 @@ def snapshot(records: list[PerceptionRecord], ids: dict[int, int], witness_ids: 
         npc_id = ids[record.actor.ref_id]
         seen_by = {witness_ids[w.actor.ref_id] for w in record.witnesses
                    if w.actor.ref_id in witness_ids and formation.perceives(w) is not None}
-        result[npc_id] = AttireNow(npc_id, record.actor.name, record.cover != "none", seen_by, record.sex)
+        from livingworld.intimacy import size as sizes
+        size = sizes.from_scale(record.player_size) if record.actor.is_player else None
+        result[npc_id] = AttireNow(npc_id, record.actor.name, record.cover != "none", seen_by, record.sex, size)
     return result
 
 
 def _bare(db, person: AttireNow) -> str:
-    return bare_words(is_nude(sex_of(db, person.npc_id, person.sex)))
+    return bare_words(person.size is not None or is_nude(sex_of(db, person.npc_id, person.sex)))
 
 
 def lines_for(db, npc_id: int, name: str, now_gt: float, present: dict[int, str],
@@ -65,9 +68,20 @@ def lines_for(db, npc_id: int, name: str, now_gt: float, present: dict[int, str]
             continue
         if other_id in present or npc_id in other.seen_by:
             lines.append(f"{name} can see that {other.name} has no clothes or armor on, {_bare(db, other)}.")
+            if other.size is not None and sex_of(db, npc_id) == "female":
+                from livingworld.intimacy import size as sizes
+                lines.append(sizes.seen_line(name, other.name, other.size))
     noticed_clothing = bool(lines)
     if noticed_clothing:
         lines.append(NOTICING_UNCHANGED.format(name=name))
+
+    from livingworld.intimacy import size as sizes
+    if sizes.size_enabled():
+        for other_id, other_name in present.items():
+            if other_id != npc_id:
+                remembered = sizes.remembered_line(db, npc_id, name, other_id, other_name)
+                if remembered:
+                    lines.append(remembered)
 
     own = drink_state(db, npc_id, now_gt).prompt_line(name)
     if own:
