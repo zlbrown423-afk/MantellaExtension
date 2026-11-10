@@ -25,7 +25,7 @@ from livingworld import mood as moods
 from livingworld.bodylang import body_language_enabled
 from livingworld.bodylang.presence import is_presence
 from livingworld.bodylang.service import BodyLanguage
-from livingworld.dialogue import hearing
+from livingworld.dialogue import hearing, leads as player_leads
 from livingworld.dialogue import promises
 from livingworld import fog
 from livingworld.fog import places as fog_places, service as fog_names
@@ -168,6 +168,9 @@ class LivingWorld:
         self._watch_sent: tuple | None = None       # G2e: the watch plan last sent to the game this conversation
         self.keep_promises = enabled and promises.promises_enabled()   # NPCs do what they say (MANTELLA_LW_KEEP_PROMISES=0 turns off)
         self.hearing = enabled and hearing.hearing_enabled()   # catch misheard speech (MANTELLA_LW_HEARING=0 turns off)
+        self.leads = enabled and player_leads.leads_enabled()  # ask about a lead without its name (MANTELLA_LW_LEADS=0 turns off)
+        self._lead_ask: str | None = None           # the player's last line, while it asks after someone
+        self._lead_learned: set[str] = set()        # names learned from that line and its answers
         self.perf_monitor: PerfMonitor | None = None  # MANTELLA_LW_PERF=1 (see livingworld/perf)
         self.body_language = enabled and body_language_enabled()   # MANTELLA_LW_BODY_LANGUAGE=0 turns off
         self._body: dict[int, BodyLanguage] = {}    # id(store) -> body language for that world
@@ -350,6 +353,8 @@ class LivingWorld:
         self._player_said = None
         self._hints_to_send = []
         self._watch_sent = None
+        self._lead_ask = None
+        self._lead_learned = set()
 
     @_never_raises
     def conversation_started(self, world_id: str, context: Any) -> None:
@@ -393,6 +398,9 @@ class LivingWorld:
             # the schema refuses a line whose voice differs from the speaker's bound voice
             self.errors += 1
             logger.error(f"Living World: line by {speaker.name} not stored: {e}")
+        if self.leads and self._lead_ask:
+            skip = [c.name for c in context.npcs_in_conversation.get_all_characters()]
+            self._learn_leads(player_leads.from_reply(self._lead_ask, text, skip), context.game_days)
 
     @_never_raises
     def player_line(self, text: str, context: Any) -> None:
@@ -404,6 +412,13 @@ class LivingWorld:
         npc_id = self._npc_ids.get(player.ref_id) or self._register(player, context.game_days)
         ConversationLog(self.store).append(self.conv_id, npc_id, text.strip(), None, context.game_days)
         self._player_said = text.strip()
+        if self.leads:
+            self._lead_ask = None
+            self._lead_learned = set()
+            if hearing.is_question(text) and not player_leads.shortcut(text):
+                self._lead_ask = text.strip()
+                names = [c.name for c in context.npcs_in_conversation.get_all_characters() if not c.is_player_character]
+                self._learn_leads(player_leads.from_player(text, names), context.game_days)
         if self.hygiene_debug:
             self._hygiene_debug(text, npc_id, context)
         if self.guard:
@@ -517,15 +532,40 @@ class LivingWorld:
 
     @_never_raises
     def hearing_note(self, text: str, context: Any) -> str | None:
-        """A narration note naming likely misheard words in the player's line, or None."""
-        if not self.hearing or context is None:
+        """A narration note naming likely misheard words in the player's line, and who they mean by
+        "the man I'm looking for" (leads), or None."""
+        if context is None or not (self.hearing or self.leads):
             return None
         player = context.npcs_in_conversation.get_player_character()
+        player_name = player.name if player else "The player"
         names = [c.name for c in context.npcs_in_conversation.get_all_characters() if not c.is_player_character]
-        note = hearing.note_text(text, names, player.name if player else "The player")
+        current = self._current_leads() if self.leads else []
+        notes = []
+        if self.hearing:
+            notes.append(hearing.note_text(text, names, player_name, [l.name for l in current]))
+        if self.leads:
+            notes.append(player_leads.shortcut_note(text, current, player_name))
+        note = " ".join(n for n in notes if n) or None
         if note:
             logger.log(23, f"Living World: {note}")
         return note
+
+    def _current_leads(self) -> list[player_leads.Lead]:
+        if self.store is None:
+            return []
+        with self.store.reading() as db:
+            return player_leads.current(db)
+
+    def _learn_leads(self, learned: list[player_leads.Learned], game_time: float) -> None:
+        fresh = [l for l in learned if l.name.lower() not in self._lead_learned]
+        if not fresh or self.store is None:
+            return
+        with self.store.transaction() as db:
+            for lead in fresh:
+                player_leads.remember(db, lead, game_time, self.conv_id)
+                self._lead_learned.add(lead.name.lower())
+                heard = f' (heard as "{lead.heard_as}")' if lead.heard_as else ""
+                logger.log(23, f"Living World: new lead, {lead.kind} '{lead.name}'{heard}")
 
     def _social_for(self, store: WorldStore) -> SocialWorld:
         if id(store) not in self._social:

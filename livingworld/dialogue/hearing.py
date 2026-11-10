@@ -116,21 +116,32 @@ def prompt_lines(npc_names: Iterable[str], player_name: str) -> list[str]:
     ]
 
 
-def notes(text: str, names: Iterable[str] = ()) -> list[str]:
-    """Likely mishearings in one player line, as short '"heard" may be "meant"' notes. Empty when none."""
+def notes(text: str, names: Iterable[str] = (), leads: Iterable[str] = ()) -> list[str]:
+    """Likely mishearings in one player line, as short '"heard" may be "meant"' notes. Empty when none.
+
+    ``leads`` are the names the player has been asking around about (``leads.py``): in a question they
+    are matched more loosely than the names of the people in the scene ("vault" for "Vald")."""
+    return [f'"{heard}" may be "{meant}"' for heard, meant, _ in matches(text, names, leads)]
+
+
+def matches(text: str, names: Iterable[str] = (), leads: Iterable[str] = ()) -> list[tuple[str, str, str]]:
+    """(heard, meant, bare name) for each likely mishearing in one player line. ``meant`` keeps any
+    context word the pattern needed ("named Vald"); the bare name is just the word or name ("Vald")."""
     if not text or not text.strip():
         return []
-    found: list[tuple[str, str]] = []
+    found: list[tuple[str, str, str]] = []
     seen_spans: list[tuple[int, int]] = []
     for pattern, meant in _COMPILED:
         for m in pattern.finditer(text):
             heard = m.group(0).strip()
+            bare = meant
             if meant == "thane of ...":
                 hold = re.split(r"\s+of\s+", heard, maxsplit=1, flags=re.IGNORECASE)[1]
                 meant_here = f"thane of {_hold_name(hold)}"
             elif meant.startswith("... "):
                 # the pattern needs the word before the name for context; keep that word as heard
-                meant_here = heard.rsplit(None, 1)[0] + " " + meant[4:]
+                bare = meant[4:]
+                meant_here = heard.rsplit(None, 1)[0] + " " + bare
             else:
                 meant_here = meant
             if _norm(heard) == _norm(meant_here):
@@ -138,14 +149,17 @@ def notes(text: str, names: Iterable[str] = ()) -> list[str]:
             if any(m.start() < e and s < m.end() for s, e in seen_spans):
                 continue
             seen_spans.append((m.start(), m.end()))
-            found.append((heard, meant_here))
-    found.extend(_name_near_misses(text, names, seen_spans))
-    return [f'"{heard}" may be "{meant}"' for heard, meant in found]
+            found.append((heard, meant_here, bare))
+    found.extend((h, n, n) for h, n in _name_near_misses(text, names, seen_spans))
+    lead_names = [n for n in leads if n]
+    if lead_names and is_question(text):
+        found.extend((h, n, n) for h, n in _lead_near_misses(text, lead_names, seen_spans))
+    return found
 
 
-def note_text(text: str, names: Iterable[str], player_name: str) -> str | None:
+def note_text(text: str, names: Iterable[str], player_name: str, leads: Iterable[str] = ()) -> str | None:
     """One narration line for the player's message, or None."""
-    found = notes(text, names)
+    found = notes(text, names, leads)
     if not found:
         return None
     return f"{player_name}'s words were hard to make out; possibly misheard: " + "; ".join(found) + "."
@@ -190,3 +204,65 @@ def _name_near_misses(text: str, names: Iterable[str], taken: list[tuple[int, in
         if close:
             out.append((m.group(0), first_names[close[0]]))
     return out
+
+
+_QUESTION = re.compile(
+    r"\?|\b(?:where|who|whereabouts|seen|heard|know|knows|find|found|looking|searching|after|about|hunting|tell\s+me)\b",
+    re.IGNORECASE)
+
+
+def is_question(text: str) -> bool:
+    """The line asks after someone or something (a question mark, or words like where, seen, looking for)."""
+    return bool(_QUESTION.search(text or ""))
+
+
+def sounds_alike(heard: str, name: str, cutoff: float = 0.6) -> bool:
+    """A loose match for names: close spelling and the same first sound ("vault"/"Vald", "pond pron"/"Pawned
+    Prawn"). Words are compared with their spaces and punctuation taken out."""
+    a, b = _norm(heard), _norm(name)
+    if len(a) < 3 or len(b) < 3 or a == b:
+        return False
+    if _first_sound(a) != _first_sound(b):
+        return False
+    return difflib.SequenceMatcher(None, a, b).ratio() >= cutoff
+
+
+def _first_sound(word: str) -> str:
+    if word.startswith("ph"):
+        return "f"
+    return {"w": "v", "k": "c", "q": "c", "z": "s"}.get(word[0], word[0])
+
+
+def _lead_near_misses(text: str, leads: list[str], taken: list[tuple[int, int]]) -> list[tuple[str, str]]:
+    """Words (or two or three words together) that sound like a lead the player has been asking about."""
+    words = list(re.finditer(r"[A-Za-z']+", text))
+    out: list[tuple[str, str]] = []
+    for lead in leads:
+        span = len(re.findall(r"[A-Za-z']+", lead))
+        if any(_norm(w.group(0)) == _norm(lead) for w in words) or _norm(lead) in _norm(text):
+            continue   # said right somewhere in the line
+        best = None
+        for size in sorted({max(1, span - 1), span, span + 1}):
+            for i in range(len(words) - size + 1):
+                start, end = words[i].start(), words[i + size - 1].end()
+                heard = text[start:end]
+                if size == 1 and heard.lower().strip("'") in _COMMON_SHORT:
+                    continue
+                if any(start < e and s < end for s, e in taken):
+                    continue
+                if sounds_alike(heard, lead, 0.65):
+                    score = difflib.SequenceMatcher(None, _norm(heard), _norm(lead)).ratio()
+                    if best is None or score > best[0]:
+                        best = (score, heard, start, end)
+        if best:
+            taken.append((best[2], best[3]))
+            out.append((best[1], lead))
+    return out
+
+
+# Short everyday words that should never be read as a lead's name, even in a question
+_COMMON_SHORT = _COMMON | {
+    "you", "him", "her", "his", "she", "he's", "she's", "the", "and", "for", "from", "have", "has", "had",
+    "seen", "know", "find", "where", "who", "whom", "looking", "after", "about", "tell", "heard", "anyone",
+    "someone", "somebody", "man", "woman", "fellow", "person", "place", "thing", "lead", "please", "any",
+}
