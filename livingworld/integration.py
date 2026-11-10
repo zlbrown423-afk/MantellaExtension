@@ -33,6 +33,7 @@ from livingworld.social.world import SocialWorld
 from livingworld.work import tasks_enabled
 from livingworld.guard import guard_debug_enabled, guard_enabled
 from livingworld.intimacy import intimacy_enabled
+from livingworld.store.minors import is_child
 from livingworld.intimacy import scenes as intimate_scenes
 from livingworld.guard.profiles import GuardFacts
 from livingworld.guard.service import ACTIONS as GUARD_ACTIONS, ENLIST as GUARD_ENLIST, Guard, Scene as GuardScene
@@ -814,6 +815,9 @@ class LivingWorld:
         keys: dict[str, Any] = {KEY_QUIET_CHATTER: True} if self.quiet_chatter else {}
         keys[KEY_BODY_ON] = bool(self.body_language)
         keys[intimate_scenes.KEY_INTIMACY_ON] = bool(self.intimacy)
+        if self.intimacy:
+            from livingworld.intimacy import arousal
+            keys[arousal.KEY_AROUSAL_KEY] = arousal.arousal_key()
         if self.body_language and self.store is not None:
             self._body_for(self.store).forget_sent()   # the first NPC line sends every participant's profile again
         wanting = self._wants_a_word()
@@ -903,8 +907,15 @@ class LivingWorld:
                 scene_lines = []
                 if self.intimacy and self._scenes_now:
                     from livingworld.perception.attire import sex_of
+                    from livingworld.intimacy.common import partners_of
                     scene_lines = intimate_scenes.lines_for(npc_id, name, self._scenes_now, present,
-                                                            is_woman=sex_of(db, npc_id) == "female")
+                                                            is_woman=sex_of(db, npc_id) == "female",
+                                                            partners=partners_of(db, npc_id, self._scenes_now))
+                if self.intimacy and not is_child(db, npc_id):
+                    from livingworld.intimacy import arousal, climax
+                    with_player = any(npc_id in s.people and s.player_id is not None for s in self._scenes_now)
+                    scene_lines += arousal.lines_for(db, npc_id, name, present, self._attire_now, with_player)
+                    scene_lines += climax.lines_for(db, npc_id, name, now, present, self._attire_now)
                 return scene_lines + awareness.lines_for(db, npc_id, name, now, present, self._attire_now,
                                                          hygiene=self.hygiene)
         except Exception:
