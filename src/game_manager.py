@@ -62,6 +62,13 @@ class GameStateManager:
         self.__rememberer: Remembering = self.__living_world.wrap_memory(Summaries(game, config, client, language_info['language'], summary_client)) # LIVINGWORLD PATCH
 
 
+    def living_world_diary_read(self, input_json: dict[str, Any]) -> dict[str, Any]: # LIVINGWORLD PATCH: the game opened an NPC's diary
+        from livingworld import diary # LIVINGWORLD PATCH
+        world_id = input_json.get(diary.KEY_WORLD_ID) # LIVINGWORLD PATCH
+        if world_id: # LIVINGWORLD PATCH
+            input_json = {**input_json, diary.KEY_WORLD_ID: self.WORLD_ID_CLEANSE_REGEX.sub("", str(world_id))} # LIVINGWORLD PATCH
+        return self.__living_world.diary_read(input_json) # LIVINGWORLD PATCH
+
     @utils.time_it
     def start_conversation(self, input_json: dict[str, Any]) -> dict[str, Any]:
         if self.__talk: #This should only happen if game and server are out of sync due to some previous error -> close conversation and start a new one

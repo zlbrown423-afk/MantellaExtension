@@ -291,14 +291,14 @@ after a test hold.
 
 | File | Change |
 | --- | --- |
-| `src/http/routes/mantella_route.py` | Optional traffic recording (does nothing unless `MANTELLA_RECORD_TRAFFIC` is set); request timing for the performance monitor |
+| `src/http/routes/mantella_route.py` | Optional traffic recording (does nothing unless `MANTELLA_RECORD_TRAFFIC` is set); request timing for the performance monitor; the diary read request, answered outside the conversation lock |
 | `src/llm/client_base.py` | Counts LLM calls waiting or in flight for the performance monitor |
 | `src/actions/function_manager.py` | Also loads `livingworld/actions/*.json` (does nothing unless `MANTELLA_LIVING_WORLD` is set) |
 | `tests/conftest.py` | Registers the `baseline_behaviour` test marker |
 | `src/output_manager.py` | Hands each turn to the Living World when it is on (group turns), refuses synthesis in the wrong voice, keeps the "generating" flag up across a multi-speaker turn, and cuts mood tags out of the streamed reply |
 | `src/conversation/context.py` | `focused_on(character)`: a copy of the context holding only the player and one NPC, for building that NPC's own prompt |
 | `src/actions/function_manager.py` | Skips actions marked `living_world` unless `MANTELLA_LIVING_WORLD` is set |
-| `src/game_manager.py` | Calls the Living World hooks at conversation start, on each request's context (perception records), each spoken line (plus its mood meter), player input, actor changes and conversation end, adds the quiet-chatter key to the start reply, and wraps Mantella's memory with the recall (does nothing unless `MANTELLA_LIVING_WORLD` is set) |
+| `src/game_manager.py` | Calls the Living World hooks at conversation start, on each request's context (perception records), each spoken line (plus its mood meter), player input, actor changes and conversation end, adds the quiet-chatter key to the start reply, answers the game's diary read request, and wraps Mantella's memory with the recall (does nothing unless `MANTELLA_LIVING_WORLD` is set) |
 
 ## Body language, step 1 (BL1): proximity and gaze
 
@@ -392,3 +392,18 @@ tables in migration 012 (`name_known`, `place_known`, `npc.stranger_label`), all
 | Existing saves | migration 012 | Everyone the player already talked to through Mantella counts as met, both ways |
 
 An older game build sends no descriptions, and then nothing changes: no prompts about names, no hidden names.
+
+## Diaries
+
+People the player spends time with keep a private diary the player can find and read in the game. On with
+`MANTELLA_LIVING_WORLD=1`; switch off with `set MANTELLA_LW_DIARY=0`. The book itself is the LWDiary companion
+plugin (Mantella-Spell `Tools/LWDiary`) plus two small hooks in `MantellaConversation.psc`. Code in
+`livingworld/diary/`, tables in migration 013 (`diary_entry`, `diary_read`), all on the save timeline.
+
+| Part | Where | What it does |
+|---|---|---|
+| Who | `diary/service.py` | Any adult NPC who was in at least `MANTELLA_LW_DIARY_MIN_TALKS` (default 5) conversations with the player. Children never. The start reply lists the participants who keep one (`mantella_lw_diary_ref_ids`, `_npc_ids`, `_titles`); the game gives each a book "Gerdur's Diary" (with fog on and the name unknown: "Nord woman's Diary") |
+| Writing | `diary/service.py`, job `diary_entry` | After a conversation, each keeper in it (re)writes that day's entry with the background model, from their own memories of the day, what they were told, and how they feel about the player. The first entry looks back over the most important memories so far. A day is rewritten only when there are new memories, at most `MANTELLA_LW_DIARY_REWRITES` (default 3) times. One short call (JSON reply) per entry |
+| Prompt | `integration.py` | A keeper knows they keep a diary and would be upset if it were read |
+| Reading | `src/http/routes/mantella_route.py` | The game's request `mantella_lw_diary_read` (outside any conversation, not behind the conversation lock) gets the newest six days as pages, newest first. It never answers with an error reply |
+| Caught | `diary/service.py` | If the owner saw the player reading it: a memory ("I caught Torvar reading my diary"), trust -0.25, liking -0.15, suspicion +0.25. Others the game saw watching: a memory and a little suspicion. Stored as a `diary.read` world event |

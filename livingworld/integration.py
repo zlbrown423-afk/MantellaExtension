@@ -28,6 +28,8 @@ from livingworld.bodylang.service import BodyLanguage
 from livingworld.dialogue import hearing, leads as player_leads
 from livingworld.dialogue import promises
 from livingworld import fog
+from livingworld import diary
+from livingworld.diary import service as diaries
 from livingworld.fog import places as fog_places, service as fog_names
 from livingworld.perception import awareness
 from livingworld.perception.intoxication import drink_state
@@ -54,6 +56,7 @@ from livingworld.store.timeline import resolve_load
 from livingworld.store.identity import ActorIdentity, FormId, IdentityRegistry, VoiceBindingConflict
 from livingworld.store.world_store import WorldStore
 from src import utils
+from src.http.communication_constants import communication_constants as comm_consts
 
 logger = utils.get_logger()
 
@@ -187,6 +190,9 @@ class LivingWorld:
         self._fog_reveal: list[str] = []            # real names the player learned, for the next NPC line
         self._fog_notes: list[str] = []             # names learned since the player last spoke, for the dialogue model
         self._fog_game = False                      # the game build hides names (it sends the player's fog label)
+        self.diary = enabled and diary.diary_enabled()   # private diaries (livingworld/diary); MANTELLA_LW_DIARY=0 off
+        self._ref_raw: dict[str, int] = {}          # Mantella's 6-digit ref id -> the form ID exactly as the game sent it
+        self._bios: dict[int, str] = {}             # npc_id -> Mantella bio, for the diary writer
         LivingWorld.latest = self
 
     @classmethod
@@ -240,6 +246,10 @@ class LivingWorld:
         for actor_json in actor_jsons or []:
             identity = ActorIdentity.from_actor_json(actor_json)
             self._identities[identity.ref.mantella_id] = identity
+            try:
+                self._ref_raw[identity.ref.mantella_id] = int(actor_json[comm_consts.KEY_ACTOR_REFID])
+            except (KeyError, TypeError, ValueError):
+                pass
             if self.guard and KEY_IS_GUARD in actor_json:
                 faction = actor_json.get(KEY_CRIME_FACTION)
                 bounty = actor_json.get(KEY_PLAYER_BOUNTY)
@@ -519,6 +529,13 @@ class LivingWorld:
             work = self._work_lines(npc_id, character.name, scene)
             if work:
                 blocks.append(f"Work on {character.name}'s mind:\n" + "\n".join(f"- {line}" for line in work))
+            if self.diary:
+                with store.reading() as db:
+                    keeps_diary = diaries.is_keeper(db, npc_id, player_id)
+                if keeps_diary:
+                    blocks.append(f"{character.name} keeps a private diary and writes in it most evenings, about "
+                                  f"their days and the people in them. They carry it or leave it at home, and "
+                                  f"would be upset to find anyone had read it.")
             guard = self._guard_lines(npc_id, character.name)
             if guard:
                 blocks.append(f"The guard, and {character.name}:\n" + "\n".join(f"- {line}" for line in guard))
@@ -924,7 +941,101 @@ class LivingWorld:
                 logger.exception("Living World: could not list the people the player knows; carrying on")
         self._fog_reveal = []
         self._fog_notes = []
+        keys.update(self._diary_keys())
         return keys
+
+    # ---- diaries (livingworld/diary) ----
+    def _diary_keepers(self) -> list[tuple[Any, int]]:
+        """(character, npc_id) for each participant who keeps a diary now."""
+        if not self.diary or self.store is None or self._context is None:
+            return []
+        out = []
+        with self.store.reading() as db:
+            player = diaries.player_id(db)
+            for c in self._context.npcs_in_conversation.get_all_characters():
+                if c.is_player_character:
+                    continue
+                npc_id = self._npc_ids.get(c.ref_id)
+                if npc_id is not None and diaries.is_keeper(db, npc_id, player):
+                    out.append((c, npc_id))
+        return out
+
+    def _diary_keys(self) -> dict[str, Any]:
+        keys: dict[str, Any] = {diary.KEY_DIARY_ON: bool(self.diary)}
+        if not self.diary:
+            return keys
+        try:
+            refs, ids, titles = [], [], []
+            keepers = self._diary_keepers()
+            with self.store.reading() as db:
+                player = diaries.player_id(db)
+                for character, npc_id in keepers:
+                    raw = self._ref_raw.get(character.ref_id)
+                    if raw is None:
+                        continue
+                    refs.append(raw)
+                    ids.append(npc_id)
+                    titles.append(diaries.title(db, npc_id, player, self._fog_active()))
+            if refs:
+                keys[diary.KEY_DIARY_REF_IDS] = refs
+                keys[diary.KEY_DIARY_NPC_IDS] = ids
+                keys[diary.KEY_DIARY_TITLES] = titles
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not list the diary keepers; carrying on")
+        return keys
+
+    def _queue_diaries(self, game_days: float) -> None:
+        """After a conversation: each keeper in it writes (or rewrites) the day's entry, after the extraction
+        job has stored this conversation's memories (jobs run in the order queued)."""
+        with self.store.reading() as db:
+            player = diaries.player_id(db)
+            people = [r[0] for r in db.execute("SELECT npc_id FROM participant WHERE conv_id = ?", (self.conv_id,))]
+            keepers = [n for n in people if diaries.is_keeper(db, n, player)]
+        queue = JobQueue(self.store)
+        for npc_id in keepers:
+            queue.enqueue(diary.JOB, {"npc_id": npc_id, "player_id": player, "conv_id": self.conv_id,
+                                      "day": int(game_days), "game_days": game_days,
+                                      "bio": self._bios.get(npc_id)},
+                          f"diary:conv:{self.conv_id}:{npc_id}")
+
+    def diary_read(self, request: dict[str, Any]) -> dict[str, Any]:
+        """The game opened a diary: the pages to show, and who (if anyone) caught the player reading it.
+        Never answers with an error reply (the game would end a running conversation on one)."""
+        reply: dict[str, Any] = {comm_consts.KEY_REPLYTYPE: diary.REPLY_READ, diary.KEY_PAGES: [],
+                                 diary.KEY_TITLE: "Diary"}
+        if not self.diary:
+            reply[diary.KEY_PAGES] = ["The pages are blank."]
+            return reply
+        try:
+            world_id = str(request.get(diary.KEY_WORLD_ID) or "")
+            store = self._store_for(world_id) if world_id else self.store
+            if store is None:
+                reply[diary.KEY_PAGES] = ["The handwriting is too cramped to make out."]
+                return reply
+            owner = int(request.get(diary.KEY_OWNER_NPC_ID) or 0)
+            with store.reading() as db:
+                player = diaries.player_id(db)
+                known = db.execute("SELECT 1 FROM npc WHERE npc_id = ? AND is_player = 0", (owner,)).fetchone()
+                if not known or player is None:
+                    reply[diary.KEY_PAGES] = ["The handwriting is too cramped to make out."]
+                    return reply
+                reply[diary.KEY_TITLE] = diaries.title(db, owner, player, self._fog_active())
+                reply[diary.KEY_PAGES] = diaries.pages(db, owner) or [
+                    "Only a few lines so far, crossed out and written over. Nothing you can make out."]
+            game_time = request.get(diary.KEY_GAME_DAYS)
+            if game_time is None:
+                game_time = store.scalar("SELECT MAX(game_time) FROM utterance") or 0.0
+            diaries.record_read(store, owner, player, bool(request.get(diary.KEY_SEEN_BY_OWNER)),
+                                list(request.get(diary.KEY_WITNESS_REF_IDS) or []),
+                                list(request.get(diary.KEY_WITNESS_NAMES) or []),
+                                request.get(diary.KEY_LOCATION) or None, float(game_time))
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not open the diary; carrying on")
+            if not reply[diary.KEY_PAGES]:
+                reply[diary.KEY_PAGES] = ["The handwriting is too cramped to make out."]
+        return reply
 
     # ---- fog: names and places unknown until told (livingworld/fog) ----
     def _fog_active(self) -> bool:
@@ -1225,6 +1336,11 @@ class LivingWorld:
         return self._stores[world_id]
 
     def _run_job(self, store: WorldStore, kind: str, payload: dict[str, Any]) -> None:
+        if kind == diary.JOB:
+            if self.complete is None:
+                raise RuntimeError("no LLM attached for the diary")
+            diaries.write_entry(store, self.complete, payload)
+            return
         if kind != EXTRACT_JOB:
             raise ValueError(f"unknown job kind {kind}")
         if self.complete is None:
@@ -1248,6 +1364,12 @@ class LivingWorld:
         logger.log(23, f"Living World: conversation {self.conv_id} closed at game day {game_days:.2f}")
         if self.store.scalar("SELECT COUNT(*) FROM utterance WHERE conv_id = ?", (self.conv_id,)):
             JobQueue(self.store).enqueue(EXTRACT_JOB, {"conv_id": self.conv_id}, f"extract:conv:{self.conv_id}")
+            if self.diary:
+                try:
+                    self._queue_diaries(game_days)
+                except Exception:
+                    self.errors += 1
+                    logger.exception("Living World: could not queue the diary entries; carrying on")
             for world_id, store in self._stores.items():
                 if store is self.store:
                     self._workers[world_id].notify()
@@ -1286,6 +1408,7 @@ class LivingWorld:
             with self.store.transaction() as db:
                 fog_names.set_label(db, npc_id, self._fog_labels[character.ref_id])
         if not character.is_player_character and getattr(character, "bio", None):
+            self._bios[npc_id] = str(character.bio)
             try:
                 with self.store.transaction() as db:
                     seed_traits_from_bio(db, npc_id, character.bio, game_time)
