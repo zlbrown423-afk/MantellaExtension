@@ -27,6 +27,8 @@ from livingworld.bodylang.presence import is_presence
 from livingworld.bodylang.service import BodyLanguage
 from livingworld.dialogue import hearing, leads as player_leads
 from livingworld.dialogue import promises
+from livingworld import fog
+from livingworld.fog import places as fog_places, service as fog_names
 from livingworld.perception import awareness
 from livingworld.perception.intoxication import drink_state
 from livingworld.perception.pipeline import PerceptionPipeline
@@ -174,6 +176,11 @@ class LivingWorld:
         self._body: dict[int, BodyLanguage] = {}    # id(store) -> body language for that world
         self.intimacy = enabled and intimacy_enabled()   # OStim scenes (livingworld/intimacy); MANTELLA_LW_INTIMACY=0 off
         self._scenes_now: list[intimate_scenes.SceneNow] = []   # scenes running near the player, from the game's snapshot
+        self.fog = enabled and fog.fog_enabled()    # names and places unknown until told (livingworld/fog); MANTELLA_LW_FOG=0 off
+        self._fog_labels: dict[str, str | None] = {}   # Mantella's 6-digit ref id -> what the game shows while unknown
+        self._fog_reveal: list[str] = []            # real names the player learned, for the next NPC line
+        self._fog_notes: list[str] = []             # names learned since the player last spoke, for the dialogue model
+        self._fog_game = False                      # the game build hides names (it sends the player's fog label)
         LivingWorld.latest = self
 
     @classmethod
@@ -234,6 +241,10 @@ class LivingWorld:
                     bool(actor_json.get(KEY_IS_GUARD)), actor_json.get(KEY_CRIME_PLUGIN) or None,
                     f"0x{int(faction) & 0xFFFFFF:08X}" if faction else None,
                     int(bounty) if bounty is not None else None)
+            if fog.KEY_FOG_LABEL in actor_json:
+                if identity.is_player:
+                    self._fog_game = True
+                self._fog_labels[identity.ref.mantella_id] = str(actor_json.get(fog.KEY_FOG_LABEL) or "").strip() or None
 
     @_never_raises
     def perceived(self, context_json: dict[str, Any] | None) -> int:
@@ -476,8 +487,17 @@ class LivingWorld:
             self._rehearsed.add(key)
             self._last_recall[npc_id] = (recall.know_ids, recall.mem_ids)
             text = recall.text()
+            fog_lines: list[str] = []
+            if self._fog_active() and player is not None and player_id is not None:
+                player_p = fog_names.Person(player_id, player.name)
+                me = self._fog_person(character)
+                with store.reading() as db:
+                    text = fog_names.hide_player_name(db, npc_id, player_p, text)
+                    fog_lines = fog_names.prompt_lines(db, me, player_p)
             if text:
                 blocks.append(text)
+            if fog_lines:
+                blocks.append(f"Names, for {character.name}:\n" + "\n".join(f"- {line}" for line in fog_lines))
             noticed = self._noticed(npc_id, character.name, now, present)
             if noticed:
                 blocks.append(f"What {character.name} notices right now:\n" + "\n".join(f"- {line}" for line in noticed))
@@ -776,6 +796,12 @@ class LivingWorld:
         text = self._moods_to_send.pop(speaker.ref_id, None)
         if text:
             keys[KEY_MOOD] = text
+        if self._fog_active() and self.store is not None and self.conv_id is not None:
+            try:
+                keys.update(self._fog_line_keys(sentence))
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not check an NPC line for names and places; carrying on")
         profiles = self._body_profiles()
         if profiles:
             keys[KEY_BODY] = profiles
@@ -870,6 +896,98 @@ class LivingWorld:
         wanting = self._wants_a_word()
         if wanting:
             keys[KEY_WANTS_A_WORD] = wanting
+        keys[fog.KEY_FOG_ON] = bool(self.fog)
+        if self.fog and self.store is not None:
+            try:
+                with self.store.reading() as db:
+                    player = fog_names.player_id(db)
+                    keys[fog.KEY_FOG_KNOWN] = fog_names.known_to_player(db, player) if player is not None else []
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not list the people the player knows; carrying on")
+        self._fog_reveal = []
+        self._fog_notes = []
+        return keys
+
+    # ---- fog: names and places unknown until told (livingworld/fog) ----
+    def _fog_active(self) -> bool:
+        """Fog is on and the game build takes part (an older game build shows every name, so the NPCs are not
+        told to pretend otherwise)."""
+        return bool(self.fog and self._fog_game)
+
+    @_never_raises
+    def fog_summary(self, characters: list[Any], text: str) -> str:
+        """Mantella's own summaries name the player; when none of the NPCs here was told that name, they read
+        'the stranger' instead."""
+        if not self._fog_active() or self.store is None or self._context is None or not text:
+            return text
+        player = self._context.npcs_in_conversation.get_player_character()
+        if player is None:
+            return text
+        player_id = self._npc_ids.get(player.ref_id) or self._register(player, self._context.game_days)
+        player_p = fog_names.Person(player_id, player.name)
+        npcs = [self._npc_ids.get(c.ref_id) or self._register(c, self._context.game_days)
+                for c in characters if not c.is_player_character]
+        with self.store.reading() as db:
+            if not npcs or any(fog_names.known_name(db, n, player_id) is not None for n in npcs):
+                return text
+            return fog_names.hide_player_name(db, npcs[0], player_p, text)
+
+    def _fog_person(self, character: Any) -> "fog_names.Person":
+        """Registers the character if need be, so call it outside a transaction."""
+        npc_id = self._npc_ids.get(character.ref_id) or self._register(character, self._context.game_days)
+        label = self.store.scalar("SELECT stranger_label FROM npc WHERE npc_id = ?", (npc_id,))
+        return fog_names.Person(npc_id, character.name, label)
+
+    def _fog_people(self, context: Any) -> tuple["fog_names.Person", list["fog_names.Person"]]:
+        player = context.npcs_in_conversation.get_player_character()
+        people = [self._fog_person(c) for c in context.npcs_in_conversation.get_all_characters()]
+        player_p = next(p for p in people if player is not None and p.npc_id == self._npc_ids.get(player.ref_id))
+        return player_p, people
+
+    def _fog_note(self, learned: "fog_names.Learned") -> None:
+        for line in learned.log:
+            logger.log(23, f"Living World fog: {line}")
+        self._fog_reveal += [n for n in learned.player_learned if n not in self._fog_reveal]
+        self._fog_notes += [n for n in learned.notes if n not in self._fog_notes]
+
+    @_never_raises
+    def fog_notes(self, text: str, context: Any) -> list[str]:
+        """Notes for the dialogue model with the player's line: names learned since the last one, the player's
+        own introduction included. The system prompt is written once per conversation, so this is how a name
+        learned mid-conversation reaches it."""
+        if not self._fog_active() or self.conv_id is None or context is not self._context:
+            return []
+        if text and text.strip():
+            player_p, present = self._fog_people(context)
+            with self.store.transaction() as db:
+                self._fog_note(fog_names.player_line(db, player_p, text.strip(), present, context.game_days,
+                                                     self.conv_id))
+        notes, self._fog_notes = self._fog_notes, []
+        return notes
+
+    def _fog_line_keys(self, sentence: Any) -> dict[str, Any]:
+        """Names and places said in this NPC line: the player learns them as the line is spoken."""
+        context = self._context
+        text = (sentence.text or "").strip()
+        keys: dict[str, Any] = {}
+        if text and context is not None and context.npcs_in_conversation.get_player_character() is not None:
+            player_p, present = self._fog_people(context)
+            with self.store.transaction() as db:
+                speaker = next((p for p in present if p.npc_id == self._npc_ids.get(sentence.speaker.ref_id)), None)
+                if speaker is not None:
+                    self._fog_note(fog_names.npc_line(db, speaker, text, present, player_p, context.game_days,
+                                                      self.conv_id))
+                    markers = fog_places.npc_line(db, text, speaker.npc_id, context.game_days, self.conv_id)
+                    if markers:
+                        keys[fog.KEY_FOG_MARKER_IDS] = [m.form_int for m in markers]
+                        keys[fog.KEY_FOG_MARKER_PLUGINS] = [m.plugin for m in markers]
+                        keys[fog.KEY_FOG_MARKER_NAMES] = [m.name for m in markers]
+                        logger.log(23, f"Living World fog: {speaker.name} told the player about "
+                                       + ", ".join(m.name for m in markers))
+        if self._fog_reveal:
+            keys[fog.KEY_FOG_REVEAL] = self._fog_reveal
+            self._fog_reveal = []
         return keys
 
     def _wants_a_word(self) -> str:
@@ -1112,6 +1230,9 @@ class LivingWorld:
             npc_id = self._npc_ids.get(character.ref_id) or self._register(character, context.game_days)
             now_present.add(npc_id)
             log.add_participant(self.conv_id, npc_id)
+            if character.ref_id in self._fog_labels:
+                with self.store.transaction() as db:
+                    fog_names.set_label(db, npc_id, self._fog_labels[character.ref_id])
         for npc_id in self._present - now_present:
             log.mark_left(self.conv_id, npc_id)
         self._present = now_present
@@ -1130,6 +1251,9 @@ class LivingWorld:
                 self.errors += 1
                 logger.error(f"Living World: {character.name}: {e}")
         self._npc_ids[character.ref_id] = npc_id
+        if character.ref_id in self._fog_labels:
+            with self.store.transaction() as db:
+                fog_names.set_label(db, npc_id, self._fog_labels[character.ref_id])
         if not character.is_player_character and getattr(character, "bio", None):
             try:
                 with self.store.transaction() as db:

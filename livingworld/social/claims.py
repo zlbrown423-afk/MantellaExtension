@@ -287,7 +287,8 @@ def sentence(db, claim: dict, viewer: int, second_person: bool = False) -> str:
     def name(npc_id):
         if npc_id == viewer:
             return "you" if second_person else "me"
-        return db.execute("SELECT display_name FROM npc WHERE npc_id = ?", (npc_id,)).fetchone()[0]
+        from livingworld.fog.service import shown_name   # names the viewer has not learned stay descriptions
+        return shown_name(db, viewer, npc_id)
     if claim["subject_id"] == viewer:
         subject = "you" if second_person else "I"
     else:

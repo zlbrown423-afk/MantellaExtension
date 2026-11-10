@@ -84,8 +84,12 @@ def _place_name(db, community_keys: list[str]) -> str:
     return row[0] if row else "local"
 
 
-def _name(db, npc_id: int) -> str:
-    return db.execute("SELECT display_name FROM npc WHERE npc_id = ?", (npc_id,)).fetchone()[0]
+def _name(db, npc_id: int, player_id: int | None = None) -> str:
+    real = db.execute("SELECT display_name FROM npc WHERE npc_id = ?", (npc_id,)).fetchone()[0]
+    if player_id is None:
+        return real
+    from livingworld.fog.service import shown_name   # someone the player has not met is 'a Nord woman'
+    return shown_name(db, player_id, npc_id, real)
 
 
 def pick(db, timeline: int, player_id: int, community_keys: list[str], now_gt: float,
@@ -100,14 +104,15 @@ def pick(db, timeline: int, player_id: int, community_keys: list[str], now_gt: f
         about_player = player_id in (c["subject_id"], c["object_id"])
         if lvl == "balanced":
             # name who was talking, so the player has someone to ask; the gist stays theirs to find out
-            who = _name(db, c["holder_id"]) if c["holder_id"] != player_id else f"{place} folk"
+            who = _name(db, c["holder_id"], player_id) if c["holder_id"] != player_id else f"{place} folk"
             text = (f"You catch {who} murmuring about you." if about_player
-                    else f"You overhear {who} talking about {_name(db, c['subject_id'])}.")
+                    else f"You overhear {who} talking about {_name(db, c['subject_id'], player_id)}.")
         else:
             said = claims.sentence(db, c, player_id, second_person=True)
-            holder = _name(db, c["holder_id"])
+            holder = _name(db, c["holder_id"], player_id)
             how = "saw that" if c["origin"] == "witnessed" else "has heard that"
             text = f"{holder} {how} {said}."
+        text = text[:1].upper() + text[1:]
         db.execute("INSERT INTO player_notice (timeline_id, claim_id, level, kind, community, shown_gt, text)"
                    " VALUES (?,?,?, 'hint', ?,?,?)", (timeline, c["claim_id"], lvl, community_keys[0], now_gt, text))
         if c["holder_id"] != player_id:
