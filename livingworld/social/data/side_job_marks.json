@@ -1,0 +1,42 @@
+{
+  "_about": "Whiterun marks for side jobs (social/side_jobs.py). place = a TravelTo place name (dialogue/travel_places.json). owner = who the goods belong to or who pays; the game looks them up by name. risk: low | medium | high. wealth: 1 (modest) .. 3 (rich). Adults only.",
+  "theft": [
+    {"key": "belethor", "owner": "Belethor", "place": "Belethor's General Goods", "risk": "low", "wealth": 2,
+     "loot": "rings, necklaces and gems on the shelves behind the counter",
+     "note": "he sells anything and watches the door more than his shelves; easiest while someone keeps him haggling"},
+    {"key": "arcadia", "owner": "Arcadia", "place": "Arcadia's Cauldron", "risk": "low", "wealth": 2,
+     "loot": "the dearer potions and rare ingredients on her shelves",
+     "note": "she gets lost in her mixing; a customer with questions keeps her eyes off the shelves"},
+    {"key": "adrianne", "owner": "Adrianne Avenicci", "place": "Warmaiden's", "risk": "medium", "wealth": 2,
+     "loot": "finely made daggers and jewellery-grade ingots inside Warmaiden's",
+     "note": "Ulfberth minds the shop while Adrianne works the forge outside; he is slow but big"},
+    {"key": "hulda", "owner": "Hulda", "place": "The Bannered Mare", "risk": "medium", "wealth": 2,
+     "loot": "the night's takings and whatever patrons leave lying about",
+     "note": "busy evenings are best; the bard and the drinkers are good cover, but Hulda counts her coin"},
+    {"key": "carlotta", "owner": "Carlotta Valentia", "place": "Whiterun Marketplace", "risk": "low", "wealth": 1,
+     "loot": "the coin purse she keeps at her market stall",
+     "note": "the market is crowded at midday; she is sharp-tongued but turns her back to serve"},
+    {"key": "nazeem", "owner": "Nazeem", "place": "Whiterun", "risk": "medium", "wealth": 3,
+     "loot": "the rings and coin he carries about the Cloud District",
+     "note": "he loves to be flattered and never looks at his own pockets"},
+    {"key": "olfrid", "owner": "Olfrid Battle-Born", "place": "House of Clan Battle-Born", "risk": "high", "wealth": 3,
+     "loot": "silver, jewellery and Imperial coin kept in the Battle-Born house",
+     "note": "rich pickings, but the house is full of Battle-Borns and their servants"}
+  ],
+  "flirt": [
+    {"key": "mikael", "owner": "Mikael", "place": "The Bannered Mare", "risk": "low", "wealth": 1,
+     "loot": "a few coins and a song or two", "note": "the bard thinks every woman is in love with him"},
+    {"key": "jon", "owner": "Jon Battle-Born", "place": "House of Clan Battle-Born", "risk": "low", "wealth": 3,
+     "loot": "a generous purse from a well-off young man", "note": "unmarried, gentle, and lonely for company"},
+    {"key": "sinmir", "owner": "Sinmir", "place": "The Bannered Mare", "risk": "low", "wealth": 1,
+     "loot": "drinks and a handful of septims", "note": "an old soldier who drinks alone and talks to anyone who listens"},
+    {"key": "belethor_f", "owner": "Belethor", "place": "Belethor's General Goods", "risk": "low", "wealth": 2,
+     "loot": "coin, or a trinket off his shelves as a present", "note": "he flirts with every woman who walks in"},
+    {"key": "nazeem_f", "owner": "Nazeem", "place": "Whiterun", "risk": "high", "wealth": 3,
+     "loot": "a fat purse from a rich man who likes to be admired", "note": "rich, vain and married to Ahlam, who would not take it well"},
+    {"key": "guards", "owner": "Whiterun Guard", "place": "Whiterun", "risk": "medium", "wealth": 1,
+     "loot": "small coin from bored guards on watch", "note": "they pay little, talk a lot, and may report a woman who pushes too hard"},
+    {"key": "ulfberth", "owner": "Ulfberth War-Bear", "place": "Warmaiden's", "risk": "high", "wealth": 2,
+     "loot": "coin from the till while his wife is at the forge", "note": "married to Adrianne, who is never far away"}
+  ]
+}

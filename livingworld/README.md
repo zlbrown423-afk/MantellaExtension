@@ -432,6 +432,28 @@ language off). Each reaches the game with the conversation start reply.
 Off switches: `MANTELLA_LW_SURRENDER=0` (also turns the wingman off; reaches the game with the start reply as
 `mantella_lw_surrender_on`), `MANTELLA_LW_WINGMAN=0`.
 
+#### Side jobs in Whiterun: stealing and flirting for coin
+
+`social/side_jobs.py`, marks in `social/data/side_job_marks.json`. Anyone who surrendered to the player (Salonia)
+can be sent out, in Whiterun only:
+
+| Step | What happens |
+| --- | --- |
+| Ask | The player says so ("go steal some jewellery", "flirt the guards for coin"), or picks the plugin's dialogue choice (game record `type=job via=ask task=theft\|flirt`). She agrees to scout first; hint "Salonia will scout Whiterun for marks"; her line carries `TravelTo` Whiterun Marketplace (after the conversation) |
+| Scout | 6 game hours. Asked about it before then, she is still making connections |
+| Propose | Next time she is alone with the player (or the player brings it up) she puts up to three marks to them: owner, place, what there is to take (30 gold or more), risk. The game shows them as numbered choices. A mark who caught her before is left out |
+| Approve | "the first one", "Belethor", or the dialogue choice (`via=approve task=2`); "no, forget it" or `via=drop` calls it off. Nothing starts without a pick. Her next line carries `TravelTo` to the mark's place, so the player can follow and watch. "I'll keep him talking" = the player will cover |
+| Job | Theft with cover: the player starts a conversation with the owner (without her) within a game day; better odds. Otherwise (and always for flirting) it happens 6 hours after the pick, the next time the player talks to her. The outcome is rolled once per job and sent as `mantella_lw_side_job_do` (`job\|kind\|ok/caught\|her name\|her ref\|owner\|owner ref\|min value\|max items\|gold\|bounty (always 0)\|bolo`); the game moves the real items or the coin to her pack and answers `via=loot task=<job> loot=Name:value;...` |
+| Report | Next time alone (or asked) she tells how it went and offers the loot (Inventory). Memories: hers; the owner's when caught (trust in her drops, and in the player when they covered) or flirted with |
+| BOLO | Nobody is ever wanted. A job nobody saw leaves no trace with the guards. A theft she is caught at puts out a lookout only: for 3 game days a Whiterun guard in conversation knows to watch for her (and that the player was keeping the owner talking, if so), eyes her and may question her, but never arrests, fines or attacks anyone over it. No crime gold |
+
+Why she helps: the player makes her. When the player killed her party, each job makes her their accomplice, and
+that is what keeps her quiet about the killings; her prompt says she is compelled, not eager.
+She never brings any of it up in front of others; asked there, she keeps it short and vague. All stages are
+`side_job` world events, so loading an older save rolls the job back. Off: `MANTELLA_LW_SALONIA_JOBS=0` (start reply
+key `mantella_lw_side_jobs_on`). The game side (Mantella-Spell orders and records, plugin dialogue choices) is
+a separate step.
+
 ### Mantella's own summaries roll back with the save
 
 Mantella keeps a summary file and a transcript per NPC, outside the database. Loading an older save hid Living
