@@ -22,6 +22,7 @@ logger = utils.get_logger()
 class Noticed:
     game_time: float
     text: str
+    minutes: float = P.OBSERVATION_MINUTES   # told only while it is this fresh
 
 
 @dataclass
@@ -58,7 +59,8 @@ class BodyLanguage:
                     changed += 1
             text = P.observation(p, p.actor.name)
             if text:
-                self._noticed.setdefault(npc_id, []).append(Noticed(p.game_time, text))
+                minutes = P.ANSWER_MINUTES if p.what in P.ANSWERS else P.OBSERVATION_MINUTES
+                self._noticed.setdefault(npc_id, []).append(Noticed(p.game_time, text, minutes))
             logger.log(23, f"Living World body language: {p.target.name} noticed {p.what} "
                            f"(dist {p.distance_m}, dur {p.duration_s}, n {p.count}); feelings now "
                            f"{ {k: v for k, v in feelings.to_json().items() if v} }")
@@ -67,7 +69,7 @@ class BodyLanguage:
     def prompt_lines(self, npc_id: int, name: str, now: float) -> list[str]:
         """What ``name`` noticed the player doing, each thing told once, plus how it left them feeling."""
         fresh = [n for n in self._noticed.pop(npc_id, [])
-                 if -5.0 <= (now - n.game_time) * state.MIN_PER_DAY <= P.OBSERVATION_MINUTES + 1e-6]
+                 if -5.0 <= (now - n.game_time) * state.MIN_PER_DAY <= n.minutes + 1e-6]
         # (a record may be stamped a little after the context's game time, which the game sends less often)
         lines = [n.text for n in fresh[-P.MAX_OBSERVATIONS:]]
         if lines:

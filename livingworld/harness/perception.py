@@ -163,7 +163,7 @@ def jail(player_json: dict[str, Any], prisoner_json: dict[str, Any], arrest: int
 
 def presence(target_json: dict[str, Any], what: str, game_days: float, player_json: dict[str, Any] | None = None,
              distance_m: float | None = None, seconds: float | None = None, count: int = 1,
-             location: str = "Riverwood", key: str | None = None) -> str:
+             location: str = "Riverwood", key: str | None = None, about: str | None = None) -> str:
     """A body language record (``livingworld/bodylang/presence.py``): what the player did near ``target``."""
     from livingworld.harness import actors
     parts = ["v=1", f"key={key or _key('presence')}", "type=presence", f"gt={game_days}", f"loc={location}",
@@ -174,6 +174,8 @@ def presence(target_json: dict[str, Any], what: str, game_days: float, player_js
     if seconds is not None:
         parts.append(f"dur={seconds}")
     parts.append(f"n={count}")
+    if about is not None:
+        parts.append(f"about={about}")
     return "|".join(parts)
 
 

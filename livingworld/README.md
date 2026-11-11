@@ -319,6 +319,23 @@ Mantella-Spell's `MantellaRepository.psc` holds the game side.
 
 `MANTELLA_LW_BODY_LANGUAGE=0` turns all of it off (the game hears it with the conversation start reply).
 
+### Step 2 (BL2): VR gestures
+
+In VR the game reads your right hand and headset through VRIK (0.8.x) and recognises a few gestures. Each
+one goes to the NPC you made it to as a presence record, like the rest:
+
+| Gesture | How the game reads it | What the NPC is told |
+| --- | --- | --- |
+| `wave` | right hand at head height moving side to side | you waved at them |
+| `nod`, `shake` | headset bobbing up and down, or side to side, while you stand still | a silent yes or no (told only within 2 game minutes) |
+| `point` | right arm held out still, index finger off the trigger | who you pointed at (`about=`) |
+| `beckon` | right hand out in front, fingers curled in (grip) twice | a "come here" gesture; the NPC decides |
+| `hands_up` | both hands above your head | a surrender; it calms fear and anger a little |
+| `thumbs_up`, `thumbs_down` | grip and trigger held, thumb off the stick and buttons, thumb pointing up or down | a thumbs up or down |
+
+`MANTELLA_LW_GESTURES=0` turns gestures off; `MANTELLA_LW_GESTURE_NOTICES=0` stops the game showing a
+notice for each gesture it recognised (shown by default while the thresholds are tuned in game).
+
 ## Intimate scenes (OStim)
 
 NPCs know when an OStim scene is running, who is in it and what is happening in it (kissing, sex, spanking

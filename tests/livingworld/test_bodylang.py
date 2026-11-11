@@ -15,7 +15,7 @@ from livingworld.harness import actors, bodysim
 from livingworld.harness.perception import KEY_EVENTS, presence
 from livingworld.harness.scripted_llm import ScriptedLLM
 from livingworld.harness.session import HeadlessSession
-from livingworld.integration import ENV_VAR, KEY_BODY, KEY_BODY_ON, KEY_MOOD, LivingWorld
+from livingworld.integration import ENV_VAR, KEY_BODY, KEY_BODY_ON, KEY_GESTURES_ON, KEY_MOOD, LivingWorld
 from livingworld.perception.records import BadRecord
 from src.http.communication_constants import communication_constants as comm_consts
 
@@ -212,3 +212,58 @@ def test_npcs_never_step_toward_the_player():
     start = [abs(n.x) for n in npcs]
     bodysim.run(npcs, lambda t: 0.0, seconds=60)
     assert all(abs(n.x) >= s for n, s in zip(npcs, start))
+
+
+# ---- gestures (BL2) ----
+def test_gesture_records_parse_with_who_was_pointed_at():
+    p = P.parse(presence(actors.gerdur(), "Point", 3.5, about="Hod"))
+    assert (p.what, p.about, p.is_gesture) == ("point", "Hod", True)
+    assert P.observation(p, "Torvar") == "Torvar pointed at Hod."
+    assert P.observation(P.parse(presence(actors.gerdur(), "point", 3.5, about="Gerdur")), "Torvar") == \
+        "Torvar pointed at them."
+    assert P.is_gesture_record(presence(actors.gerdur(), "thumbs_up", 3.5))
+    assert not P.is_gesture_record(presence(actors.gerdur(), "crowd", 3.5))
+
+
+def test_gestures_between_two_npcs_are_refused():
+    with pytest.raises(BadRecord):
+        P.parse(presence(actors.gerdur(), "wave", 3.5, player_json=actors.hod()))
+
+
+def test_hands_up_calms_and_thumbs_down_annoys():
+    scared = Feelings()
+    scared.add({"fear": 0.6, "irritation": 0.4})
+    scared.add(P.appraise(P.parse(presence(actors.gerdur(), "hands_up", 3.5)), {}, P.Bond()))
+    assert scared.get("fear") < 0.5 and scared.get("irritation") < 0.4
+    assert P.appraise(P.parse(presence(actors.gerdur(), "thumbs_down", 3.5)), {"temper": 0.9}, P.Bond())["irritation"] > 0
+    assert P.appraise(P.parse(presence(actors.gerdur(), "nod", 3.5)), {}, P.Bond()) == {}
+
+
+def test_a_nod_reaches_the_next_line_in_a_conversation(tmp_path):
+    llm = ScriptedLLM(replies=["Will you help?", "Good.", "Yes?"])
+    with HeadlessSession(str(tmp_path), llm) as s:
+        s.start([PLAYER, actors.gerdur()], game_days=3.5)
+        s.continue_until_player_turn()
+        s.say("Alright.", context_extra={KEY_EVENTS: [presence(actors.gerdur(), "nod", 3.5002),
+                                                       presence(actors.gerdur(), "thumbs_up", 3.5002)]})
+        s.end(game_days=3.51)
+    user_lines = [m["content"] for m in llm.dialogue_calls[-1].messages if m["role"] == "user"]
+    told = [u for u in user_lines if "Torvar nodded (a silent yes)" in u]
+    assert len(told) == 1 and "Torvar gave them a thumbs up" in told[0]
+
+
+def test_an_old_nod_is_not_an_answer(tmp_path):
+    rec = presence(actors.gerdur(), "nod", 3.4965)          # ~5 game minutes before the talk
+    wave = presence(actors.gerdur(), "wave", 3.4965)
+    llm, *_ = talk(tmp_path, [rec, wave])
+    prompt = llm.dialogue_calls[0].system_prompt
+    assert "nodded" not in prompt and "Torvar waved at them." in prompt
+
+
+def test_gestures_switch_off(tmp_path, monkeypatch):
+    monkeypatch.setenv("MANTELLA_LW_GESTURES", "0")
+    llm, start, *_ = talk(tmp_path, [presence(actors.gerdur(), "wave", 3.4995),
+                                     presence(actors.gerdur(), "crowd", 3.4995, distance_m=0.6, seconds=5.0)])
+    assert start[KEY_GESTURES_ON] is False and start[KEY_BODY_ON] is True
+    prompt = llm.dialogue_calls[0].system_prompt
+    assert "waved" not in prompt and "stood very close" in prompt

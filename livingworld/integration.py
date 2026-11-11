@@ -22,8 +22,8 @@ from livingworld.memory import backfill
 from livingworld.memory import settings as memory_settings
 from livingworld.memory.recall import recall_for
 from livingworld import mood as moods
-from livingworld.bodylang import body_language_enabled
-from livingworld.bodylang.presence import is_presence
+from livingworld.bodylang import body_language_enabled, gesture_notices, gestures_enabled
+from livingworld.bodylang.presence import is_gesture_record, is_presence
 from livingworld.bodylang.service import BodyLanguage
 from livingworld.dialogue import hearing, leads as player_leads
 from livingworld.dialogue import promises
@@ -79,6 +79,8 @@ KEY_MOOD = "mantella_lw_mood"                    # sent with an NPC line: the me
 KEY_QUIET_CHATTER = "mantella_lw_quiet_chatter"  # sent with the start reply: mute vanilla chatter until the end
 KEY_WANTS_A_WORD = "mantella_lw_wants_a_word"    # sent with the start reply: people with work to offer (game side: W2)
 KEY_BODY_ON = "mantella_lw_body_on"              # sent with the start reply: body language on or off (game side)
+KEY_GESTURES_ON = "mantella_lw_gestures_on"      # sent with the start reply: VR gestures on or off (game side)
+KEY_GESTURE_NOTICES = "mantella_lw_gesture_notices"   # start reply: show each recognised gesture (for tuning)
 KEY_BODY = "mantella_lw_body"                    # sent with an NPC line: changed expression profiles ('Name|comfort|gaze|guard|step')
 KEY_HINTS = "mantella_lw_hints"                  # sent with the first NPC line: what the player overhears (S2)
 KEY_GUARD_ISSUE = "mantella_lw_guard_issue"      # sent with an NPC line: items handed to the player ('Name|plugin|0xID;...', for logs)
@@ -278,6 +280,8 @@ class LivingWorld:
                 and intimate_scenes.KEY_SCENE in context_json:
             self._scenes_now = self._scene_snapshot(records_from_context(context_json, intimate_scenes.KEY_SCENE))
         body_raw = [r for r in raw if is_presence(r)]   # body language records never reach the event pipeline
+        if not gestures_enabled():   # MANTELLA_LW_GESTURES=0: a game still sending them is ignored
+            body_raw = [r for r in body_raw if not is_gesture_record(r)]
         raw = [r for r in raw if not is_presence(r)]
         if body_raw and self.store is not None and self.body_language:
             try:
@@ -949,6 +953,8 @@ class LivingWorld:
         """Extra keys for the conversation start reply."""
         keys: dict[str, Any] = {KEY_QUIET_CHATTER: True} if self.quiet_chatter else {}
         keys[KEY_BODY_ON] = bool(self.body_language)
+        keys[KEY_GESTURES_ON] = bool(self.body_language and gestures_enabled())
+        keys[KEY_GESTURE_NOTICES] = gesture_notices()
         keys[intimate_scenes.KEY_INTIMACY_ON] = bool(self.intimacy)
         keys[confront.KEY_CONFRONT_ON] = bool(self.confront)
         keys[decency.KEY_DECENCY_ON] = bool(self.decency)
