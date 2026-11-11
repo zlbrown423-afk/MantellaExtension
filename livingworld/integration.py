@@ -204,6 +204,8 @@ class LivingWorld:
         self.decency = enabled and decency.enabled()   # guards tell a naked player to cover up; MANTELLA_LW_DECENCY=0 off
         self.summary_rollback = enabled and os.environ.get("MANTELLA_LW_SUMMARY_ROLLBACK", "").strip().lower() not in {
             "0", "false", "no", "off"}   # Mantella's own summaries roll back with the save
+        self._surrender_pending: set[str] = set()
+        self._surrender_done: set[str] = set()
         self.surrender = enabled and surrender.enabled()   # a survivor begs for their life; MANTELLA_LW_SURRENDER=0 off
         self.wingman = self.surrender and wingman.enabled()   # ...and plays the player's wingman; MANTELLA_LW_WINGMAN=0 off
         self.side_jobs = self.surrender and side_jobs.enabled()   # ...and steals or flirts for coin in Whiterun; MANTELLA_LW_SALONIA_JOBS=0 off
@@ -440,6 +442,8 @@ class LivingWorld:
         self._lead_learned = set()
         self._trips = trips.TripPlanner(here=str(getattr(context, "location", "") or "")) if self.trips else None
         self._desk = side_jobs.Desk() if self.side_jobs else None
+        self._surrender_pending = set()   # survivors in this conversation who have not agreed to follow yet
+        self._surrender_done = set()      # ...and those who have (Follow fired)
 
     @_never_raises
     def conversation_started(self, world_id: str, context: Any) -> None:
@@ -1496,6 +1500,8 @@ class LivingWorld:
                     begged = surrender.line(db, npc_id, name, player_id, player_name or "the player", now)
                     if begged:
                         scene_lines.append(begged)
+                    if begged and name not in self._surrender_done and surrender.is_fresh(db, npc_id, player_id, now):
+                        self._surrender_pending.add(name)   # her "I'll come along" fires Follow
                     if self.wingman:
                         wing = wingman.line(db, npc_id, name, player_id, player_name or "the player", present,
                                             self._guards_here(db, present), now)
@@ -1598,6 +1604,11 @@ class LivingWorld:
         if self._desk is not None:
             from src.actions.function_manager import FunctionManager
             also.append(side_jobs.TravelWatcher(self._desk, FunctionManager._actions.keys()))
+        if self.surrender and self._surrender_pending:
+            from src.actions.function_manager import FunctionManager
+            also.append(surrender.FollowWatcher(self._surrender_pending, self._player_said,
+                                                {getattr(a, "identifier", None) for a in actions}
+                                                | set(FunctionManager._actions.keys()), self._surrender_done))
         if not self.keep_promises and not also:
             return None
         return promises.make_parser(actions, keep_promises=self.keep_promises, also=also)
