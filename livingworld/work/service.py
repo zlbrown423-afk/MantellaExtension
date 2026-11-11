@@ -8,7 +8,7 @@ from livingworld.social import claims, processor
 from livingworld.store.minors import is_child
 from livingworld.store.world_store import WorldStore
 from livingworld.work import conditions as C, consequences, needs, prompts, tasks as T
-from livingworld.work.templates import by_key
+from livingworld.work.templates import by_key, for_giver
 
 AGREE = "mantella_lw_task_agree"
 CHECK = "mantella_lw_task_check"
@@ -106,6 +106,26 @@ class Work:
             consequences.let_down(db, task, "failed", scene.now, "released: player said they cannot finish",
                                   withdrew=True)
             return f"task {task.task_id} released"
+
+    def offered_here(self, npc_id: int, now: float | None = None) -> T.Task | None:
+        """The work ``npc_id`` has for the player right now, for an agreement made in words: the task their
+        prompt offered in this conversation, else any open need of theirs nobody has taken, else a need
+        opened on the spot from one of their templates (the talk itself is the reason to ask)."""
+        with self.store.transaction() as db:
+            if is_child(db, npc_id):
+                return None
+            open_ = [x for x in T.open_for_giver(db, npc_id) if x.state in ("available", "offered")]
+            here = [x for x in open_ if x.task_id in self._offered]
+            if here or open_:
+                return (here or open_)[0]
+            if now is None or any(x.state in T.TAKEN for x in T.open_for_giver(db, npc_id)):
+                return None
+            t = next((t for t in for_giver(db, npc_id) if t.asks_player), None)
+            if t is None:
+                return None
+            task = T.create(db, t, npc_id, now, source="conversation")
+            self._offered.add(task.task_id)
+            return task
 
     def mood(self, npc_id: int, score: int, scene: Scene) -> None:
         """The giver's mood tag while the worker is with them counts toward how the work went."""

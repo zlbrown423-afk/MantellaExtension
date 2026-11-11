@@ -43,3 +43,8 @@ def gerdur() -> dict[str, Any]:
 
 def hod() -> dict[str, Any]:
     return actor("Hod", 0x0001347D, 0x0001348A, 0, "Nord", "MaleNord")
+
+
+def alfhild() -> dict[str, Any]:
+    """Alfhild Battle-Born (Whiterun; runs Battle-Born Farm). Form IDs from data/Skyrim/skyrim_characters.csv."""
+    return actor("Alfhild Battle-Born", 0x00013BB0, 0x0001A68B, 1, "Nord", "FemaleNord")

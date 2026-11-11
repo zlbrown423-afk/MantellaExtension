@@ -46,7 +46,8 @@ from livingworld.guard import decency
 from livingworld.bodylang.peek import KEY_PEEK_ON, peek_enabled
 from livingworld.guard.profiles import GuardFacts
 from livingworld.guard.service import ACTIONS as GUARD_ACTIONS, ENLIST as GUARD_ENLIST, Guard, Scene as GuardScene
-from livingworld.work.service import ACTIONS as TASK_ACTIONS, Scene as WorkScene, Work
+from livingworld.work import words as task_words
+from livingworld.work.service import ACTIONS as TASK_ACTIONS, AGREE as TASK_AGREE, Scene as WorkScene, Work
 from livingworld.perception.records import KEY_ATTIRE, BadRecord, parse_record, records_from_context
 from livingworld.perf.game_records import split_perf_records
 from livingworld.perf.monitor import PerfMonitor
@@ -165,6 +166,9 @@ class LivingWorld:
         self.tasks = enabled and tasks_enabled()    # NPC tasks and shared work (livingworld/work)
         self._work: dict[int, Work] = {}            # id(store) -> tasks for that world
         self._work_refreshed: int | None = None     # conv_id tasks were last brought up to date for
+        self.task_words = self.tasks and task_words.words_enabled()   # "I'll help you" / "Thank you!" agrees (MANTELLA_LW_TASK_WORDS=0 off)
+        self._help_offered = False                  # the player's last line offered help with the work
+        self._npc_last: str | None = None           # the last NPC sentence (did it ask for help?)
         self.guard = enabled and guard_enabled()    # guard careers (livingworld/guard)
         self.guard_debug = enabled and guard_debug_enabled()
         self._guard: dict[int, Guard] = {}          # id(store) -> guard careers for that world
@@ -378,6 +382,8 @@ class LivingWorld:
         self._guard_sent = set()
         self._held_actions = {}
         self._player_said = None
+        self._help_offered = False
+        self._npc_last = None
         self._hints_to_send = []
         self._watch_sent = None
         self._lead_ask = None
@@ -429,6 +435,9 @@ class LivingWorld:
         if self.leads and self._lead_ask:
             skip = [c.name for c in context.npcs_in_conversation.get_all_characters()]
             self._learn_leads(player_leads.from_reply(self._lead_ask, text, skip), context.game_days)
+        if self.task_words and context is self._context:
+            self._agree_in_words(sentence, npc_id, text)
+        self._npc_last = text
 
     @_never_raises
     def player_line(self, text: str, context: Any) -> None:
@@ -440,6 +449,8 @@ class LivingWorld:
         npc_id = self._npc_ids.get(player.ref_id) or self._register(player, context.game_days)
         ConversationLog(self.store).append(self.conv_id, npc_id, text.strip(), None, context.game_days)
         self._player_said = text.strip()
+        if self.task_words:
+            self._help_offered = task_words.player_offers(text, self._npc_last)
         if self.leads:
             self._lead_ask = None
             self._lead_learned = set()
@@ -698,6 +709,29 @@ class LivingWorld:
             npc_id = self._npc_ids.get(who.ref_id) or self._register(who, scene.now)
             result = self._work_for(self.store).action(action["identifier"], npc_id, scene)
             logger.log(23, f"Living World work: {who.name} {action['identifier']}: {result}")
+
+    def _agree_in_words(self, sentence: Any, npc_id: int, text: str) -> None:
+        """The player offered help and the NPC took it up in words only: record the task as agreed."""
+        if not self._help_offered:
+            return
+        self._help_offered = False          # only the first NPC sentence after the offer answers it
+        if any(isinstance(a, dict) and a.get("identifier") == TASK_AGREE for a in (sentence.actions or [])):
+            return                          # the AI called AgreeTask itself
+        if not task_words.npc_takes_it_up(text):
+            return
+        try:
+            work = self._work_for(self.store)
+            scene = self._player_scene()
+            task = work.offered_here(npc_id, scene.now if scene else None)
+            if task is None:
+                return
+            result = work.action(TASK_AGREE, npc_id, scene) if scene else None
+            logger.log(23, f"Living World work: {sentence.speaker.name} took up the player's offer in words: {result}")
+            if result and "accepted" in result:
+                self._hints_to_send.append(f"Agreed with {sentence.speaker.name.split(' ')[0]}: {task.title}.")
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not record a task agreed in words; carrying on")
 
     # ---- guard careers (livingworld/guard) ----
     def _guard_for(self, store: WorldStore) -> Guard:
@@ -1412,6 +1446,9 @@ class LivingWorld:
         here = str(getattr(context, "location", "") or "")
         if here:
             self._trips.here = here
+        for c in context.npcs_in_conversation.get_all_characters():
+            if not c.is_player_character:
+                self._trips.learn_bio(c.name, str(getattr(c, "bio", "") or ""))   # "the farm" = her farm
         note = self._trips.player_said(text.strip())
         return [note] if note else []
 
