@@ -38,7 +38,9 @@ A ``react`` record is someone reacting on the spot to the player's hands on them
 (a guard who saw it steps in, and ``party`` is the person grabbed); ``area`` and ``dur`` are the grab's. The game
 starts a conversation with them right after sending it. ``via=decency`` is a guard who saw the player walking
 about naked in public coming over about it (``dur`` is how long the player had been naked; see
-``guard/decency.py``).
+``guard/decency.py``). ``via=surrender`` is a survivor whose party was just killed coming to the player to beg
+for their life: ``party`` is the one they lost who mattered most, each ``d`` another dead companion, and
+``killer`` is ``player`` or ``other`` (see ``social/surrender.py``).
 
 A ``purchase`` record is an NPC (``actor``) buying a round from a bartender (``target``) with the
 Living World OrderDrinks action: ``gold`` paid in total, ``payer`` is ``player`` or ``npc`` (the buyer),
@@ -180,6 +182,8 @@ class PerceptionRecord:
     erect: bool = False             # attire (the player): visibly aroused right now
     eyes_covered: bool = False      # attire (the player): their eyes are covered right now
     level: int | None = None        # arousal: TNG's bend, -10 (soft) .. 9
+    dead: list[GameActor] = field(default_factory=list)   # react via=surrender: other dead companions (d=)
+    killer: str | None = None       # react via=surrender: 'player' | 'other'
     witnesses: list[Witness] = field(default_factory=list)
     raw: str = ""
 
@@ -209,6 +213,7 @@ def _witness(text: str) -> Witness:
 def parse_record(text: str) -> PerceptionRecord:
     fields: dict[str, str] = {}
     witnesses: list[Witness] = []
+    dead: list[GameActor] = []
     for part in text.split("|"):
         if "=" not in part:
             continue
@@ -216,6 +221,8 @@ def parse_record(text: str) -> PerceptionRecord:
         name = name.strip().lower()
         if name == "w":
             witnesses.append(_witness(value))
+        elif name == "d":
+            dead.append(_actor(value))
         else:
             fields[name] = value
     if fields.get("v") != RECORD_VERSION:
@@ -255,6 +262,7 @@ def parse_record(text: str) -> PerceptionRecord:
         climax=_count(fields.get("climax")), scene_id=(fields.get("scene") or "").strip() or None,
         player_size=_scale(fields.get("psize")), erect=fields.get("erect") == "1", eyes_covered=fields.get("eyes") == "1",
         level=_level(fields.get("level")),
+        dead=dead, killer=(fields.get("killer") or "").strip().lower() or None,
         witnesses=witnesses, raw=text)
     if kind == "scene" and (record.via not in ("end", "now") or record.target is None):
         raise BadRecord("a scene record needs via=end or now and at least two people (actor and target)")
@@ -268,9 +276,10 @@ def parse_record(text: str) -> PerceptionRecord:
         raise BadRecord("a watch record needs via=approach or observe, win and task")
     if kind == "jail" and (record.via not in ("jailed", "released") or record.target is None or not record.task):
         raise BadRecord("a jail record needs via=jailed or released, the prisoner as target and the arrest as task")
-    if kind == "react" and (record.via not in ("victim", "guard", "decency") or record.target is None
-                            or (record.via == "guard" and record.party is None)):
-        raise BadRecord("a react record needs via=victim, guard or decency, the player as target, and party for a guard")
+    if kind == "react" and (record.via not in ("victim", "guard", "decency", "surrender") or record.target is None
+                            or (record.via in ("guard", "surrender") and record.party is None)):
+        raise BadRecord("a react record needs via=victim, guard, decency or surrender, the player as target, and party"
+                        " for a guard or a surrender")
     if kind == "grab" and record.target is None:
         raise BadRecord("a grab needs a target")
     if kind == "consume" and not record.item:

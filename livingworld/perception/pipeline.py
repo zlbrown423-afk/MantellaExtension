@@ -230,20 +230,33 @@ class PerceptionPipeline:
             " WHERE e.game_key = ? AND e.game_time <= s.cutoff_gt", (record.key,))
         if existing is not None:
             return Outcome(existing, duplicate=True)
+        if record.via == "surrender":
+            from livingworld.social.surrender import enabled as surrender_enabled
+            if not surrender_enabled():
+                return Outcome(None)
         reactor = self.identities.ensure_npc(record.actor.identity(), gt)
         player = self.identities.ensure_npc(record.target.identity(), gt)
         victim = self.identities.ensure_npc(record.party.identity(), gt) if record.party else reactor
         if any(self._child(i) for i in (reactor, victim)):
             return Outcome(None)
         timeline = self.store.active_timeline_id()
+        payload: dict = {"role": record.via, "area": record.area}
+        dead: list[int] = []
+        if record.via == "surrender":
+            dead = [victim] + [self.identities.ensure_npc(a.identity(), gt) for a in record.dead]
+            payload = {"role": record.via, "dead": dead, "killer": record.killer or "other"}
         with self.store.transaction() as db:
             event_id = db.execute(
                 "INSERT INTO world_event (timeline_id, type, location, actors_json, payload_json, source, game_time,"
                 " game_key, real_time, duration_s, confidence) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (timeline, "reaction", record.location, json.dumps([reactor, player, victim]),
-                 json.dumps({"role": record.via, "area": record.area}), "game", gt, record.key,
+                 json.dumps(payload), "game", gt, record.key,
                  datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"), record.duration_s, 1.0)).lastrowid
-        what = "being naked in public" if record.via == "decency" else "grab"
+            if record.via == "surrender":
+                from livingworld.social import surrender
+                surrender.remember(db, timeline, event_id, reactor, player, dead, record.killer or "other",
+                                   record.location, gt)
+        what = {"decency": "being naked in public", "surrender": "killing their party"}.get(record.via, "grab")
         logger.log(23, f"Living World: {record.actor.name} reacts ({record.via}) to {record.target.name}'s {what}"
                        f" -> event {event_id}")
         return Outcome(event_id)
