@@ -60,11 +60,45 @@ def _phrase(by: str, on: str, spot: str, *, mine: bool = False, on_me: bool = Fa
     return f"{by} finished on {target}"
 
 
+# A long scene can climax many times (OStim keeps going); everyone remembers it once per scene, not each time.
+SAME_SCENE_HOURS = 12.0          # how far back an earlier climax can belong to the same scene, at most
+
+
+def _remembered_this_scene(db, by_id: int, on_id: int, thread, gt: float) -> tuple[set[int], int]:
+    """Who already has a memory of ``by_id`` climaxing with ``on_id`` in the scene still running on ``thread``,
+    and how many times it happened before. The scene began after the last finished scene on that thread."""
+    from livingworld.intimacy.scenes import EVENT_FORCED, EVENT_SCENE
+    floor = gt - SAME_SCENE_HOURS / 24.0
+    # a scene stored while still running (scenes.record_scene, ongoing) has not ended; a completed one ended at
+    # its end record's time, not when it was first stored
+    ended = db.execute(
+        "SELECT MAX(t) FROM (SELECT COALESCE(json_extract(payload_json, '$.ended_gt'), game_time) AS t"
+        " FROM v_visible_event WHERE type IN (?, ?) AND game_time >= ? AND game_time <= ?"
+        " AND COALESCE(json_extract(payload_json, '$.ongoing'), 0) = 0"
+        " AND json_extract(payload_json, '$.thread') IS ?) WHERE t >= ? AND t <= ?",
+        (EVENT_SCENE, EVENT_FORCED, floor - SAME_SCENE_HOURS / 24.0, gt + 1e-6, thread, floor, gt + 1e-6)).fetchone()[0]
+    since = max(floor, ended) if ended is not None else floor
+    rows = db.execute(
+        "SELECT event_id FROM v_visible_event WHERE type = ? AND game_time > ? AND game_time <= ?"
+        " AND json_extract(payload_json, '$.by') = ? AND json_extract(payload_json, '$.on') = ?"
+        " AND json_extract(payload_json, '$.thread') IS ?",
+        (EVENT_CLIMAX, since, gt + 1e-6, by_id, on_id, thread)).fetchall()
+    if not rows:
+        return set(), 0
+    ids = [r[0] for r in rows]
+    owners = {r[0] for r in db.execute(
+        f"SELECT DISTINCT owner_id FROM memory WHERE event_id IN ({','.join('?' * len(ids))})", ids)}
+    return owners, len(ids)
+
+
 def record_climax(pipeline, record: PerceptionRecord):
     from livingworld.perception.pipeline import Outcome
     existing = common.existing_event(pipeline.store, record.key)
     if existing is not None:
         return Outcome(existing, duplicate=True)
+    seen_live = getattr(pipeline, "scene_seers", None)
+    if seen_live is not None:
+        record = seen_live.merged(record, ending=False)   # people the live snapshots showed seeing the scene
     gt = record.game_time
     by_id = pipeline.identities.ensure_npc(record.actor.identity(), gt)
     on_id = pipeline.identities.ensure_npc(record.target.identity(), gt)
@@ -96,10 +130,17 @@ def record_climax(pipeline, record: PerceptionRecord):
                 valence = -0.7
             drafts[npc_id] = (MemoryDraft(f"{common.hedge(how)} {what}{at}.", interpretation, 0.55, valence, 0.5,
                                           how.confidence, "witnessed", {}), [])
+        remembered, before = _remembered_this_scene(db, by_id, on_id, record.thread, gt)
+    if before:
+        # again in the same scene: only people who have not remembered it yet (someone who just walked in) do
+        payload["repeat"] = before + 1
+        drafts = {i: d for i, d in drafts.items() if i not in remembered}
+        seen = {i: s for i, s in seen.items() if i in drafts}
     outcome = common.store(pipeline, record, EVENT_CLIMAX, [by_id, on_id], payload,
                            {by_id: "participated", on_id: "participated"}, seen, drafts)
+    again = f" (time {before + 1} this scene)" if before else ""
     logger.log(23, f"Living World: stored {EVENT_CLIMAX} event {outcome.event_id} ({record.key}): {by} with {on},"
-                   f" where {spot or '-'}; memories for {len(outcome.memories)} NPC(s)")
+                   f" where {spot or '-'}{again}; memories for {len(outcome.memories)} NPC(s)")
     return outcome
 
 
