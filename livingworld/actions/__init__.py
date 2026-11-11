@@ -31,8 +31,9 @@ GUARD_ENLIST = "mantella_lw_guard_enlist"   # guard careers: handled on the serv
 GUARD_REPORT = "mantella_lw_guard_report"   # guard duties: server only
 GUARD_PAY = "mantella_lw_guard_pay"         # guard wages: the game hands over the gold the server names
 DECENCY_FINE = "mantella_lw_decency_fine"   # a guard's fine for public nakedness: the game takes the gold the server names
+TRADE = "mantella_lw_npc_trade"             # an agreed deal: the game swaps the goods and gold (trade.py)
 ALL = (SIT, STAND_UP, GO_THERE, ORDER_DRINKS, UNDRESS, DRESS, TASK_AGREE, TASK_CHECK, TASK_RELEASE, GUARD_ENLIST,
-       GUARD_REPORT, GUARD_PAY, DECENCY_FINE)
+       GUARD_REPORT, GUARD_PAY, DECENCY_FINE, TRADE)
 
 
 def enabled() -> bool:
@@ -44,4 +45,8 @@ def action_files() -> list[Path]:
     """The action files to load, or none when Living World is off."""
     if not enabled():
         return []
-    return sorted(ACTIONS_DIR.glob("*.json"))
+    files = sorted(ACTIONS_DIR.glob("*.json"))
+    from livingworld.actions.trade import trade_enabled   # MANTELLA_LW_TRADE=0 leaves Trade out
+    if not trade_enabled():
+        files = [f for f in files if f.name != "trade.json"]
+    return files
