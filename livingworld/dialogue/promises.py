@@ -129,15 +129,36 @@ def _verb(identifier: str) -> str:
     return {SIT: "sit down", DRINK: "have a drink"}.get(identifier, identifier)
 
 
-def make_parser(actions: Iterable[Any]):
-    """A Mantella output parser that keeps the NPC's promises (see module docstring)."""
+class _Both:
+    """Several keepers behind one parser: promises and trips (dialogue/trips.py) read the same lines."""
+
+    def __init__(self, keepers: list):
+        self.keepers = keepers
+
+    def note_actions(self, actions: Iterable[Any]) -> None:
+        actions = list(actions)
+        for k in self.keepers:
+            k.note_actions(actions)
+
+    def keep(self, speaker_name: str, text: str, sentence_actions: list) -> list[str]:
+        added: list[str] = []
+        for k in self.keepers:
+            added += k.keep(speaker_name, text, sentence_actions)
+        return added
+
+
+def make_parser(actions: Iterable[Any], keep_promises: bool = True, also: Iterable[Any] = ()):
+    """A Mantella output parser that keeps the NPC's promises (see module docstring). ``also``: more
+    keepers with the same ``keep`` / ``note_actions`` shape, run on the same lines (trips)."""
+    actions = list(actions)
     from src.llm.output.output_parser import output_parser
     from src.llm.sentence_content import SentenceTypeEnum
 
     class PromiseParser(output_parser):
         def __init__(self) -> None:
             super().__init__()
-            self.keeper = PromiseKeeper(actions)
+            keepers = ([PromiseKeeper(actions)] if keep_promises else []) + list(also)
+            self.keeper = keepers[0] if len(keepers) == 1 else _Both(keepers)
 
         def cut_sentence(self, output, current_settings):
             return None, output

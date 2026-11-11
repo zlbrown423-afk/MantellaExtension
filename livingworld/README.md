@@ -222,6 +222,18 @@ Code: `dialogue/hearing.py`.
 | Rule | Each prompt tells the NPCs the player's words can arrive garbled. A line that makes no sense gets an in-character check ("Thane, you say?") or a request to say it again, not a literal answer. A clear line with one wrong word is just answered. |
 | Note | Each player line is checked against a list of commonly misheard Skyrim words ("stain of white run" -> "thane of Whiterun", "Kai's" -> "Caius", "yarl" -> "Jarl") and against near misses of the names of the people present ("Gerdar" -> "Gerdur"). Hits are added before the line as a narration note. The player's words are never rewritten. Add words to `MISHEARD`. |
 
+## Trips: "let's go to the farm" actually sets off
+
+On with `MANTELLA_LIVING_WORLD=1`. Switch off with `set MANTELLA_LW_TRIPS=0`. No extra AI call, no Papyrus change
+(it uses Mantella's own `LeadTo` / `TravelTo`). Code: `dialogue/trips.py`, place list `dialogue/travel_places.json`
+(copied from Mantella-Spell `MantellaLocationUtils.psc`).
+
+| Part | What it does |
+| --- | --- |
+| Watch | When an NPC line agrees to set off ("let's head to Battle-Born Farm", "follow me", "I'm right behind you") and the reply did not call LeadTo / TravelTo / Follow itself, the place is taken from that line or from what the player asked for in the last few lines. Names are matched loosely ("Brees home" -> Breezehome); the place where the conversation is happening is skipped. |
+| Ask | The game shows "Go with Alfhild to Battle-Born Farm? Say yes or no." When the name could be several places, it shows numbered choices ("say one or two"). Nothing moves before the player answers. |
+| Go | "Yes", "one", "two" or the place's name puts `LeadTo` (the NPC walks, the player follows) on the NPC's next line, with a note so the NPC speaks as if setting off. If LeadTo is in Disabled Actions, `TravelTo` with `leave_now`. "No" drops it for the rest of the conversation; an ignored question lapses after two lines. |
+
 ## Leads: ask about someone without saying their name
 
 On with `MANTELLA_LIVING_WORLD=1`. Switch off with `set MANTELLA_LW_LEADS=0`. No extra AI call.

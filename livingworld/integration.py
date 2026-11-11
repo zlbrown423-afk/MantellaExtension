@@ -26,7 +26,7 @@ from livingworld.bodylang import body_language_enabled, gesture_notices, gesture
 from livingworld.bodylang.presence import is_gesture_record, is_presence
 from livingworld.bodylang.service import BodyLanguage
 from livingworld.dialogue import hearing, leads as player_leads
-from livingworld.dialogue import promises
+from livingworld.dialogue import promises, trips
 from livingworld import fog
 from livingworld import diary
 from livingworld.diary import service as diaries
@@ -175,6 +175,8 @@ class LivingWorld:
         self._player_said: str | None = None        # the player's last line (kept with a duty report)
         self._watch_sent: tuple | None = None       # G2e: the watch plan last sent to the game this conversation
         self.keep_promises = enabled and promises.promises_enabled()   # NPCs do what they say (MANTELLA_LW_KEEP_PROMISES=0 turns off)
+        self.trips = enabled and trips.trips_enabled()   # "let's go to X" sets off after the player's yes (MANTELLA_LW_TRIPS=0 off)
+        self._trips: trips.TripPlanner | None = None   # this conversation's trip question and confirmed trip
         self.hearing = enabled and hearing.hearing_enabled()   # catch misheard speech (MANTELLA_LW_HEARING=0 turns off)
         self.leads = enabled and player_leads.leads_enabled()  # ask about a lead without its name (MANTELLA_LW_LEADS=0 turns off)
         self._lead_ask: str | None = None           # the player's last line, while it asks after someone
@@ -376,6 +378,7 @@ class LivingWorld:
         self._watch_sent = None
         self._lead_ask = None
         self._lead_learned = set()
+        self._trips = trips.TripPlanner(here=str(getattr(context, "location", "") or "")) if self.trips else None
 
     @_never_raises
     def conversation_started(self, world_id: str, context: Any) -> None:
@@ -903,6 +906,8 @@ class LivingWorld:
                 logger.exception("Living World: could not send the guard watch windows; carrying on")
         if self.guard and self.store is not None:
             self._hints_to_send += self._guard_for(self.store).take_notices()   # shift started / over
+        if self._trips is not None:
+            self._hints_to_send += self._trips.take_notices()   # "Go with Alfhild to Battle-Born Farm? Say yes or no."
         if self._hints_to_send:
             keys[KEY_HINTS] = self._hints_to_send
             self._hints_to_send = []
@@ -1327,10 +1332,29 @@ class LivingWorld:
                 (timeline, "dialogue", str(model or "unknown"), npc_id, self.conv_id, trace, latency_ms, status, error))
 
     def promise_parser(self, actions: list) -> Any:
-        """A reply parser that starts Sit / Drink when the NPC says they are about to (dialogue/promises.py)."""
-        if not self.keep_promises:
+        """A reply parser that starts Sit / Drink when the NPC says they are about to (dialogue/promises.py),
+        and asks the player before an NPC who agreed to go somewhere sets off (dialogue/trips.py)."""
+        also = []
+        if self._trips is not None:
+            from src.actions.function_manager import FunctionManager
+            also = [trips.TripWatcher(self._trips, actions, FunctionManager._actions.keys())]
+        if not self.keep_promises and not also:
             return None
-        return promises.make_parser(actions)
+        return promises.make_parser(actions, keep_promises=self.keep_promises, also=also)
+
+    @_never_raises
+    def trip_notes(self, text: str, context: Any) -> list[str]:
+        """The player's answer to "Go with Alfhild to Battle-Born Farm?", as a note for the dialogue model."""
+        if self._trips is None or context is not self._context or not text or not text.strip():
+            return []
+        player = context.npcs_in_conversation.get_player_character()
+        if player is not None:
+            self._trips.player_name = player.name
+        here = str(getattr(context, "location", "") or "")
+        if here:
+            self._trips.here = here
+        note = self._trips.player_said(text.strip())
+        return [note] if note else []
 
     def voice_allowed(self, character: Any) -> bool:
         """False if this NPC's bound voice differs from the voice Mantella is about to use."""
