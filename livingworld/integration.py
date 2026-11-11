@@ -207,6 +207,8 @@ class LivingWorld:
             "0", "false", "no", "off"}   # Mantella's own summaries roll back with the save
         self._surrender_pending: set[str] = set()
         self._surrender_done: set[str] = set()
+        self._surrender_all: set[str] = set()
+        self._surrender_sent: set[str] = set()
         self.surrender = enabled and surrender.enabled()   # a survivor begs for their life; MANTELLA_LW_SURRENDER=0 off
         self.wingman = self.surrender and wingman.enabled()   # ...and plays the player's wingman; MANTELLA_LW_WINGMAN=0 off
         self.side_jobs = self.surrender and side_jobs.enabled()   # ...and steals or flirts for coin in Whiterun; MANTELLA_LW_SALONIA_JOBS=0 off
@@ -451,6 +453,8 @@ class LivingWorld:
         self._desk = side_jobs.Desk() if self.side_jobs else None
         self._surrender_pending = set()   # survivors in this conversation who have not agreed to follow yet
         self._surrender_done = set()      # ...and those who have (Follow fired)
+        self._surrender_all = set()       # every survivor here: "come with me" / "go home" and her yes
+        self._surrender_sent = set()      # ...sent off (Unfollow fired)
 
     @_never_raises
     def conversation_started(self, world_id: str, context: Any) -> None:
@@ -1509,6 +1513,8 @@ class LivingWorld:
                         scene_lines.append(begged)
                     if begged and name not in self._surrender_done and surrender.is_fresh(db, npc_id, player_id, now):
                         self._surrender_pending.add(name)   # her "I'll come along" fires Follow
+                    if surrender.is_survivor(db, npc_id, player_id, now):
+                        self._surrender_all.add(name)       # ...or after the player asked (also Unfollow)
                     if self.wingman:
                         wing = wingman.line(db, npc_id, name, player_id, player_name or "the player", present,
                                             self._guards_here(db, present), now)
@@ -1601,7 +1607,7 @@ class LivingWorld:
                 " VALUES (?,?,?,?,?,?,?,?,?)",
                 (timeline, "dialogue", str(model or "unknown"), npc_id, self.conv_id, trace, latency_ms, status, error))
 
-    def promise_parser(self, actions: list) -> Any:
+    def promise_parser(self, actions: list, player_said: str | None = None) -> Any:
         """A reply parser that starts Sit / Drink when the NPC says they are about to (dialogue/promises.py),
         and asks the player before an NPC who agreed to go somewhere sets off (dialogue/trips.py)."""
         also = []
@@ -1611,11 +1617,12 @@ class LivingWorld:
         if self._desk is not None:
             from src.actions.function_manager import FunctionManager
             also.append(side_jobs.TravelWatcher(self._desk, FunctionManager._actions.keys()))
-        if self.surrender and self._surrender_pending:
+        if self.surrender and (self._surrender_pending or self._surrender_all):
             from src.actions.function_manager import FunctionManager
-            also.append(surrender.FollowWatcher(self._surrender_pending, self._player_said,
+            also.append(surrender.FollowWatcher(self._surrender_pending, player_said or self._player_said,
                                                 {getattr(a, "identifier", None) for a in actions}
-                                                | set(FunctionManager._actions.keys()), self._surrender_done))
+                                                | set(FunctionManager._actions.keys()), self._surrender_done,
+                                                self._surrender_all, self._surrender_sent))
         if not self.keep_promises and not also:
             return None
         return promises.make_parser(actions, keep_promises=self.keep_promises, also=also)

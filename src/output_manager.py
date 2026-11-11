@@ -26,7 +26,7 @@ from src.llm.ai_client import AIClient
 from src.llm.client_base import ClientBase
 from src.model_profile_manager import get_profile_manager, ModelProfileManager
 from src.actions.function_manager import FunctionManager
-from src.llm.messages import AssistantMessage, ToolMessage
+from src.llm.messages import AssistantMessage, ToolMessage, UserMessage # LIVINGWORLD PATCH: UserMessage
 from src.tts.ttsable import TTSable
 from src.tts.synthesization_options import SynthesizationOptions
 from src.tts.tts_factory import parse_tts_service, create_tts
@@ -285,6 +285,17 @@ class ChatManager:
             tool_result_message = ToolMessage(tool_call_id, "done")
             messages.add_message(tool_result_message)
     
+    @staticmethod
+    def __last_player_text(messages: message_thread) -> str | None: # LIVINGWORLD PATCH: what this reply answers
+        try:
+            for i in range(len(messages) - 1, -1, -1):
+                m = messages[i]
+                if isinstance(m, UserMessage) and not m.is_system_generated_message:
+                    return m.text
+        except Exception:
+            pass
+        return None
+
     @utils.time_it
     async def process_response(self, active_character: Character, blocking_queue: SentenceQueue, messages : message_thread, characters: Characters, actions: list[Action], tools: list[dict] | None, game: Gameable | None = None):
         """Stream response from LLM one sentence at a time"""
@@ -315,7 +326,7 @@ class ChatManager:
                 sentence_length_parser(self.__config.number_words_tts),
                 max_count_sentences_parser(max_response_sentences, not characters.contains_player_character(), self.__config.narration_handling == NarrationHandlingEnum.CUT_NARRATIONS)
             ])
-            promise_parser = getattr(self, "living_world", None) and self.living_world.promise_parser(actions) # LIVINGWORLD PATCH: NPCs do what they say they will
+            promise_parser = getattr(self, "living_world", None) and self.living_world.promise_parser(actions, self.__last_player_text(messages)) # LIVINGWORLD PATCH: NPCs do what they say they will
             if promise_parser: # LIVINGWORLD PATCH: right after the actions parser, so "Sit:" counts as already done
                 parser_chain.insert(next(i for i, p in enumerate(parser_chain) if isinstance(p, actions_parser)) + 1, promise_parser) # LIVINGWORLD PATCH
 
