@@ -43,7 +43,7 @@ from livingworld.store.minors import is_child
 from livingworld.intimacy import scenes as intimate_scenes
 from livingworld.intimacy import confront
 from livingworld.guard import decency
-from livingworld.social import surrender, wingman
+from livingworld.social import side_jobs, surrender, wingman
 from livingworld.bodylang.peek import KEY_PEEK_ON, peek_enabled
 from livingworld.guard.profiles import GuardFacts
 from livingworld.guard.service import ACTIONS as GUARD_ACTIONS, ENLIST as GUARD_ENLIST, Guard, Scene as GuardScene
@@ -203,6 +203,8 @@ class LivingWorld:
         self.decency = enabled and decency.enabled()   # guards tell a naked player to cover up; MANTELLA_LW_DECENCY=0 off
         self.surrender = enabled and surrender.enabled()   # a survivor begs for their life; MANTELLA_LW_SURRENDER=0 off
         self.wingman = self.surrender and wingman.enabled()   # ...and plays the player's wingman; MANTELLA_LW_WINGMAN=0 off
+        self.side_jobs = self.surrender and side_jobs.enabled()   # ...and steals or flirts for coin in Whiterun; MANTELLA_LW_SALONIA_JOBS=0 off
+        self._desk: side_jobs.Desk | None = None   # this conversation's side job words, notices and orders
         self.peek = enabled and peek_enabled()   # women's eyes drift to a naked player; MANTELLA_LW_PEEK=0 off
         self.fog = enabled and fog.fog_enabled()    # names and places unknown until told (livingworld/fog); MANTELLA_LW_FOG=0 off
         self._fog_labels: dict[str, str | None] = {}   # Mantella's 6-digit ref id -> what the game shows while unknown
@@ -305,6 +307,11 @@ class LivingWorld:
         if not gestures_enabled():   # MANTELLA_LW_GESTURES=0: a game still sending them is ignored
             body_raw = [r for r in body_raw if not is_gesture_record(r)]
         raw = [r for r in raw if not is_presence(r)]
+        job_raw = [r for r in raw if side_jobs.is_job_record(r)]
+        if job_raw:
+            raw = [r for r in raw if not side_jobs.is_job_record(r)]
+            if self.side_jobs and self.store is not None:
+                self._side_job_records(job_raw)
         if body_raw and self.store is not None and self.body_language:
             try:
                 self._body_for(self.store).ingest(body_raw)
@@ -429,6 +436,7 @@ class LivingWorld:
         self._lead_ask = None
         self._lead_learned = set()
         self._trips = trips.TripPlanner(here=str(getattr(context, "location", "") or "")) if self.trips else None
+        self._desk = side_jobs.Desk() if self.side_jobs else None
 
     @_never_raises
     def conversation_started(self, world_id: str, context: Any) -> None:
@@ -447,6 +455,7 @@ class LivingWorld:
         self._npc_ids.clear()
         self._present.clear()
         self._sync(context)
+        self._side_jobs_started(context)
         logger.log(23, f"Living World: conversation {self.conv_id} started in {context.location}"
                        f" at game day {context.game_days:.2f} with {', '.join(npcs.get_all_names())}")
 
@@ -1041,6 +1050,11 @@ class LivingWorld:
             self._hints_to_send += self._guard_for(self.store).take_notices()   # shift started / over
         if self._trips is not None:
             self._hints_to_send += self._trips.take_notices()   # "Go with Alfhild to Battle-Born Farm? Say yes or no."
+        if self._desk is not None:
+            self._hints_to_send += self._desk.take_notices()   # "Salonia's marks: say one, two or three, or no:"
+            orders = self._desk.take_orders()
+            if orders:
+                keys[side_jobs.KEY_JOB_DO] = orders
         if self._hints_to_send:
             keys[KEY_HINTS] = self._hints_to_send
             self._hints_to_send = []
@@ -1097,6 +1111,7 @@ class LivingWorld:
         keys[confront.KEY_CONFRONT_ON] = bool(self.confront)
         keys[decency.KEY_DECENCY_ON] = bool(self.decency)
         keys[surrender.KEY_SURRENDER_ON] = bool(self.surrender)
+        keys[side_jobs.KEY_JOBS_ON] = bool(self.side_jobs)
         keys[KEY_PEEK_ON] = bool(self.peek and self.body_language)
         if self.confront and self.store is not None:
             try:
@@ -1432,6 +1447,11 @@ class LivingWorld:
                                             self._guards_here(db, present), now)
                         if wing:
                             scene_lines.append(wing)
+                    if self._desk is not None:
+                        job_line = self._side_job_line(db, npc_id, name, player_id, player_name or "the player",
+                                                       present, now)
+                        if job_line:
+                            scene_lines.append(job_line)
                 if self.intimacy and self._scenes_now:
                     from livingworld.perception.attire import sex_of
                     from livingworld.intimacy.common import partner_in, partners_of
@@ -1516,6 +1536,9 @@ class LivingWorld:
         if self._trips is not None:
             from src.actions.function_manager import FunctionManager
             also = [trips.TripWatcher(self._trips, actions, FunctionManager._actions.keys())]
+        if self._desk is not None:
+            from src.actions.function_manager import FunctionManager
+            also.append(side_jobs.TravelWatcher(self._desk, FunctionManager._actions.keys()))
         if not self.keep_promises and not also:
             return None
         return promises.make_parser(actions, keep_promises=self.keep_promises, also=also)
@@ -1536,6 +1559,95 @@ class LivingWorld:
                 self._trips.learn_bio(c.name, str(getattr(c, "bio", "") or ""))   # "the farm" = her farm
         note = self._trips.player_said(text.strip())
         return [note] if note else []
+
+    @_never_raises
+    def side_job_notes(self, text: str, context: Any) -> list[str]:
+        """The player sending a companion out stealing or flirting for coin, or picking a mark (social/side_jobs.py)."""
+        if self._desk is None or context is not self._context or self.conv_id is None or not text or not text.strip():
+            return []
+        player = context.npcs_in_conversation.get_player_character()
+        if player is None:
+            return []
+        player_id = self._npc_ids.get(player.ref_id) or self._register(player, context.game_days)
+        others = [c for c in context.npcs_in_conversation.get_all_characters() if not c.is_player_character]
+        notes = []
+        with self.store.transaction() as db:
+            for c in others:
+                me = self._npc_ids.get(c.ref_id) or self._register(c, context.game_days)
+                if is_child(db, me) or not wingman.is_wingman(db, me, player_id):
+                    continue
+                note = self._desk.player_said(db, text.strip(), me, c.name, player_id, len(others) == 1,
+                                              str(getattr(context, "location", "") or ""), context.game_days)
+                if note:
+                    notes.append(note)
+                    break
+        return notes
+
+    def _side_jobs_started(self, context: Any) -> None:
+        """A job that happens as this conversation starts: the player covering for her, or a job that ran its course."""
+        if self._desk is None:
+            return
+        try:
+            player = context.npcs_in_conversation.get_player_character()
+            if player is None:
+                return
+            present = {self._npc_ids[c.ref_id]: c.name for c in context.npcs_in_conversation.get_all_characters()
+                       if c.ref_id in self._npc_ids and not c.is_player_character}
+            with self.store.transaction() as db:
+                self._desk.started(db, self._npc_ids[player.ref_id], present, context.game_days)
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not carry out a side job; carrying on")
+
+    def _side_job_line(self, db, npc_id: int, name: str, player_id: int, player_name: str, present: dict[int, str],
+                       now: float) -> str | None:
+        if is_child(db, npc_id) or not wingman.is_wingman(db, npc_id, player_id):
+            return None
+        private = not [i for i in present if i not in (npc_id, player_id)]
+        text, job = side_jobs.line(db, npc_id, name, player_id, player_name, private, self._desk.brought_up, now)
+        if job is not None:
+            self._desk.told[npc_id] = job
+        cur = side_jobs.current(db, npc_id, now)
+        if cur is not None and cur.stage == "scouting" and now >= cur.ready_gt and (private or self._desk.brought_up):
+            self._desk.proposal(cur, name)
+        return text
+
+    def _side_job_records(self, raw: list[str]) -> None:
+        """The game's ``job`` records: the dialogue choice asking for a job, picking a mark or calling it off,
+        and what the game really took."""
+        from livingworld.perception.records import _actor
+        pipeline = PerceptionPipeline(self.store)
+        for rec in raw:
+            try:
+                f = side_jobs.fields_of(rec)
+                gt = float(f.get("gt") or 0)
+                me = pipeline.identities.ensure_npc(_actor(f["actor"]).identity(), gt)
+                player = pipeline.identities.ensure_npc(_actor(f["target"]).identity(), gt) if f.get("target") else None
+                with self.store.transaction() as db:
+                    if f.get("key") and db.execute("SELECT 1 FROM world_event WHERE game_key = ? AND type = ?",
+                                                   (f["key"], side_jobs.EVENT)).fetchone():
+                        continue
+                    via = (f.get("via") or "").lower()
+                    if via == "loot":
+                        job = next((j for j in side_jobs.jobs(db, gt + 1.0, me) if str(j.job_id) == f.get("task")), None)
+                        if job is not None:
+                            side_jobs.record_loot(db, job, side_jobs.parse_loot(f.get("loot")),
+                                                  int(float(f.get("gold") or 0)), gt, f.get("key"))
+                        continue
+                    if player is None or is_child(db, me) or not wingman.is_wingman(db, me, player):
+                        continue
+                    job = side_jobs.current(db, me, gt)
+                    if via == "ask" and f.get("task") in (side_jobs.THEFT, side_jobs.FLIRT):
+                        side_jobs.ask(db, me, player, f["task"], gt, f.get("loc"), f.get("key"))
+                    elif via == "approve" and job is not None and job.stage == "scouting" and gt >= job.ready_gt:
+                        pick = int(f.get("task") or 1) - 1
+                        if 0 <= pick < len(job.marks):
+                            side_jobs.approve(db, job, pick, gt)
+                    elif via == "drop" and job is not None and job.stage in ("scouting", "approved"):
+                        side_jobs.drop(db, job, gt)
+            except Exception:
+                self.errors += 1
+                logger.exception(f"Living World: side job record not stored: {rec[:200]}")
 
     def voice_allowed(self, character: Any) -> bool:
         """False if this NPC's bound voice differs from the voice Mantella is about to use."""
@@ -1603,6 +1715,15 @@ class LivingWorld:
                 "SELECT COALESCE(MAX(game_time), (SELECT started_gt FROM conversation WHERE conv_id = ?))"
                 " FROM utterance WHERE conv_id = ?", (self.conv_id, self.conv_id))
         self._store_running_scenes()
+        if self._desk is not None and self._desk.told:
+            try:
+                with self.store.transaction() as db:
+                    spoke = {r[0] for r in db.execute(
+                        "SELECT DISTINCT speaker_id FROM utterance WHERE conv_id = ?", (self.conv_id,)).fetchall()}
+                    self._desk.closed(db, game_days, spoke)
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not mark a side job as reported; carrying on")
         ConversationLog(self.store).close(self.conv_id, game_days)
         if self.tasks:
             try:
