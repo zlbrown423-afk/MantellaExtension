@@ -153,7 +153,10 @@ def test_mid_scene_the_npc_knows_what_is_happening_and_that_slaps_are_part_of_it
     assert "Gerdur is in the middle of an intimate scene with Torvar right now (kissing and spanking)" in prompt
     assert "slaps and rough play between Gerdur and Torvar right now are part of this scene, not an attack" in prompt
     db = open_db(tmp_path)
-    assert db.execute("SELECT COUNT(*) FROM world_event WHERE type LIKE 'romance.%'").fetchone()[0] == 0
+    # the snapshot itself stores nothing; the scene is stored, as still running, only when the conversation
+    # closes with it still going (test_scene_seers_and_open.py)
+    rows = db.execute("SELECT payload_json FROM world_event WHERE type LIKE 'romance.%'").fetchall()
+    assert len(rows) == 1 and '"ongoing": true' in rows[0][0]
 
 
 def test_a_bystander_who_can_see_it_knows_and_one_who_cannot_does_not():

@@ -130,6 +130,45 @@ def test_a_climax_is_remembered_and_seen(tmp_path):
     assert memories(db, "Sigrid")[-1]["content"] == "I saw Torvar finish on Gerdur's face in Whiterun."
 
 
+def test_many_climaxes_in_one_scene_are_remembered_once(tmp_path):
+    # 2026-11-10: one 25-minute scene sent 41 climaxes and left 327 near-identical memories on 6 NPCs
+    events = [climax(PLAYER, actors.gerdur(), 3.5 + i * 0.01, acts=("vaginalsex",), witnesses=[seen(SIGRID, 4.0)])
+              for i in range(5)]
+    talk(tmp_path, [actors.gerdur()], 3.56, events=events)
+    db = open_db(tmp_path)
+    assert len(memories(db, "Gerdur")) == 1
+    assert len(memories(db, "Sigrid")) == 1
+    assert db.execute("SELECT COUNT(*) FROM world_event WHERE type = 'intimacy.climax'").fetchone()[0] == 5
+
+
+def test_someone_who_walks_in_later_still_remembers_it(tmp_path):
+    first = climax(PLAYER, actors.gerdur(), 3.5, acts=("vaginalsex",))
+    later = climax(PLAYER, actors.gerdur(), 3.51, acts=("vaginalsex",), witnesses=[seen(SIGRID, 4.0)])
+    talk(tmp_path, [actors.gerdur()], 3.52, events=[first, later])
+    db = open_db(tmp_path)
+    assert len(memories(db, "Gerdur")) == 1
+    assert memories(db, "Sigrid")[-1]["content"] == "I saw Torvar finish inside Gerdur in Whiterun."
+
+
+def test_a_new_scene_is_remembered_again(tmp_path):
+    talk(tmp_path, [actors.gerdur()], 3.51, events=[
+        climax(PLAYER, actors.gerdur(), 3.5, acts=("vaginalsex",)),
+        scene([PLAYER, actors.gerdur()], 3.505, acts=("vaginalsex",)),
+        climax(PLAYER, actors.gerdur(), 3.6, acts=("blowjob",))])
+    db = open_db(tmp_path)
+    climaxes_remembered = [m for m in memories(db, "Gerdur") if "finished" in m["content"]]
+    assert len(climaxes_remembered) == 2
+
+
+def test_the_turn_note_keeps_people_in_and_around_a_scene_on_it():
+    gerdur, hod, alvor = 1, 2, 3
+    live = scenes.SceneNow({10: "Torvar", gerdur: "Gerdur"}, ["vaginalsex"], seen_by={hod})
+    assert scenes.turn_note(gerdur, "Gerdur", [live]).startswith(
+        "Gerdur is in the middle of an intimate scene with Torvar as they speak (sex).")
+    assert "does not act as if it were not happening" in scenes.turn_note(hod, "Hod", [live])
+    assert scenes.turn_note(alvor, "Alvor", [live]) is None
+
+
 def test_the_mess_shows_until_a_bath(tmp_path):
     talk(tmp_path, [actors.gerdur()], 3.51, events=[climax(PLAYER, actors.gerdur(), 3.5, acts=("blowjob",))])
     snap = [attire(PLAYER, "clothing", 3.52), attire(actors.gerdur(), "clothing", 3.52)]

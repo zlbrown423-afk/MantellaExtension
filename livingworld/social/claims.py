@@ -135,11 +135,34 @@ def appraise(db, event) -> int | None:
         " truth_event_id, sensitivity) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         (event["timeline_id"], subject, act_name, obj, detail, valence, magnitude, event["location"],
          event["game_time"], event["event_id"], sensitivity)).lastrowid
+    _give_copies(db, event, claim_id, subject, obj, act_name, etype, sensitivity, valence, magnitude)
+    return claim_id
+
+
+def witnesses_added(db, event_id: int, npc_ids: list[int]) -> int:
+    """People added to an event that was already appraised (a scene completed after it was stored while still
+    running, ``intimacy/scenes.py``) get their own copy of its claim. Returns how many got one."""
+    claim = db.execute("SELECT claim_id, subject_id, object_id, act, valence, magnitude, sensitivity FROM claim"
+                       " WHERE truth_event_id = ? ORDER BY claim_id LIMIT 1", (event_id,)).fetchone()
+    if claim is None or not npc_ids:
+        return 0                 # not appraised yet (appraisal will include them) or nothing people talk about
+    event = db.execute("SELECT * FROM world_event WHERE event_id = ?", (event_id,)).fetchone()
+    claim_id, subject, obj, act_name, valence, magnitude, sensitivity = claim
+    return _give_copies(db, event, claim_id, subject, obj, act_name, event["type"], sensitivity, valence, magnitude,
+                        only=set(npc_ids))
+
+
+def _give_copies(db, event, claim_id: int, subject: int, obj: int | None, act_name: str, etype: str,
+                 sensitivity: str, valence: float, magnitude: float, only: set[int] | None = None) -> int:
+    """Each person who perceived the event holds the claim (``only``: just these people)."""
+    given = 0
     perceivers = db.execute(
         "SELECT w.npc_id, m.confidence, n.is_player, w.how FROM event_witness w JOIN npc n ON n.npc_id = w.npc_id"
         " LEFT JOIN memory m ON m.event_id = w.event_id AND m.owner_id = w.npc_id"
         " WHERE w.event_id = ? AND n.is_child = 0", (event["event_id"],)).fetchall()
     for npc_id, confidence, is_player, how in perceivers:
+        if only is not None and npc_id not in only:
+            continue
         if is_player or npc_id == subject or is_child(db, npc_id):
             continue
         share = "yes"
@@ -162,7 +185,8 @@ def appraise(db, event) -> int | None:
             romance.on_learned(db, event["timeline_id"], npc_id,
                                {"act": act_name, "subject_id": subject, "object_id": obj}, believed,
                                event["game_time"], event["event_id"])
-    return claim_id
+        given += 1
+    return given
 
 
 GUARD_ACTS = {"guard.enlisted": "enlisted", "guard.promoted": "promoted", "guard.demoted": "demoted",

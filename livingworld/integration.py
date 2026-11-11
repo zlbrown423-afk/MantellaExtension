@@ -186,6 +186,8 @@ class LivingWorld:
         self._body: dict[int, BodyLanguage] = {}    # id(store) -> body language for that world
         self.intimacy = enabled and intimacy_enabled()   # OStim scenes (livingworld/intimacy); MANTELLA_LW_INTIMACY=0 off
         self._scenes_now: list[intimate_scenes.SceneNow] = []   # scenes running near the player, from the game's snapshot
+        self._scene_records: list[Any] = []         # that snapshot's records, stored if still running at close
+        self._scene_seers = intimate_scenes.SceneSeers()   # who each running scene's snapshots showed seeing it
         self.confront = self.intimacy and confront.enabled()   # partners who catch each other speak up; MANTELLA_LW_CONFRONT=0 off
         self._fine_sent: set[int] = set()           # lines whose PayFine was handled
         self._held_actions: dict[str, list[dict[str, Any]]] = {}   # speaker ref id -> actions from an action-only reply
@@ -252,6 +254,12 @@ class LivingWorld:
     def actors_seen(self, actor_jsons: list[dict[str, Any]] | None) -> None:
         """Keep the full form IDs from the request, before Mantella truncates them."""
         for actor_json in actor_jsons or []:
+            # the game has been seen to slip a non-actor entry into the list (an end-conversation request); skip
+            # it rather than drop every actor after it
+            if not isinstance(actor_json, dict) or comm_consts.KEY_ACTOR_BASEID not in actor_json \
+                    or comm_consts.KEY_ACTOR_REFID not in actor_json or comm_consts.KEY_ACTOR_NAME not in actor_json:
+                logger.debug(f"Living World: skipped an actor entry with no form IDs: {str(actor_json)[:200]}")
+                continue
             identity = ActorIdentity.from_actor_json(actor_json)
             self._identities[identity.ref.mantella_id] = identity
             try:
@@ -297,6 +305,8 @@ class LivingWorld:
         if not (raw or attire_raw) or self.store is None:
             return 0
         pipeline = PerceptionPipeline(self.store)
+        if self.intimacy:
+            pipeline.scene_seers = self._scene_seers   # end and climax records also get the snapshots' seers
         outcomes = pipeline.ingest(raw + attire_raw)
         stored = len([o for o in outcomes if not o.duplicate])
         if stored:
@@ -326,6 +336,8 @@ class LivingWorld:
             for actor in [record.actor, record.target, record.party] + [w.actor for w in record.witnesses]:
                 if actor is not None and actor.ref_id not in ids:
                     ids[actor.ref_id] = identities.ensure_npc(actor.identity(), record.game_time)
+        self._scene_records = records
+        self._scene_seers.note(records)
         return intimate_scenes.snapshot(records, ids)
 
     def _attire_snapshot(self, attire_raw: list[str], pipeline: PerceptionPipeline) -> dict[int, awareness.AttireNow]:
@@ -373,6 +385,7 @@ class LivingWorld:
         self._pending = True
         self._attire_now = {}
         self._scenes_now = []
+        self._scene_records = []
         self._moods_shown = {}
         self._moods_to_send = {}
         self._guard_sent = set()
@@ -1286,6 +1299,28 @@ class LivingWorld:
             logger.exception("Living World: could not add body language events; leaving them out")
             return []
 
+    def scene_notes(self, context: Any) -> list[str]:
+        """A note on the player's line while someone in the conversation is in, or watching, an intimate scene.
+        The prompt already says so, but far from the reply; without this the NPCs carried on with the earlier
+        topic as if nothing were happening."""
+        if not self.intimacy or self.store is None or context is None or not self._scenes_now:
+            return []
+        try:
+            now = context.game_days
+            out = []
+            for c in context.npcs_in_conversation.get_all_characters():
+                if c.is_player_character:
+                    continue
+                npc_id = self._npc_ids.get(c.ref_id) or self._register(c, now)
+                line = intimate_scenes.turn_note(npc_id, c.name, self._scenes_now)
+                if line:
+                    out.append(line)
+            return out
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not add the intimate scene note; leaving it out")
+            return []
+
     def _body_profiles(self) -> list[str]:
         if not self.body_language or self.store is None or self._context is None:
             return []
@@ -1321,10 +1356,10 @@ class LivingWorld:
                         for s in self._scenes_now:
                             if npc_id in s.people:
                                 watched_by |= {w for w in s.seen_by if partner_in(db, w, [npc_id]) == npc_id}
-                    scene_lines = intimate_scenes.lines_for(npc_id, name, self._scenes_now, present,
-                                                            is_woman=sex_of(db, npc_id) == "female",
-                                                            partners=partners_of(db, npc_id, self._scenes_now),
-                                                            confront=self.confront, watched_by=watched_by)
+                    scene_lines += intimate_scenes.lines_for(npc_id, name, self._scenes_now, present,
+                                                             is_woman=sex_of(db, npc_id) == "female",
+                                                             partners=partners_of(db, npc_id, self._scenes_now),
+                                                             confront=self.confront, watched_by=watched_by)
                 if self.confront and not is_child(db, npc_id):
                     scene_lines += confront.grievance_lines(db, npc_id, name, now, present)
                 if self.intimacy and not is_child(db, npc_id):
@@ -1480,6 +1515,7 @@ class LivingWorld:
             game_days = self.store.scalar(
                 "SELECT COALESCE(MAX(game_time), (SELECT started_gt FROM conversation WHERE conv_id = ?))"
                 " FROM utterance WHERE conv_id = ?", (self.conv_id, self.conv_id))
+        self._store_running_scenes()
         ConversationLog(self.store).close(self.conv_id, game_days)
         if self.tasks:
             try:
@@ -1503,6 +1539,26 @@ class LivingWorld:
                     self._workers[world_id].notify()
         self.conv_id = None
         self._context = None
+
+    def _store_running_scenes(self) -> None:
+        """Scenes the last snapshot showed still running: stored now, marked ongoing, because the game only sends
+        a scene's end record with its next request, and that may not come (2026-11-11: the second scene with
+        Gisli ran 17:00-17:09 after the last conversation and was never stored). The end record, if it does come,
+        completes the stored event (``intimacy/scenes.record_scene``)."""
+        records, self._scene_records = self._scene_records, []
+        if not self.intimacy or self.store is None or not records:
+            return
+        try:
+            pipeline = PerceptionPipeline(self.store)
+            stored = 0
+            for record in self._scene_seers.open_records(records):
+                outcome = intimate_scenes.record_scene(pipeline, record, ongoing=True)
+                stored += outcome.event_id is not None and not outcome.duplicate
+            if stored:
+                self._social_for(self.store).appraise_new()
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not store a scene still running at the end of the conversation")
 
     def _sync(self, context: Any) -> None:
         log = ConversationLog(self.store)
