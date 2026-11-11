@@ -25,7 +25,10 @@ conversations still know how they came to be with the player; the memory does th
 from __future__ import annotations
 
 import json
+import logging
 import os
+import re
+from typing import Any, Iterable
 
 from livingworld import mood as moods
 
@@ -35,6 +38,8 @@ ROLE = "surrender"
 FRESH_DAYS = 0.05        # about an hour of game time: the conversation this record started
 AFTER_DAYS = 30.0        # a background line for this long afterwards (the memory lasts on its own)
 TERRIFIED = moods.Mood("terrified", 1)
+
+logger = logging.getLogger("livingworld.surrender")
 
 
 def enabled() -> bool:
@@ -125,3 +130,82 @@ def line(db, survivor: int, name: str, player: int, player_name: str, now: float
                 f" along, because {name} has nobody and nowhere left.")
     return text + (f" If {player_name} agrees to take {name} along, use Follow. If {player_name} refuses, sends"
                    f" {name} away or threatens {name}, {name} may use Flee. Never use Attack.")
+
+
+# ---- her "yes, I'll come along" really makes her follow ----------------------------------------------
+# 2026-11-11 test: Salonia begged, the player took her along, she said "I'll come along", and the model never
+# called Follow, so she was not a follower (Unfollow and going home then did nothing). While a surrender is
+# fresh, a line of hers that goes along with the player gets Follow added, unless the player's last line
+# turned her away. Begging to be taken ("Please, let me come with you?") is a question or a plea, not this.
+
+FOLLOW = "mantella_npc_follow"
+
+_ACCEPT = re.compile(
+    r"\b(?:i\s*'?\s*ll|i\s+will|i\s*'?\s*m\s+(?:coming|going\s+to\s+(?:come|follow|go))|i\s+shall)\s+(?:\w+\s+){0,2}?"
+    r"(?:come\s+(?:with\s+you|along)|follow\s+you|go\s+with\s+you|stay\s+(?:with|close\s+to|by)\s+you|join\s+you"
+    r"|accompany\s+you|be\s+at\s+your\s+side|keep\s+up)\b"
+    r"|\bi\s*'?\s*m\s+(?:right\s+)?behind\s+you\b|\blead\s+the\s+way\b|\bwherever\s+you\s+(?:go|lead)\b",
+    re.IGNORECASE)
+_NOT_NOW = re.compile(r"\b(?:not|never|if|unless|later|once|when)\b|n\s*'?\s*t\b", re.IGNORECASE)
+_PLAYER_NO = re.compile(r"^\W*(?:no|nope|nah|never)\b|\b(?:go\s+away|leave\s+me|get\s+lost|begone|be\s+gone|on\s+your\s+own"
+                        r"|you\s+can\s*'?\s*t\s+come|you\s+cannot\s+come|not\s+coming|stay\s+here|don\s*'?\s*t\s+follow"
+                        r"|do\s+not\s+follow|run\s+along|off\s+with\s+you|i\s+don\s*'?\s*t\s+need\s+you)\b", re.IGNORECASE)
+
+
+def is_fresh(db, survivor: int, player: int, now: float) -> bool:
+    """Whether ``survivor`` surrendered to the player within this conversation's span (``FRESH_DAYS``)."""
+    found = _latest(db, survivor, player, now)
+    return found is not None and now - found[1] <= FRESH_DAYS
+
+
+def accepts(text: str) -> bool:
+    """A line that goes along with being taken: "Thank you, I'll come along", "I'll follow you anywhere"."""
+    text = (text or "").replace("’", "'")
+    if not text.strip() or text.rstrip().endswith("?"):
+        return False
+    m = _ACCEPT.search(text)
+    if not m:
+        return False
+    clause = re.split(r"[.!?;]", text[m.start():], maxsplit=1)[0]
+    before = re.split(r"[.!?;]", text[:m.start()])[-1]
+    return not _NOT_NOW.search(clause) and not re.search(r"\b(?:let\s+me|please|could\s+i|may\s+i|can\s+i)\b", before,
+                                                         re.IGNORECASE)
+
+
+def turned_away(player_text: str | None) -> bool:
+    return bool(player_text) and bool(_PLAYER_NO.search(player_text.replace("’", "'")))
+
+
+class FollowWatcher:
+    """In the reply parser chain (``promises.make_parser`` ``also``): adds Follow to a fresh survivor's line
+    that accepts. ``pending``: names of survivors not following yet; shared, emptied as each one follows."""
+
+    def __init__(self, pending: set[str], player_said: str | None, offered: Iterable[str], done: set[str] | None = None):
+        self.pending = pending
+        self.done = done if done is not None else set()
+        self.player_said = player_said
+        self.offered = FOLLOW in set(offered)
+
+    def note_actions(self, actions: Iterable[Any]) -> None:
+        for action in actions:
+            if isinstance(action, dict) and action.get("identifier") == FOLLOW:
+                for name in _sources(action):
+                    self.pending.discard(name)
+                    self.done.add(name)
+
+    def keep(self, speaker_name: str, text: str, sentence_actions: list) -> list[str]:
+        self.note_actions(sentence_actions)
+        if not self.offered or speaker_name not in self.pending or turned_away(self.player_said) or not accepts(text):
+            return []
+        sentence_actions.append({"identifier": FOLLOW, "arguments": {"source": [speaker_name]}})
+        self.pending.discard(speaker_name)
+        self.done.add(speaker_name)
+        logger.log(23, f"Living World surrender: {speaker_name} agreed to come along; Follow")
+        return [FOLLOW]
+
+
+def _sources(action: dict) -> list[str]:
+    src = (action.get("arguments") or {}).get("source")
+    if isinstance(src, str):
+        return [src]
+    return list(src or [])

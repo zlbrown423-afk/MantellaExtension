@@ -152,3 +152,54 @@ def test_wingman_switch_off(tmp_path, monkeypatch):
     talk(tmp_path, [SALONIA], 3.5, events=[surrendered(3.4995)])
     prompt, _ = talk(tmp_path, [SALONIA, YSOLDA], 4.1)
     assert "wingman" not in prompt
+
+
+# ---- her "I'll come along" makes her follow (2026-11-11: the model never called Follow) -------------------
+
+from livingworld.harness.scripted_llm import when_player_says  # noqa: E402
+from src.actions.function_manager import FunctionManager  # noqa: E402
+
+
+@pytest.fixture
+def reset_actions():
+    yield
+    FunctionManager._actions.clear()
+    FunctionManager._last_tool_calls = []
+
+
+@pytest.mark.parametrize("line", ["Thank you, thank you. I'll come along, I swear I'll be useful.",
+                                  "I'll follow you anywhere.", "I'm right behind you.", "I will stay close to you.",
+                                  "Lead the way."])
+def test_accepting(line):
+    assert surrender.accepts(line)
+
+
+@pytest.mark.parametrize("line", ["Please, let me come with you!", "May I come with you?", "I'll come along?",
+                                  "I won't follow you.", "I'll come with you once I've buried him.",
+                                  "Spare me, I beg you."])
+def test_not_accepting(line):
+    assert not surrender.accepts(line)
+
+
+def test_the_watcher_adds_follow_once_and_not_after_a_no():
+    pending = {"Salonia Carvain"}
+    w = surrender.FollowWatcher(pending, "Fine, you can come.", {surrender.FOLLOW})
+    acts = []
+    assert w.keep("Salonia Carvain", "I'll come along.", acts) == [surrender.FOLLOW]
+    assert acts == [{"identifier": surrender.FOLLOW, "arguments": {"source": ["Salonia Carvain"]}}]
+    assert w.keep("Salonia Carvain", "I'll follow you.", []) == [] and not pending
+    refused = surrender.FollowWatcher({"Salonia Carvain"}, "No. Go away.", {surrender.FOLLOW})
+    assert refused.keep("Salonia Carvain", "I'll come along.", []) == []
+
+
+def test_in_game_her_yes_carries_follow(tmp_path, reset_actions):
+    talk(tmp_path, [SALONIA], 3.5, events=[surrendered(3.4995)])
+    llm = ScriptedLLM(rules=[when_player_says("come", "Thank you. I'll come along, I promise I'll be useful.")],
+                      replies=["Please, spare me."])
+    with HeadlessSession(str(tmp_path), llm, settings={"disabled_actions": ""}) as s:
+        s.start([PLAYER, SALONIA], game_days=3.5005)
+        s.continue_until_player_turn()
+        said = s.say("Alright, you can come with me.")
+        s.end(game_days=3.502)
+    sent = [a for line in said for a in line.actions]
+    assert {"identifier": surrender.FOLLOW, "arguments": {"source": ["Salonia Carvain"]}} in sent
