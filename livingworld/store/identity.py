@@ -83,6 +83,16 @@ class VoiceBindingConflict(Exception):
     pass
 
 
+def game_voice_changed(bound_type: str | None, current_type: str | None) -> bool:
+    """True if the game now reports a different voice type than the one stored with a binding.
+
+    Unknown on either side counts as unchanged, so a missing voice type never loosens the lock.
+    """
+    if not bound_type or not current_type:
+        return False
+    return bound_type.strip().lower() != current_type.strip().lower()
+
+
 class IdentityRegistry:
     """Finds or creates ``npc`` rows and binds each NPC's voice the first time it is seen."""
 
@@ -127,11 +137,25 @@ class IdentityRegistry:
                    game_time: float) -> str:
         """Bind a voice on first sight and return the bound model.
 
-        A locked binding is never changed. If Mantella later asks for a different voice for the
-        same NPC, the binding wins and ``VoiceBindingConflict`` is raised so the caller can log it.
+        A locked binding is never changed by Mantella picking another voice model: if Mantella
+        later asks for a different voice for the same NPC while the game still reports the same
+        voice type, the binding wins and ``VoiceBindingConflict`` is raised so the caller can log it.
+
+        The one exception is when the game itself now gives the actor a different voice type than
+        the one stored with the binding. Leveled actors such as town guards are rebuilt from a
+        leveled list when their cell resets, and the same reference can come back with another
+        voice type (MaleGuard one day, MaleNordCommander the next). Named NPCs keep the voice type
+        of their base record, so this never fires for them. When it happens the binding follows
+        the game and is replaced (also when the model stays the same, so the stored voice type is current).
         """
         with self.store.transaction() as db:
-            row = db.execute("SELECT voice_model FROM voice_binding WHERE npc_id = ?", (npc_id,)).fetchone()
+            row = db.execute("SELECT voice_model, game_voice_type FROM voice_binding WHERE npc_id = ?",
+                             (npc_id,)).fetchone()
+            if row is not None and game_voice_changed(row[1], game_voice_type):
+                db.execute("DELETE FROM voice_binding WHERE npc_id = ?", (npc_id,))
+                logger.info("Living World: npc_id %s now has game voice type %s (was %s); voice rebound "
+                            "from '%s' to '%s'", npc_id, game_voice_type, row[1], row[0], voice_model)
+                row = None
             if row is None:
                 db.execute(
                     "INSERT INTO voice_binding (npc_id, tts_service, voice_model, game_voice_type, bound_gt)"

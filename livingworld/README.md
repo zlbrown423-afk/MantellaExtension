@@ -60,7 +60,7 @@ extraction call per NPC in it.
 | --- | --- | --- |
 | Group turns | `dialogue/group.py` | Each NPC gets their own AI call with their own one-on-one prompt (their bio and their recall only) plus a note naming who else is present. Others' lines are shown as "Name: text". A reply that tries to speak as someone else is cut off there |
 | Who speaks | `dialogue/group.py` | The NPC the player names first, otherwise the one who did not speak last. If the speaker names another NPC, that NPC answers next, up to 2 speakers per player turn |
-| Voice check | `integration.py` (`voice_allowed`) | Before synthesis, the voice Mantella picked must match the NPC's bound voice, or no audio is made and the error is logged |
+| Voice check | `integration.py` (`voice_allowed`) | Before synthesis, the voice Mantella picked must match the NPC's bound voice, or no audio is made and the error is logged. If the game itself now reports a different voice type for the actor (leveled guards rebuilt after a cell reset), the binding follows the game instead |
 | Call log | `integration.py` (`record_dialogue_call`) | One `llm_request` row per dialogue call with the speaker, and a `decision_trace` row listing the knowledge and memory ids that call's prompt held |
 
 Radiant conversations (two NPCs, no player) still use Mantella's own single call for now.

@@ -56,7 +56,8 @@ from livingworld.perf.monitor import PerfMonitor
 from livingworld.perf.stats import STATS as PERF
 from livingworld.store.conversation_log import ConversationLog
 from livingworld.store.timeline import resolve_load
-from livingworld.store.identity import ActorIdentity, FormId, IdentityRegistry, VoiceBindingConflict
+from livingworld.store.identity import (ActorIdentity, FormId, IdentityRegistry, VoiceBindingConflict,
+                                        game_voice_changed)
 from livingworld.store.world_store import WorldStore
 from livingworld.store import worlds
 from livingworld.store import rebind
@@ -1734,24 +1735,48 @@ class LivingWorld:
                 logger.exception(f"Living World: side job record not stored: {rec[:200]}")
 
     def voice_allowed(self, character: Any) -> bool:
-        """False if this NPC's bound voice differs from the voice Mantella is about to use."""
+        """False if this NPC's bound voice differs from the voice Mantella is about to use.
+
+        If the game itself now gives the actor another voice type (a leveled guard rebuilt after a
+        cell reset), the binding follows the game instead (see ``IdentityRegistry.bind_voice``).
+        """
         if not self.enabled or self.store is None or character.is_player_character:
             return True
         try:
             npc_id = self._npc_ids.get(character.ref_id)
             if npc_id is None:
                 return True
-            bound = self.store.scalar("SELECT voice_model FROM voice_binding WHERE npc_id = ?", (npc_id,))
+            rows = self.store.query(
+                "SELECT voice_model, game_voice_type FROM voice_binding WHERE npc_id = ?", (npc_id,))
+            if not rows:
+                return True
+            bound, bound_type = rows[0][0], rows[0][1]
+            game_type = getattr(character, "in_game_voice_model", None)
+            if game_voice_changed(bound_type, game_type):
+                IdentityRegistry(self.store).bind_voice(
+                    npc_id, character.tts_service or self.default_tts_service, character.tts_voice_model,
+                    game_type, self._voice_rebind_time())
+                logger.info(f"Living World: {character.name} now speaks with the game voice type {game_type} "
+                            f"(was {bound_type}); their voice follows the game: '{character.tts_voice_model}'")
+                return True
         except Exception:
             logger.exception("Living World: voice check failed; allowing the line")
             return True
-        if bound is not None and bound != character.tts_voice_model:
+        if bound != character.tts_voice_model:
             self.errors += 1
             logger.error(f"Living World: refused to voice {character.name} with '{character.tts_voice_model}'; "
                          f"their voice is bound to '{bound}'. No audio was made for this line. To change the voice on "
                          f"purpose, delete the voice_binding row for npc_id {npc_id}.")
             return False
         return True
+
+    def _voice_rebind_time(self) -> float:
+        """Game time for a voice rebound mid-conversation: when the open conversation started."""
+        if self.conv_id is not None:
+            started = self.store.scalar("SELECT started_gt FROM conversation WHERE conv_id = ?", (self.conv_id,))
+            if started is not None:
+                return float(started)
+        return 0.0
 
     def wait_for_jobs(self) -> int:
         """Run every due job now, on this thread. Returns how many ran."""
