@@ -21,7 +21,10 @@ from livingworld.work.templates import by_key
 
 
 def _matches(task: T.Task, item: str | None) -> bool:
-    return bool(task.need_item and item and task.need_item.lower() in item.lower())
+    """``need_item`` may list several items: 'Leek|Wheat|Gourd'."""
+    if not task.need_item or not item:
+        return False
+    return any(want.strip() and want.strip().lower() in item.lower() for want in task.need_item.split("|"))
 
 
 def consume(db, event) -> None:

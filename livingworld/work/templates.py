@@ -10,7 +10,7 @@ from typing import Any
 from livingworld.social import seed as social_seed
 from livingworld.store.minors import looks_like_child
 
-WORK_FILES = ("riverwood_work.json",)
+WORK_FILES = ("riverwood_work.json", "whiterun_work.json")
 PLAYER = "player"
 
 
@@ -78,12 +78,29 @@ def by_key(key: str) -> Template | None:
 
 @functools.lru_cache(maxsize=1)
 def _people() -> dict[str, tuple[str, str]]:
-    """person key -> (plugin, base form id) from the social seeds."""
+    """person key -> (plugin, base form id) from the social seeds, and from givers written as
+    ``Plugin.esm:0xBASEID`` (people outside the seeded villages, such as Alfhild in Whiterun)."""
     out = {}
     for s in social_seed.seeds():
         for p in s["people"]:
             out[p["key"]] = (p["plugin"], "0x" + p["base_id"].upper().rjust(8, "0"))
+    for t in templates():
+        for key in (t.giver, *t.helpers):
+            ref = form_ref(key)
+            if ref is not None:
+                out.setdefault(key, ref)
     return out
+
+
+def form_ref(key: str) -> tuple[str, str] | None:
+    """'Skyrim.esm:0x13BB0' -> ('Skyrim.esm', '0x00013BB0'); None for a seed person key."""
+    if ":" not in (key or ""):
+        return None
+    plugin, _, base = key.partition(":")
+    base = base.strip().lower().removeprefix("0x")
+    if not plugin.strip() or not base or any(c not in "0123456789abcdef" for c in base):
+        return None
+    return plugin.strip(), "0x" + base.upper().rjust(8, "0")
 
 
 def person_id(db, key: str) -> int | None:

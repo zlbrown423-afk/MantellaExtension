@@ -1,0 +1,77 @@
+{
+  "_about": "Work people around Whiterun need done. Same fields as riverwood_work.json. A giver who is not in a social seed file is written as Plugin.esm:0xBASEID (their base form id, as the Living World log prints it for 'new NPC'). need.item may list several items separated by | ; any of them counts.",
+  "templates": [
+    {
+      "key": "battleborn_harvest",
+      "giver": "Skyrim.esm:0x00013BB0",
+      "_giver_name": "Alfhild Battle-Born",
+      "community": "whiterun",
+      "location": "Battle-Born Farm",
+      "title": "help bring in the harvest at Battle-Born Farm",
+      "why": "The leeks, wheat and gourds have to come in before the weather turns, and the farmhands cannot pick it all alone",
+      "instructions": "Pick leeks, wheat and gourds in the Battle-Born Farm fields outside Whiterun and bring the crops to her; she pays for what is brought in.",
+      "need": {
+        "item": "Leek|Wheat|Gourd",
+        "count": 10,
+        "units": "crops"
+      },
+      "evidence": [
+        "given"
+      ],
+      "helpers": [
+        "player"
+      ],
+      "hours": [
+        6,
+        20
+      ],
+      "outdoors": true,
+      "bad_weather": [
+        "storm",
+        "thunder",
+        "blizzard"
+      ],
+      "ask_min_trust": -0.3,
+      "reward_gold": 40,
+      "size": 0.3,
+      "open_days": 7,
+      "cooldown_days": 3
+    },
+    {
+      "key": "pelagia_harvest",
+      "giver": "Skyrim.esm:0x0002C925",
+      "_giver_name": "Severio Pelagia",
+      "community": "whiterun",
+      "location": "Pelagia Farm",
+      "title": "help bring in the harvest at Pelagia Farm",
+      "why": "The farm feeds a good part of Whiterun's market, and there are more crops ripe than hands to pick them",
+      "instructions": "Pick the crops in the Pelagia Farm fields just outside Whiterun's gate and bring them to him; he pays for what is brought in.",
+      "need": {
+        "item": "Leek|Wheat|Gourd|Cabbage|Potato",
+        "count": 10,
+        "units": "crops"
+      },
+      "evidence": [
+        "given"
+      ],
+      "helpers": [
+        "player"
+      ],
+      "hours": [
+        6,
+        20
+      ],
+      "outdoors": true,
+      "bad_weather": [
+        "storm",
+        "thunder",
+        "blizzard"
+      ],
+      "ask_min_trust": -0.3,
+      "reward_gold": 40,
+      "size": 0.3,
+      "open_days": 7,
+      "cooldown_days": 3
+    }
+  ]
+}
