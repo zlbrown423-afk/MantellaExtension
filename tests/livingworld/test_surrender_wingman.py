@@ -237,3 +237,53 @@ def test_a_copy_already_met_as_a_stranger_is_taken_over(tmp_path):
     talk(tmp_path, [SALONIA_COPY], 3.55)   # met before the swap record arrived
     prompt, _ = talk(tmp_path, [SALONIA_COPY], 3.6, events=[rebind_record(3.5995)])
     assert "Plautis Carvain" in prompt
+
+
+# ---- later on (2026-11-11 14:22, the copy in Whiterun: "Can you follow me?" / "I will follow you", no Follow) ----
+
+def test_a_later_yes_counts_when_the_player_asked():
+    survivors = {"Salonia Carvain"}
+    offered = {surrender.FOLLOW, surrender.UNFOLLOW}
+    asked = surrender.FollowWatcher(set(), "Can you follow me?", offered, survivors=survivors)
+    acts = []
+    assert asked.keep("Salonia Carvain", "I will follow you.", acts) == [surrender.FOLLOW]
+    unasked = surrender.FollowWatcher(set(), "Nice weather.", offered, survivors=survivors)
+    assert unasked.keep("Salonia Carvain", "I will follow you.", []) == []
+    stranger = surrender.FollowWatcher(set(), "Can you follow me?", offered, survivors=survivors)
+    assert stranger.keep("Ysolda", "I will follow you.", []) == []
+
+
+@pytest.mark.parametrize("player,her,fires", [
+    ("Stop following me, go home.", "As you wish. I'll wait at the house.", True),
+    ("Go wait at Breezehome.", "I'll head there now.", True),
+    ("You can go now.", "Very well.", True),
+    ("Stop following me.", "No, I won't leave you.", False),
+    ("Stop following me.", "Must I?", False),
+    ("Let's go to the market.", "I'll go with you.", False),
+])
+def test_her_yes_to_being_sent_off_carries_unfollow(player, her, fires):
+    w = surrender.FollowWatcher(set(), player, {surrender.FOLLOW, surrender.UNFOLLOW}, survivors={"Salonia Carvain"})
+    acts = []
+    got = w.keep("Salonia Carvain", her, acts)
+    if fires:
+        assert got == [surrender.UNFOLLOW]
+        assert acts == [{"identifier": surrender.UNFOLLOW, "arguments": {"source": ["Salonia Carvain"]}}]
+    else:
+        assert surrender.UNFOLLOW not in got
+
+
+def test_in_game_the_copy_follows_and_unfollows_later(tmp_path, reset_actions):
+    talk(tmp_path, [SALONIA], 3.5, events=[surrendered(3.4995)])
+    llm = ScriptedLLM(rules=[when_player_says("follow me?", "I will follow you."),
+                             when_player_says("go home", "As you wish. I'll wait at the house.")],
+                      replies=["Hm."])
+    with HeadlessSession(str(tmp_path), llm, settings={"disabled_actions": ""}) as s:
+        s.start([PLAYER, SALONIA_COPY], game_days=3.9, context_extra={KEY_EVENTS: [rebind_record(3.8995)]})
+        s.continue_until_player_turn()
+        come = s.say("Can you follow me?")
+        home = s.say("Stop following me now, go home.")
+        s.end(game_days=3.91)
+    assert {"identifier": surrender.FOLLOW, "arguments": {"source": ["Salonia Carvain"]}} in \
+        [a for line in come for a in line.actions]
+    assert {"identifier": surrender.UNFOLLOW, "arguments": {"source": ["Salonia Carvain"]}} in \
+        [a for line in home for a in line.actions]
