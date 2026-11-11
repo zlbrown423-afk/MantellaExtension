@@ -66,7 +66,7 @@ class GameStateManager:
         from livingworld import diary # LIVINGWORLD PATCH
         world_id = input_json.get(diary.KEY_WORLD_ID) # LIVINGWORLD PATCH
         if world_id: # LIVINGWORLD PATCH
-            input_json = {**input_json, diary.KEY_WORLD_ID: self.WORLD_ID_CLEANSE_REGEX.sub("", str(world_id))} # LIVINGWORLD PATCH
+            input_json = {**input_json, diary.KEY_WORLD_ID: diary.clean_world_id(world_id)} # LIVINGWORLD PATCH: keeps the '-' of a world key
         return self.__living_world.diary_read(input_json) # LIVINGWORLD PATCH
 
     @utils.time_it
@@ -80,6 +80,7 @@ class GameStateManager:
         if input_json.__contains__(comm_consts.KEY_STARTCONVERSATION_WORLDID):
             world_id = input_json[comm_consts.KEY_STARTCONVERSATION_WORLDID]
             world_id = self.WORLD_ID_CLEANSE_REGEX.sub("", world_id)
+        world_id = self.__living_world.resolve_world(world_id, input_json) # LIVINGWORLD PATCH: the world key in the save survives a rename
 
         if input_json.__contains__(comm_consts.KEY_INPUTTYPE):
             self.process_stt_setup(input_json)

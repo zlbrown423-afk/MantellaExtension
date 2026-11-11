@@ -17,6 +17,7 @@ On with the Living World unless ``MANTELLA_LW_DIARY=0``.
 from __future__ import annotations
 
 import os
+import re
 
 ENV = "MANTELLA_LW_DIARY"
 MIN_TALKS_ENV = "MANTELLA_LW_DIARY_MIN_TALKS"
@@ -35,7 +36,7 @@ KEY_DIARY_TITLES = "mantella_lw_diary_titles"         # string[]: what the book 
 
 # The game opening a diary (its own request, outside any conversation)
 REQUEST_READ = "mantella_lw_diary_read"
-KEY_WORLD_ID = "mantella_lw_diary_world_id"           # string: player name + MCM world id (as a conversation start)
+KEY_WORLD_ID = "mantella_lw_diary_world_id"           # string: the save's world key, or player name + MCM world id
 KEY_OWNER_NPC_ID = "mantella_lw_diary_owner"          # int: the npc id the start reply gave for this diary
 KEY_SEEN_BY_OWNER = "mantella_lw_diary_seen"          # bool: the owner saw the player reading it
 KEY_WITNESS_REF_IDS = "mantella_lw_diary_witness_ref_ids"   # int[]: others who saw it (reference form IDs)
@@ -65,3 +66,9 @@ def min_talks() -> int:
 
 def max_rewrites() -> int:
     return _int_env(REWRITES_ENV, DEFAULT_REWRITES, 1)
+
+
+def clean_world_id(value: object) -> str:
+    """The diary's world id with anything but letters, digits and '-' removed (world keys such as
+    "Adventurer1-2" keep their dash; Mantella's own cleanse would drop it)."""
+    return re.sub(r"[^A-Za-z0-9-]+", "", str(value or ""))
