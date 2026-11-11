@@ -43,6 +43,7 @@ from livingworld.store.minors import is_child
 from livingworld.intimacy import scenes as intimate_scenes
 from livingworld.intimacy import confront
 from livingworld.guard import decency
+from livingworld.social import surrender, wingman
 from livingworld.bodylang.peek import KEY_PEEK_ON, peek_enabled
 from livingworld.guard.profiles import GuardFacts
 from livingworld.guard.service import ACTIONS as GUARD_ACTIONS, ENLIST as GUARD_ENLIST, Guard, Scene as GuardScene
@@ -200,6 +201,8 @@ class LivingWorld:
         self.asked_joins = enabled and joins.joins_enabled()   # only add people the player asked for (MANTELLA_LW_ASKED_JOINS=0 off)
         self.place = enabled and place.place_enabled()   # tell NPCs whether they are outdoors or inside (MANTELLA_LW_PLACE=0 off)
         self.decency = enabled and decency.enabled()   # guards tell a naked player to cover up; MANTELLA_LW_DECENCY=0 off
+        self.surrender = enabled and surrender.enabled()   # a survivor begs for their life; MANTELLA_LW_SURRENDER=0 off
+        self.wingman = self.surrender and wingman.enabled()   # ...and plays the player's wingman; MANTELLA_LW_WINGMAN=0 off
         self.peek = enabled and peek_enabled()   # women's eyes drift to a naked player; MANTELLA_LW_PEEK=0 off
         self.fog = enabled and fog.fog_enabled()    # names and places unknown until told (livingworld/fog); MANTELLA_LW_FOG=0 off
         self._fog_labels: dict[str, str | None] = {}   # Mantella's 6-digit ref id -> what the game shows while unknown
@@ -1093,6 +1096,7 @@ class LivingWorld:
         keys[intimate_scenes.KEY_INTIMACY_ON] = bool(self.intimacy)
         keys[confront.KEY_CONFRONT_ON] = bool(self.confront)
         keys[decency.KEY_DECENCY_ON] = bool(self.decency)
+        keys[surrender.KEY_SURRENDER_ON] = bool(self.surrender)
         keys[KEY_PEEK_ON] = bool(self.peek and self.body_language)
         if self.confront and self.store is not None:
             try:
@@ -1396,6 +1400,19 @@ class LivingWorld:
             logger.exception("Living World: could not work out body language profiles; the game keeps its last ones")
             return []
 
+    def _guards_here(self, db, present: dict[int, str]) -> set[int]:
+        """The people in this conversation who are guards: the game's word (IsGuard) or a guard career profile."""
+        out: set[int] = set()
+        if self._context is not None:
+            for c in self._context.npcs_in_conversation.get_all_characters():
+                f = self._guard_facts.get(c.ref_id)
+                if f is not None and f.is_guard and c.ref_id in self._npc_ids:
+                    out.add(self._npc_ids[c.ref_id])
+        for npc_id in present:
+            if db.execute("SELECT 1 FROM guard_profile WHERE npc_id = ?", (npc_id,)).fetchone():
+                out.add(npc_id)
+        return out
+
     def _noticed(self, npc_id: int, name: str, now: float, present: dict[int, str], player_id: int | None = None,
                  player_name: str | None = None) -> list[str]:
         try:
@@ -1406,6 +1423,15 @@ class LivingWorld:
                                         thane_of=self._thane_hold(db, npc_id, player_id))
                     if told:
                         scene_lines.append(told)
+                if self.surrender and player_id is not None and npc_id != player_id:
+                    begged = surrender.line(db, npc_id, name, player_id, player_name or "the player", now)
+                    if begged:
+                        scene_lines.append(begged)
+                    if self.wingman:
+                        wing = wingman.line(db, npc_id, name, player_id, player_name or "the player", present,
+                                            self._guards_here(db, present), now)
+                        if wing:
+                            scene_lines.append(wing)
                 if self.intimacy and self._scenes_now:
                     from livingworld.perception.attire import sex_of
                     from livingworld.intimacy.common import partner_in, partners_of

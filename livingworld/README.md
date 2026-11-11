@@ -422,6 +422,16 @@ grabs and hits as before). Children are never part of any of it: not in a scene,
 Off switches: `MANTELLA_LW_CONFRONT=0`, `MANTELLA_LW_DECENCY=0`, `MANTELLA_LW_PEEK=0` (peek is also off with body
 language off). Each reaches the game with the conversation start reply.
 
+### Surrender and the wingman (Salonia Carvain)
+
+| Piece | File | What it does |
+| --- | --- | --- |
+| Begging to be spared | `social/surrender.py`, Mantella-Spell `LwSurrender`, the LWSaloniaSurrender plugin | The plugin watches the Carvain party (Dark Brotherhood wedding guests, quests WEDL03/WEDL04) and sends `LivingWorld_Surrender` once Plautis and the bodyguard are dead. The game stops Salonia fighting or fleeing, walks her to the player, queues `react` `via=surrender` (`party` = her husband, `d` = other dead, `killer` = `player` or `other`) and starts a conversation. She gets a lasting memory of it and starts terrified (mood 1). Her prompt: submit, beg for her life, offer to come along; Follow if the player agrees, Flee if refused or threatened, never Attack. For 30 game days after, a short line says how she came to be with the player (wary of a killer, grieving otherwise) |
+| Wingman | `social/wingman.py` | Anyone who surrendered to the player insists on being their wingman: in a conversation with a woman she talks the player up and sets up openings. Bold, even lewd talk only when the woman is receptive (mood 7+, or attraction 0.4+), not spoken for, no guard is in the conversation and at most one other person listens; charm only in front of a guard or others; backs off from a cold woman (mood 3 or less) or one whose partner is standing there; nothing suggestive at all with a child present |
+
+Off switches: `MANTELLA_LW_SURRENDER=0` (also turns the wingman off; reaches the game with the start reply as
+`mantella_lw_surrender_on`), `MANTELLA_LW_WINGMAN=0`.
+
 ## Memory when talking again
 
 Each conversation is turned into each NPC's own memories and facts by a background extraction call. Before
