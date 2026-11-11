@@ -234,6 +234,18 @@ On with `MANTELLA_LIVING_WORLD=1`. Switch off with `set MANTELLA_LW_TRIPS=0`. No
 | Ask | The game shows "Go with Alfhild to Battle-Born Farm? Say yes or no." When the name could be several places, it shows numbered choices ("say one or two"). Nothing moves before the player answers. |
 | Go | "Yes", "one", "two" or the place's name puts `LeadTo` (the NPC walks, the player follows) on the NPC's next line, with a note so the NPC speaks as if setting off. If LeadTo is in Disabled Actions, `TravelTo` with `leave_now`. "No" drops it for the rest of the conversation; an ignored question lapses after two lines. |
 
+## Trade: a deal agreed in conversation actually happens
+
+"I'll give you 100 gold for those two amethysts" used to go nowhere with anyone who is not a merchant:
+Mantella's Barter only opens for shopkeepers (Skyrim ignores it on a guard), and Inventory only opens a
+window. The `Trade` action (`actions/trade.json`) names what each side hands over; `actions/trade.py`
+tidies the AI's wording ("two amethysts", "100 septims") into counts, gold and name spellings, and the
+game (Mantella-Spell `LwTrade`) checks the player really has the goods and gold, then swaps everything at
+once and tells the NPC "Trade done: ...", or why it did not happen. An NPC short of coin pays the rest
+from their savings (added). Barter on a non-merchant now opens their pack instead and says so.
+
+On with `MANTELLA_LIVING_WORLD=1`. Switch off with `set MANTELLA_LW_TRADE=0`.
+
 ## Leads: ask about someone without saying their name
 
 On with `MANTELLA_LIVING_WORLD=1`. Switch off with `set MANTELLA_LW_LEADS=0`. No extra AI call.

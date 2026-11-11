@@ -1,0 +1,47 @@
+{
+    "identifier": "mantella_lw_npc_trade",
+    "name": "Trade",
+    "description": "Carry out a deal the player and the NPC have BOTH clearly agreed to in this conversation, such as '100 gold for two amethysts': the game swaps exactly those items and that gold between them at once. Use this, not Barter or Inventory, whenever the deal names what changes hands, with anyone (guards and other non-merchants included). Fill in only what each side hands over. Do not use it while still haggling, or if the NPC refuses.",
+    "note": "Living World (MANTELLA_LIVING_WORLD=1; MANTELLA_LW_TRADE=0 turns it off). The game checks both sides have the goods before anything moves; if not, nothing changes and the NPC is told why. An NPC short of gold pays the rest from their savings.",
+    "key": "Trade",
+    "parameters": {
+        "source": {
+            "type": "string",
+            "description": "The NPC making the deal with the player.",
+            "scope": "conversation"
+        },
+        "player_gives_item": {
+            "type": "string",
+            "description": "The item the player hands over, in a word or two as it is called in game (e.g. 'amethyst', 'iron sword'). Leave empty if the player only pays gold."
+        },
+        "player_gives_count": {
+            "type": "integer",
+            "description": "How many of player_gives_item. 1 if not said."
+        },
+        "player_gives_gold": {
+            "type": "integer",
+            "description": "Gold the player pays. 0 if none."
+        },
+        "npc_gives_item": {
+            "type": "string",
+            "description": "The item the NPC hands over, in a word or two. Leave empty if the NPC only pays gold."
+        },
+        "npc_gives_count": {
+            "type": "integer",
+            "description": "How many of npc_gives_item. 1 if not said."
+        },
+        "npc_gives_gold": {
+            "type": "integer",
+            "description": "Gold the NPC pays. 0 if none."
+        }
+    },
+    "required": ["source"],
+    "prompt": "If you and the player have agreed a deal and you now hand over your side, begin your response with '{key}:'",
+    "allowed_games": ["skyrim"],
+    "requires_response": false,
+    "is-interrupting": false,
+    "allow_repeat": true,
+    "one-on-one": true,
+    "multi-npc": true,
+    "radiant": false
+}

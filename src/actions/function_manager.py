@@ -427,6 +427,11 @@ class FunctionManager:
             identifier: The action identifier
             characters: The Characters manager (may be None)
         """
+        if identifier == 'mantella_lw_npc_trade' and parsed_tool.get('arguments'): # LIVINGWORLD PATCH: tidy the deal for the game
+            from livingworld.actions import trade as lw_trade # LIVINGWORLD PATCH
+            parsed_tool['arguments'] = lw_trade.normalize(parsed_tool['arguments']) # LIVINGWORLD PATCH
+            logger.log(23, f"Living World: trade agreed, {lw_trade.describe(parsed_tool['arguments'])}") # LIVINGWORLD PATCH
+
         # ShareConversation: store pending share for end of conversation
         if identifier == 'mantella_npc_shareconversation' and characters:
             args = parsed_tool.get('arguments', {})

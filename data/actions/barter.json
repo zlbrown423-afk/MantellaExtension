@@ -1,7 +1,7 @@
 {
     "identifier": "mantella_npc_barter",
     "name": "Barter",
-    "description": "Show what an NPC has for sale.",
+    "description": "Show what a merchant (shopkeeper, innkeeper, trader) has for sale. Other NPCs, such as guards, have no barter menu. For a deal agreed in conversation (a set price for set items), use Trade if it is offered.",
     "key": "Barter",
     "parameters": {
         "source": {
