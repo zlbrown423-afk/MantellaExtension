@@ -311,6 +311,9 @@ class Conversation:
             fog_notes = living_world.fog_notes(player_text, self.__context) if living_world is not None else None # LIVINGWORLD PATCH: fog, names learned
             if fog_notes: # LIVINGWORLD PATCH
                 new_message.add_event(fog_notes) # LIVINGWORLD PATCH
+            trip_notes = living_world.trip_notes(player_text, self.__context) if living_world is not None else None # LIVINGWORLD PATCH: trips, the player's yes / no
+            if trip_notes: # LIVINGWORLD PATCH
+                new_message.add_event(trip_notes) # LIVINGWORLD PATCH
             body_notes = living_world.body_events(self.__context) if living_world is not None else None # LIVINGWORLD PATCH: body language noticed since the last line
             if body_notes: # LIVINGWORLD PATCH
                 new_message.add_event(body_notes) # LIVINGWORLD PATCH
