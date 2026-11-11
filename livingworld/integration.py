@@ -19,6 +19,7 @@ from typing import Any, Callable
 from livingworld.memory.extraction import Extractor
 from livingworld.memory.jobs import JobQueue, JobWorker
 from livingworld.memory import backfill
+from livingworld.memory import summary_timeline
 from livingworld.memory import settings as memory_settings
 from livingworld.memory.recall import recall_for
 from livingworld import mood as moods
@@ -201,6 +202,8 @@ class LivingWorld:
         self.asked_joins = enabled and joins.joins_enabled()   # only add people the player asked for (MANTELLA_LW_ASKED_JOINS=0 off)
         self.place = enabled and place.place_enabled()   # tell NPCs whether they are outdoors or inside (MANTELLA_LW_PLACE=0 off)
         self.decency = enabled and decency.enabled()   # guards tell a naked player to cover up; MANTELLA_LW_DECENCY=0 off
+        self.summary_rollback = enabled and os.environ.get("MANTELLA_LW_SUMMARY_ROLLBACK", "").strip().lower() not in {
+            "0", "false", "no", "off"}   # Mantella's own summaries roll back with the save
         self.surrender = enabled and surrender.enabled()   # a survivor begs for their life; MANTELLA_LW_SURRENDER=0 off
         self.wingman = self.surrender and wingman.enabled()   # ...and plays the player's wingman; MANTELLA_LW_WINGMAN=0 off
         self.peek = enabled and peek_enabled()   # women's eyes drift to a naked player; MANTELLA_LW_PEEK=0 off
@@ -537,6 +540,56 @@ class LivingWorld:
                 self.errors += 1
                 logger.exception("Living World: could not file the written guard report; carrying on")
         self._close(game_days)
+
+    # ---- Mantella's own summaries roll back with the save (memory/summary_timeline.py) ----
+    def _summary_gt(self, store: WorldStore, game_days: float | None) -> float:
+        if game_days is not None:
+            return float(game_days)
+        if self._context is not None and getattr(self._context, "game_days", None) is not None:
+            return float(self._context.game_days)
+        return float(store.scalar("SELECT COALESCE(MAX(game_time), 0) FROM world_event") or 0.0)
+
+    @_never_raises
+    def summary_written(self, world_id: str, folder: str, text: str, game_days: float | None) -> None:
+        """Mantella appended ``text`` to the summary file in ``folder``."""
+        if not self.summary_rollback or not text.strip():
+            return
+        store = self._store_for(world_id)
+        gt = self._summary_gt(store, game_days)
+        timeline = store.active_timeline_id()
+        with store.transaction() as db:
+            summary_timeline.note_lines(db, timeline, folder, text, gt)
+
+    @_never_raises
+    def summary_file_started(self, world_id: str, folder: str, number: int, game_days: float | None) -> None:
+        """A resummary started ``<name>_summary_<number>.txt`` in ``folder``."""
+        if not self.summary_rollback:
+            return
+        store = self._store_for(world_id)
+        gt = self._summary_gt(store, game_days)
+        timeline = store.active_timeline_id()
+        with store.transaction() as db:
+            summary_timeline.note_file(db, timeline, folder, number, gt)
+
+    @_never_raises
+    def summary_lines(self, world_id: str, folder: str, lines: list[str]) -> list[str] | None:
+        """The summary lines the current save may see (None: no change)."""
+        if not self.summary_rollback:
+            return None
+        with self._store_for(world_id).reading() as db:
+            kept = summary_timeline.visible_lines(db, folder, lines)
+        if len(kept) != len(lines):
+            logger.log(23, f"Living World: left out {len(lines) - len(kept)} summary line(s) in {folder} written"
+                           f" after this save")
+        return kept
+
+    @_never_raises
+    def summary_file_number(self, world_id: str, folder: str, numbers: list[int]) -> int | None:
+        """The newest summary file the current save may see (None: no change)."""
+        if not self.summary_rollback or not numbers:
+            return None
+        with self._store_for(world_id).reading() as db:
+            return summary_timeline.visible_file(db, folder, numbers)
 
     @_never_raises
     def recall_text(self, characters: list[Any], world_id: str) -> str:

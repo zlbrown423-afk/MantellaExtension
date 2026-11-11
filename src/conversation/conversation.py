@@ -564,7 +564,7 @@ class Conversation:
             npcs_to_summarize = npcs.get_non_player_characters()
 
         for npc in npcs_to_summarize:
-            conversation_log.save_conversation_log(npc, self.__messages.transform_to_openai_messages(self.__messages.get_talk_only()), self.__context.world_id)
+            conversation_log.save_conversation_log(npc, self.__messages.transform_to_openai_messages(self.__messages.get_talk_only()), self.__context.world_id, self.__context.game_days)  # LIVINGWORLD PATCH: game time
         
         # Skip summary generation if disabled (but always allow reloads to save state)
         if not is_reload and not self.__context.config.conversation_summary_enabled:
