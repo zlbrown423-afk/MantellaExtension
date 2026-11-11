@@ -167,6 +167,7 @@ class GameStateManager:
                     requires_response = FunctionManager.any_action_requires_response(sentence_to_play.actions)
                     
                     logger.log(23, f"Sending action-only response with {len(sentence_to_play.actions)} action(s), requires_response={requires_response}")
+                    self.__living_world.action_only(sentence_to_play) # LIVINGWORLD PATCH: guard armour / wages / fines ride on the next line
                     return {
                         comm_consts.KEY_REPLYTYPE: comm_consts.KEY_REPLYTYPE_NPCACTION,
                         comm_consts.KEY_REPLYTYPE_NPCACTION: {

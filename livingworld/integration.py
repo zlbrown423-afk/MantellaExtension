@@ -26,7 +26,7 @@ from livingworld.bodylang import body_language_enabled, gesture_notices, gesture
 from livingworld.bodylang.presence import is_gesture_record, is_presence
 from livingworld.bodylang.service import BodyLanguage
 from livingworld.dialogue import hearing, leads as player_leads
-from livingworld.dialogue import promises, trips
+from livingworld.dialogue import joins, place, promises, trips
 from livingworld import fog
 from livingworld import diary
 from livingworld.diary import service as diaries
@@ -188,6 +188,9 @@ class LivingWorld:
         self._scenes_now: list[intimate_scenes.SceneNow] = []   # scenes running near the player, from the game's snapshot
         self.confront = self.intimacy and confront.enabled()   # partners who catch each other speak up; MANTELLA_LW_CONFRONT=0 off
         self._fine_sent: set[int] = set()           # lines whose PayFine was handled
+        self._held_actions: dict[str, list[dict[str, Any]]] = {}   # speaker ref id -> actions from an action-only reply
+        self.asked_joins = enabled and joins.joins_enabled()   # only add people the player asked for (MANTELLA_LW_ASKED_JOINS=0 off)
+        self.place = enabled and place.place_enabled()   # tell NPCs whether they are outdoors or inside (MANTELLA_LW_PLACE=0 off)
         self.decency = enabled and decency.enabled()   # guards tell a naked player to cover up; MANTELLA_LW_DECENCY=0 off
         self.peek = enabled and peek_enabled()   # women's eyes drift to a naked player; MANTELLA_LW_PEEK=0 off
         self.fog = enabled and fog.fog_enabled()    # names and places unknown until told (livingworld/fog); MANTELLA_LW_FOG=0 off
@@ -373,6 +376,7 @@ class LivingWorld:
         self._moods_shown = {}
         self._moods_to_send = {}
         self._guard_sent = set()
+        self._held_actions = {}
         self._player_said = None
         self._hints_to_send = []
         self._watch_sent = None
@@ -547,6 +551,13 @@ class LivingWorld:
             guard = self._guard_lines(npc_id, character.name)
             if guard:
                 blocks.append(f"The guard, and {character.name}:\n" + "\n".join(f"- {line}" for line in guard))
+        if self.place and player is not None:
+            npcs = [c.name for c in characters if not c.is_player_character]
+            where = place.prompt_lines(getattr(self._context, "location", ""),
+                                       bool(getattr(self._context, "_Context__weather", "")))
+            if npcs and where:
+                who = npcs[0] if len(npcs) == 1 else "everyone here"
+                blocks.append(f"Where {who} is right now:\n" + "\n".join(f"- {line}" for line in where))
         if self.hearing and player is not None:
             npcs = [c.name for c in characters if not c.is_player_character]
             if npcs:
@@ -735,11 +746,11 @@ class LivingWorld:
         """Handle EnlistRecruit / ReportDuty / PayWages on this line (once) and return the reply keys it needs."""
         if not self.guard or self._context is None or id(sentence) in self._guard_sent:
             return {}
-        wanted = [a for a in (getattr(sentence, "actions", None) or [])
-                  if isinstance(a, dict) and a.get("identifier") in GUARD_ACTIONS]
+        wanted = [a for a in self._line_actions(sentence) if a.get("identifier") in GUARD_ACTIONS]
         if not wanted:
             return {}
         self._guard_sent.add(id(sentence))
+        self._release_held(sentence, GUARD_ACTIONS)
         scene = self._guard_scene()
         speaker = sentence.speaker
         if scene is None or speaker is None or speaker.is_player_character:
@@ -764,6 +775,54 @@ class LivingWorld:
                 keys[KEY_GUARD_ISSUE_COUNTS] = issue.item_counts()
         return keys
 
+    # ---- actions that came without a line (tool calls) ----
+    # A tool call (from Mantella's separate tool-calling model, or the main model's tool call) reaches the
+    # game as an action-only reply before the NPC speaks. The guard's armour, wages and fines ride on a
+    # spoken line (the game hands them over with it), so those actions are held for the speaker's next line.
+    HELD_ACTIONS = (*GUARD_ACTIONS, decency.FINE_ACTION)
+
+    @_never_raises
+    def action_only(self, sentence: Any) -> None:
+        """An action-only reply went to the game: keep the actions that need a spoken line for the next one."""
+        speaker = getattr(sentence, "speaker", None)
+        if self._context is None or speaker is None or speaker.is_player_character:
+            return
+        held = [a for a in (getattr(sentence, "actions", None) or [])
+                if isinstance(a, dict) and a.get("identifier") in self.HELD_ACTIONS]
+        if held:
+            self._held_actions.setdefault(speaker.ref_id, []).extend(held)
+            logger.log(23, f"Living World: holding {[a['identifier'] for a in held]} for {speaker.name}'s next line")
+
+    def _line_actions(self, sentence: Any) -> list[dict[str, Any]]:
+        """The actions on this line, plus any held for its speaker from an action-only reply."""
+        own = [a for a in (getattr(sentence, "actions", None) or []) if isinstance(a, dict)]
+        speaker = getattr(sentence, "speaker", None)
+        held = self._held_actions.get(speaker.ref_id, []) if speaker is not None else []
+        seen = {a.get("identifier") for a in own}
+        return own + [a for a in held if a.get("identifier") not in seen]
+
+    def _release_held(self, sentence: Any, identifiers: Any) -> None:
+        speaker = getattr(sentence, "speaker", None)
+        if speaker is None or speaker.ref_id not in self._held_actions:
+            return
+        rest = [a for a in self._held_actions[speaker.ref_id] if a.get("identifier") not in identifiers]
+        if rest:
+            self._held_actions[speaker.ref_id] = rest
+        else:
+            del self._held_actions[speaker.ref_id]
+
+    @_never_raises
+    def filter_tool_actions(self, actions: list, messages: Any, characters: Any) -> list:
+        """Tool calls before they go to the game: AddToConversation only for people the player asked for."""
+        if not self.asked_joins or not actions or not characters.contains_player_character():
+            return actions
+        from livingworld.dialogue.group import last_user_text
+        said = last_user_text(messages)
+        kept, dropped = joins.keep_asked(actions, said)
+        if dropped:
+            logger.log(23, f"Living World: not adding {', '.join(dropped)} to the conversation (the player did not ask)")
+        return kept
+
     def _thane_hold(self, db, guard_id: int, player_id: int) -> str | None:
         """The hold ``guard_id`` serves, when the player is its thane (the game's own word, or a debug grant)."""
         from livingworld.guard import orgs as GO, profiles as GP, store as GS
@@ -779,10 +838,10 @@ class LivingWorld:
         """PayFine on a guard's line (once): the gold the game takes from the player for public nakedness."""
         if not self.decency or self._context is None or self.store is None or id(sentence) in self._fine_sent:
             return {}
-        if not any(isinstance(a, dict) and a.get("identifier") == decency.FINE_ACTION
-                   for a in (getattr(sentence, "actions", None) or [])):
+        if not any(a.get("identifier") == decency.FINE_ACTION for a in self._line_actions(sentence)):
             return {}
         self._fine_sent.add(id(sentence))
+        self._release_held(sentence, (decency.FINE_ACTION,))
         speaker = sentence.speaker
         player = self._context.npcs_in_conversation.get_player_character()
         if speaker is None or speaker.is_player_character or player is None:
