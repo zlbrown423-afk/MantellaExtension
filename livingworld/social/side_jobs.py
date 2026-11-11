@@ -475,6 +475,21 @@ def resolve(db, job: Job, gt: float, covered: bool) -> Order:
 
 # ---------------------------------------------------------------- what she says
 
+def why(db, me: int, name: str, player_id: int, player_name: str, now: float) -> str:
+    """Why she does it at all: the player makes her. When the player killed her party, helping makes her their
+    accomplice, and that is what keeps her quiet about the killings. Compelled, never eager."""
+    from livingworld.social.surrender import _join, _latest, _names
+    found = _latest(db, me, player_id, now)
+    if found is not None and found[0].get("killer") == "player":
+        lost = _join(_names(db, found[0].get("dead") or [])) or "her husband and bodyguard"
+        return (f" {name} does this because {player_name} makes {name} do it, not because {name} wants to:"
+                f" {player_name} killed {lost}, and every job {name} does for {player_name} makes {name} an accomplice,"
+                f" which keeps {name} quiet about the killings. {name} knows it and so does {player_name}. {name} is"
+                f" compelled, not eager: the fear and resentment stay under the surface, but {name} does the work"
+                f" well, because {name} has no choice.")
+    return (f" {name} does this because {player_name} makes {name} do it, not because {name} wants to; {name}"
+            f" depends on {player_name} and has nowhere else to go.")
+
 _KIND = {THEFT: "things worth stealing (worth 30 gold or more: jewellery first)",
          FLIRT: "men and guards she can flirt out of their coin"}
 
@@ -523,6 +538,14 @@ def _report(job: Job, name: str, player_name: str) -> str:
 def line(db, me: int, name: str, player_id: int, player_name: str, private: bool, brought_up: bool,
          now: float) -> tuple[str | None, Job | None]:
     """What ``name`` knows about her side job right now, and the job when this line reports its outcome."""
+    text, job = _line(db, me, name, player_id, player_name, private, brought_up, now)
+    if text and (private or brought_up):
+        text += why(db, me, name, player_id, player_name, now)
+    return text, job
+
+
+def _line(db, me: int, name: str, player_id: int, player_name: str, private: bool, brought_up: bool,
+          now: float) -> tuple[str | None, Job | None]:
     job = current(db, me, now)
     if job is None:
         return None, None
@@ -661,9 +684,10 @@ class Desk:
         self.notices.append(f"{first} will scout Whiterun for marks. Talk to {first} alone in a few hours.")
         what = ("go stealing in Whiterun: jewellery and anything else worth 30 gold or more" if kind == THEFT else
                 "flirt with the men and guards of Whiterun for coin")
-        return (f"The player asked {name} to {what}. {name} agrees, but first {name} will scout: make connections,"
-                f" watch who has what, and come back to the player with marks to approve. {name} does not do the"
-                f" job itself yet and says so in {name}'s own words. When they part, {name} heads into town.")
+        return (f"The player asked {name} to {what}. {name} agrees, because {name} has no real choice, but first"
+                f" {name} will scout: make connections, watch who has what, and come back to the player with marks to"
+                f" approve. {name} does not do the job itself yet and says so in {name}'s own words. When they part,"
+                f" {name} heads into town." + why(db, me, name, player, _name(db, player), now))
 
     def proposal(self, job: Job, name: str) -> None:
         """The game shows her marks as numbered choices, once per conversation."""

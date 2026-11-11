@@ -447,6 +447,8 @@ can be sent out, in Whiterun only:
 | Report | Next time alone (or asked) she tells how it went and offers the loot (Inventory). Memories: hers; the owner's when caught (trust in her drops, and in the player when they covered) or flirted with |
 | BOLO | Nobody is ever wanted. A job nobody saw leaves no trace with the guards. A theft she is caught at puts out a lookout only: for 3 game days a Whiterun guard in conversation knows to watch for her (and that the player was keeping the owner talking, if so), eyes her and may question her, but never arrests, fines or attacks anyone over it. No crime gold |
 
+Why she helps: the player makes her. When the player killed her party, each job makes her their accomplice, and
+that is what keeps her quiet about the killings; her prompt says she is compelled, not eager.
 She never brings any of it up in front of others; asked there, she keeps it short and vague. All stages are
 `side_job` world events, so loading an older save rolls the job back. Off: `MANTELLA_LW_SALONIA_JOBS=0` (start reply
 key `mantella_lw_side_jobs_on`). The game side (Mantella-Spell orders and records, plugin dialogue choices) is

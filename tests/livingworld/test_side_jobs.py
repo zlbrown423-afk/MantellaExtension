@@ -124,6 +124,7 @@ def test_theft_scout_propose_pick_cover_and_report(tmp_path):
     assert asked.start[side_jobs.KEY_JOBS_ON] is True
     assert "Salonia will scout Whiterun for marks. Talk to Salonia alone in a few hours." in asked.hints
     assert "first Salonia Carvain will scout" in asked.notes
+    assert "Torvar makes Salonia Carvain do it" in asked.notes and "keeps Salonia Carvain quiet about the killings" in asked.notes
     assert {"identifier": side_jobs.TRAVEL_TO, "arguments": {"source": ["Salonia Carvain"],
                                                               "location": "Whiterun Marketplace"}} in asked.actions
     db = open_db(tmp_path)
@@ -131,6 +132,7 @@ def test_theft_scout_propose_pick_cover_and_report(tmp_path):
     assert job.kind == "theft" and len(job.marks) == 3 and job.stage == "scouting"
 
     early = talk(tmp_path, [SALONIA], 4.1)
+    assert "makes Salonia Carvain an accomplice" in early.prompt()
     assert "still making connections" in early.prompt() and not any("marks:" in h for h in early.hints)
 
     mark = job.marks[0]
