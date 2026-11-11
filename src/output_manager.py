@@ -376,6 +376,8 @@ class ChatManager:
                                     
                                     # Parse tool calls
                                     parsed_tools = FunctionManager.parse_function_calls(collected_tool_calls, characters, game)
+                                    lw_kept = living_world.filter_tool_actions(parsed_tools, messages, characters) if living_world is not None else None # LIVINGWORLD PATCH: only add people the player asked for
+                                    parsed_tools = parsed_tools if lw_kept is None else lw_kept # LIVINGWORLD PATCH
                                     
                                     # Check if vision was requested - filter it out from game actions
                                     vision_requested = any(

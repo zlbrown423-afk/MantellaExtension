@@ -448,3 +448,13 @@ plugin (Mantella-Spell `Tools/LWDiary`) plus two small hooks in `MantellaConvers
 | Prompt | `integration.py` | A keeper knows they keep a diary and would be upset if it were read |
 | Reading | `src/http/routes/mantella_route.py` | The game's request `mantella_lw_diary_read` (outside any conversation, not behind the conversation lock) gets the newest six days as pages, newest first. It never answers with an error reply |
 | Caught | `diary/service.py` | If the owner saw the player reading it: a memory ("I caught Torvar reading my diary"), trust -0.25, liking -0.15, suspicion +0.25. Others the game saw watching: a memory and a little suspicion. Stored as a `diary.read` world event |
+
+## Asked-for joins, where the NPC is, and tool-call guard actions
+
+Three fixes from the 2026-11-10 play session. All server side, no compile.
+
+| Part | What it does | Off |
+| --- | --- | --- |
+| Asked-for joins (`dialogue/joins.py`) | Mantella's AddToConversation tool call is kept only for the people the player's own last line names (full name, first name, or the role for a generic NPC: "guard!"), or for everyone the AI picked when the player calls a group ("everyone", "all of you", "join us"). A separate tool-calling model was adding everyone nearby, a cow included, on the first line of nearly every conversation. | `MANTELLA_LW_ASKED_JOINS=0` |
+| Where you are (`dialogue/place.py`) | One prompt block: outdoors (the game sent weather with the start of the conversation) means "out in the open, not inside your shop or home"; indoors names the place, or says the building is unknown when the location is just the town. A later "(The location is now ...)" note still wins. | `MANTELLA_LW_PLACE=0` |
+| Held actions (`integration.action_only`) | A tool call reaches the game as an action-only reply before the NPC speaks. EnlistRecruit, ReportDuty, PayWages and PayFine are now held and handled with that NPC's next spoken line, so the uniform, wages and fines are handed over (they ride on a line). Before, only the 'EnlistRecruit:' text prefix worked. | (follows `MANTELLA_LW_GUARD` / `MANTELLA_LW_DECENCY`) |

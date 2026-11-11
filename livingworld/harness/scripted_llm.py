@@ -85,6 +85,9 @@ class ScriptedLLM(AIClient):
     extractions: dict[str, "ScriptedExtraction"] = field(default_factory=dict)
     # Living World diaries: NPC name -> the entry they write (JSON reply); others write a stock entry
     diary_entries: dict[str, str] = field(default_factory=dict)
+    # tool calls, like a tool-calling model: (phrase in the last user message, [(function name, arguments)]),
+    # sent before the reply text when the phrase matches and the call offers tools
+    tool_rules: list[tuple[str, list[tuple[str, dict[str, Any]]]]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self._reply_index = 0
@@ -98,6 +101,9 @@ class ScriptedLLM(AIClient):
         openai_messages = _to_openai(messages)
         reply = self._choose_reply(openai_messages)
         self.calls.append(LLMCall("stream", openai_messages, reply))
+        calls = self._tool_calls(openai_messages) if tools else []
+        if calls:
+            yield ("tool_calls", calls)
         # yield word by word, like a streamed response
         words = reply.split(" ")
         for i, word in enumerate(words):
@@ -167,6 +173,16 @@ class ScriptedLLM(AIClient):
     @property
     def background_calls(self) -> list[LLMCall]:
         return [c for c in self.calls if c.kind == "request"]
+
+    def _tool_calls(self, openai_messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        last_user = next((_content_text(m.get("content")) for m in reversed(openai_messages)
+                          if m.get("role") == "user"), "")
+        for phrase, calls in self.tool_rules:
+            if phrase.lower() in last_user.lower():
+                return [{"id": f"call_{i}", "type": "function",
+                         "function": {"name": name, "arguments": json.dumps(args)}}
+                        for i, (name, args) in enumerate(calls)]
+        return []
 
     def _choose_reply(self, openai_messages: list[dict[str, Any]]) -> str:
         last_user = ""
