@@ -75,6 +75,23 @@ Radiant conversations (two NPCs, no player) still use Mantella's own single call
 The reply to a conversation start carries `mantella_lw_timeline_id`, which the game keeps in its save.
 Without the game-side change nothing new is sent, and everything stays on one timeline.
 
+### World key: renaming the character keeps the memories
+
+Mantella names a world (the `.sqlite` file and its own summary folder) after the player's name plus the
+MCM World ID, so a rename, or a new game that runs as "Adventurer" until the name is set, used to start
+an empty world. `store/worlds.py` fixes this with a world key kept in the save (`mantella_lw_world_key`,
+stored by Mantella-Spell in `MantellaRepository.LivingWorldWorldKey`):
+
+| Request | World used |
+| --- | --- |
+| Carries a key | That world, whatever the player is called now |
+| Key field empty, no save loaded yet (a New Game) | The name-based world, or `<name>-2`, `-3`... if that one already exists, so two new games never share the default "Adventurer1" |
+| Key field empty, a save was loaded (saves from before keys, or the MCM World ID was just changed) | The name-based world, as before |
+| No key field (older game scripts) | The name-based world, as before |
+
+Every start reply carries the key, and Mantella's summaries use the same world. Diary requests send the
+key too. Changing the World ID slider clears the key, so that still starts a separate world.
+
 ## Perception prototype: grabs, eating and drinking, witnesses
 
 NPCs remember being grabbed by the player and seeing it happen, and seeing someone eat or drink,

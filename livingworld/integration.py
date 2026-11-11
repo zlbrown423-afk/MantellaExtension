@@ -55,6 +55,7 @@ from livingworld.store.conversation_log import ConversationLog
 from livingworld.store.timeline import resolve_load
 from livingworld.store.identity import ActorIdentity, FormId, IdentityRegistry, VoiceBindingConflict
 from livingworld.store.world_store import WorldStore
+from livingworld.store import worlds
 from src import utils
 from src.http.communication_constants import communication_constants as comm_consts
 
@@ -140,6 +141,7 @@ class LivingWorld:
         self.enabled = enabled
         self.errors = 0
         self._stores: dict[str, WorldStore] = {}
+        self._world_by_name: dict[str, str] = {}          # name-based world id -> world it was resolved to
         self.store: WorldStore | None = None
         self._identities: dict[str, ActorIdentity] = {}   # Mantella's 6-digit ref id -> full identity
         self._npc_ids: dict[str, int] = {}                # Mantella's 6-digit ref id -> npc_id
@@ -342,13 +344,35 @@ class LivingWorld:
                     ids[actor.ref_id] = pipeline.identities.ensure_npc(actor.identity(), record.game_time)
         return awareness.snapshot(records, ids, ids)
 
+    def resolve_world(self, name_world: str, request: dict[str, Any]) -> str:
+        """The world (database and Mantella summary folder) this conversation belongs to: the world key
+        the save carries, so renaming the character keeps the same memories (see ``store/worlds.py``).
+        Falls back to Mantella's name-based world when the Living World is off or anything goes wrong."""
+        if not self.enabled:
+            return name_world
+        try:
+            world = worlds.resolve_world(self.save_folder, name_world, request)
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not work out the world key; using the player's name")
+            return name_world
+        if world != name_world:
+            logger.log(23, f"Living World: '{name_world}' is kept in world '{world}' (same playthrough)")
+        self._world_by_name[name_world] = world
+        return world
+
+    def world_for_name(self, name_world: str) -> str:
+        """The world a name-based id was last resolved to this session (diary requests send the name)."""
+        return self._world_by_name.get(name_world, name_world)
+
     @_never_raises
     def game_loaded(self, world_id: str, request: dict[str, Any]) -> dict[str, Any]:
         """Handle the save load the game reports with each conversation start (see ``store/timeline.py``).
-        Returns extra reply keys: the timeline id the game should keep in its save."""
+        Returns extra reply keys: the world and the timeline id the game should keep in its save."""
+        reply = {worlds.KEY_WORLD_KEY: world_id}
         nonce = request.get(KEY_LOAD_NONCE)
         if nonce is None or request.get(KEY_LOADED_GAME_DAYS) is None:
-            return {}
+            return reply
         store = self._store_for(world_id)
         save_timeline = request.get(KEY_TIMELINE_ID) or None
         result = resolve_load(store, int(nonce), int(save_timeline) if save_timeline else None,
@@ -360,7 +384,7 @@ class LivingWorld:
                                f"NPCs now forget everything after it (timeline {result.timeline_id}).")
             else:
                 logger.log(23, f"Living World: save loaded on timeline {result.timeline_id}.")
-        return {KEY_TIMELINE_ID: result.timeline_id}
+        return {**reply, KEY_TIMELINE_ID: result.timeline_id}
 
     @_never_raises
     def conversation_starting(self, world_id: str, context: Any) -> None:
@@ -1116,7 +1140,7 @@ class LivingWorld:
             reply[diary.KEY_PAGES] = ["The pages are blank."]
             return reply
         try:
-            world_id = str(request.get(diary.KEY_WORLD_ID) or "")
+            world_id = self.world_for_name(str(request.get(diary.KEY_WORLD_ID) or ""))
             store = self._store_for(world_id) if world_id else self.store
             if store is None:
                 reply[diary.KEY_PAGES] = ["The handwriting is too cramped to make out."]
