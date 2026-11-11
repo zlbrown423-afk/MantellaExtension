@@ -242,7 +242,7 @@ def parse_record(text: str) -> PerceptionRecord:
     if fields.get("payer"):
         fields["payer"] = fields["payer"].strip().lower()
     if kind not in ("grab", "consume", "attire", "purchase", "fight", "swim", "gift", "theft", "hit", "watch", "react", "jail",
-                    "scene", "climax", "arousal", "eyes"):
+                    "scene", "climax", "arousal", "eyes", "rebind"):
         raise BadRecord(f"unknown event type {kind!r}")
     record = PerceptionRecord(
         key=fields["key"], type=kind, game_time=float(fields["gt"]), location=fields.get("loc") or None,
@@ -280,6 +280,8 @@ def parse_record(text: str) -> PerceptionRecord:
                             or (record.via in ("guard", "surrender") and record.party is None)):
         raise BadRecord("a react record needs via=victim, guard, decency or surrender, the player as target, and party"
                         " for a guard or a surrender")
+    if kind == "rebind" and record.target is None:
+        raise BadRecord("a rebind record needs the old reference as target")
     if kind == "grab" and record.target is None:
         raise BadRecord("a grab needs a target")
     if kind == "consume" and not record.item:

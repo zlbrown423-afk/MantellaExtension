@@ -59,6 +59,7 @@ from livingworld.store.timeline import resolve_load
 from livingworld.store.identity import ActorIdentity, FormId, IdentityRegistry, VoiceBindingConflict
 from livingworld.store.world_store import WorldStore
 from livingworld.store import worlds
+from livingworld.store import rebind
 from src import utils
 from src.http.communication_constants import communication_constants as comm_consts
 
@@ -312,6 +313,11 @@ class LivingWorld:
         if not gestures_enabled():   # MANTELLA_LW_GESTURES=0: a game still sending them is ignored
             body_raw = [r for r in body_raw if not is_gesture_record(r)]
         raw = [r for r in raw if not is_presence(r)]
+        rebind_raw = [r for r in raw if rebind.is_rebind_record(r)]
+        if rebind_raw:   # before anyone is registered: the copy must already resolve to the NPC it replaces
+            raw = [r for r in raw if not rebind.is_rebind_record(r)]
+            if self.store is not None:
+                self._rebind(rebind_raw)
         job_raw = [r for r in raw if side_jobs.is_job_record(r)]
         if job_raw:
             raw = [r for r in raw if not side_jobs.is_job_record(r)]
@@ -424,6 +430,7 @@ class LivingWorld:
         if self.conv_id is not None:
             self._close(None)
         self.store = self._store_for(world_id)
+        self._world_id = world_id
         self._context = context
         self._pending = True
         self._attire_now = {}
@@ -1851,6 +1858,19 @@ class LivingWorld:
         for npc_id in self._present - now_present:
             log.mark_left(self.conv_id, npc_id)
         self._present = now_present
+
+    def _rebind(self, raws: list[str]) -> None:
+        from src.conversation.conversation_log import conversation_log
+        for raw in raws:
+            try:
+                record = rebind.parse(raw)
+                if record is None:
+                    continue
+                rebind.apply(self.store, record)
+                rebind.copy_mantella_folder(conversation_log.game_path, getattr(self, "_world_id", None), record)
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not carry an NPC over to their new reference; carrying on")
 
     def _register(self, character: Any, game_time: float) -> int:
         identity = self._identities.get(character.ref_id) or self._identity_from_character(character)
