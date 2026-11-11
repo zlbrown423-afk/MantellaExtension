@@ -19,8 +19,8 @@ or with the dialogue choice the game plugin adds (a ``job`` record, below). Noth
    * on her own: once ``JOB_DAYS`` have passed, the next time the player talks to her.
    A flirting job always happens on her own. The outcome is rolled here (seeded by the job, so it is the same
    on every retry) and sent to the game in ``mantella_lw_side_job_do``; the game moves the actual items
-   (worth ``MIN_VALUE`` gold or more) or the coin into her pack, and adds a bounty when the player was
-   caught covering for her. It answers with a ``job`` record ``via=loot`` naming what was really taken.
+   (worth ``MIN_VALUE`` gold or more) or the coin into her pack. Being caught never adds a bounty: the guards
+   only get a BOLO (below). It answers with a ``job`` record ``via=loot`` naming what was really taken.
 5. **Report.** She tells the player how it went the next time they are alone (or the player asks), and
    offers to hand the loot over.
 
@@ -42,7 +42,12 @@ Game records (Mantella-Spell queues them like every perception record)::
 Order to the game (a list, one string per job)::
 
     job id|theft or flirt|ok, caught or nothing|her name|her ref (plugin:0xID or empty)|owner name|owner ref|
-    min value|max items|gold|bounty
+    min value|max items|gold|bounty (always 0)|bolo (1 = guards on the lookout)
+
+Nobody is ever wanted for a side job. A job nobody saw leaves no trace with the guards at all. A theft she is
+caught at only puts out a BOLO: for ``BOLO_DAYS`` the Whiterun guards know to look out for her (and that the
+player was keeping the owner talking, if so); a guard who meets her eyes her and may question her, but does not
+arrest, fine or attack anyone over it.
 """
 from __future__ import annotations
 
@@ -69,6 +74,7 @@ MAX_ITEMS = 2
 MAX_MARKS = 3
 SCOUT_DAYS = 0.25        # six hours of game time to make connections and watch
 JOB_DAYS = 0.25          # an approved job done on her own is over this long afterwards
+BOLO_DAYS = 3.0          # guards look out for her this long after she was caught
 COVER_DAYS = 1.0         # the player can cover for her by talking to the owner within this long
 TRAVEL_TO = "mantella_npc_travelto"
 _OFF = {"0", "false", "no", "off"}
@@ -343,11 +349,12 @@ class Order:
     owner_ref: str
     max_items: int
     gold: int
-    bounty: int
+    bounty: int          # always 0: kept so the game's field order stays fixed
+    bolo: int = 0        # 1: the Whiterun guards are on the lookout for her (nobody is wanted)
 
     def encode(self) -> str:
         return "|".join(str(x) for x in (self.job_id, self.kind, self.result, self.npc_name, self.npc_ref, self.owner,
-                                          self.owner_ref, MIN_VALUE, self.max_items, self.gold, self.bounty))
+                                          self.owner_ref, MIN_VALUE, self.max_items, self.gold, self.bounty, self.bolo))
 
 
 def _ref_of(db, npc_id: int | None) -> str:
@@ -406,15 +413,16 @@ def resolve(db, job: Job, gt: float, covered: bool) -> Order:
         result = "ok" if ok else "caught"
         gold = rnd.randint(20, 40) * wealth if ok and job.marks[job.pick]["key"] in ("hulda", "carlotta", "nazeem") else 0
         items = (2 if wealth >= 2 and rnd.random() < 0.5 else 1) if ok else 0
-        bounty = 40 if not ok and covered else 0
+        bounty = 0       # never a real bounty: a theft she is caught at only puts the guards on the lookout (BOLO)
     else:
         chance = 0.85 - risk
         ok = rnd.random() < chance
         result = "ok" if ok else "caught"
         gold = rnd.randint(8, 25) * wealth + (rnd.randint(5, 15) if ok and mark.get("key") == "guards" else 0) if ok else 0
         items, bounty = 0, 0
+    bolo = job.kind == THEFT and not ok
     outcome = {"result": result, "covered": covered, "gold": gold, "items": items, "bounty": bounty,
-               "owner": owner_name, "place": place}
+               "bolo": bolo, "owner": owner_name, "place": place}
     timeline = _timeline(db)
     event_id = _write(db, timeline, job.npc_id, job.player_id, {"stage": "done", "job": job.job_id, "outcome": outcome},
                       gt, place)
@@ -462,7 +470,7 @@ def resolve(db, job: Job, gt: float, covered: bool) -> Order:
     logger.log(23, f"Living World side jobs: job {job.job_id} ({job.kind}) at {place}: {result}"
                    f"{' with the player covering' if covered else ''}, gold {gold}, items {items}, bounty {bounty}")
     return Order(job.job_id, job.kind, result, _name(db, me), _ref_of(db, me), owner_name, _ref_of(db, owner_id),
-                 items, gold, bounty)
+                 items, gold, bounty, int(bolo))
 
 
 # ---------------------------------------------------------------- what she says
@@ -487,8 +495,10 @@ def _report(job: Job, name: str, player_name: str) -> str:
             f" {player_name} wants them).")
     if o.get("result") == "caught":
         if job.kind == THEFT:
-            extra = (f" {owner} saw {player_name} talking to them at the same time and may suspect both of them;"
-                     f" the guards may have been told." if o.get("covered") else "")
+            extra = (f" {owner} saw {player_name} talking to them at the same time and may suspect both of them."
+                     if o.get("covered") else "")
+            extra += (" The guards have been told to keep an eye out for her for a few days, but nobody is wanted"
+                      " and there is no bounty.")
             return (f"{name} has news for {player_name} about {owner} at {place}: it went wrong. {owner} caught"
                     f" {name} in the act; {name} got away empty-handed but shaken, and {owner} knows {name}'s face"
                     f" now, so {name} will not go back there.{extra} {name} tells it in {name}'s own words.")
@@ -541,6 +551,35 @@ def line(db, me: int, name: str, player_id: int, player_name: str, private: bool
         return (f"{player_name} approved {name}'s plan: {m['owner']} at {m['place']}. {name} will go and do it as"
                 f" soon as they part, alone.{cover}{hush}"), None
     return _report(job, name, player_name) + hush, job
+
+
+def bolo_line(db, guard_name: str, present: dict[int, str], player_id: int, now: float) -> str | None:
+    """What a Whiterun guard knows about a recent BOLO, or None. Never grounds for an arrest."""
+    found = [j for j in jobs(db, now) if j.outcome and j.outcome.get("bolo") and j.player_id == player_id]
+    recent = [j for j in found if now - _done_gt(db, j) <= BOLO_DAYS]
+    if not recent:
+        return None
+    j = recent[-1]
+    her = _name(db, j.npc_id)
+    place = j.outcome.get("place") or "town"
+    text = (f"{guard_name} has been told to keep an eye out for {her}, a woman seen trying to steal at {place}."
+            f" It is only a lookout: nobody saw her take anything, she is not wanted and there is no bounty.")
+    if j.npc_id in present:
+        text += (f" {her} is right here: {guard_name} recognises her, eyes her with suspicion and may ask a pointed"
+                 f" question or tell her to keep her hands to herself, but does not arrest, fine or attack her.")
+    if j.outcome.get("covered") and player_id in present:
+        text += (f" Word is that {_name(db, player_id)} was keeping the owner talking at the time; {guard_name} may"
+                 f" let on that they have heard, but accuses nobody of anything.")
+    return text
+
+
+def _done_gt(db, job: Job) -> float:
+    for payload_json, gt in db.execute("SELECT payload_json, game_time FROM v_visible_event WHERE type = ?"
+                                       " ORDER BY game_time DESC", (EVENT,)).fetchall():
+        p = json.loads(payload_json or "{}")
+        if p.get("job") == job.job_id and p.get("stage") == "done":
+            return gt
+    return job.asked_gt
 
 
 # ---------------------------------------------------------------- one conversation

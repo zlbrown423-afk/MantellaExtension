@@ -19,6 +19,7 @@ PLAYER = actors.player("Torvar")
 SALONIA = actors.actor("Salonia Carvain", 0x000B8149, 0xFF001A01, 1, "Imperial", "FemaleCommoner")
 PLAUTIS = actors.actor("Plautis Carvain", 0x000B8148, 0xFF00196B, 0, "Imperial", "MaleCommoner")
 BELETHOR = actors.actor("Belethor", 0x00013B9F, 0x00013BA0, 0, "Breton", "MaleCommoner")
+GUARD = actors.actor("Whiterun Guard", 0x0001A6A3, 0x000A0A44, 0, "Nord", "MaleNord")
 YSOLDA = actors.actor("Ysolda", 0x00013BAB, 0x00013BB0, 1, "Nord", "FemaleNord")
 
 
@@ -276,7 +277,7 @@ def test_caught_while_the_player_covers(tmp_path):
     finally:
         side_jobs.random.Random = real
     order = covered.orders[0].split("|")
-    assert order[2] == "caught" and order[-1] == "40" and order[-3] == "0"
+    assert order[2] == "caught" and order[-1] == "1" and order[-2] == "0" and order[-4] == "0"   # BOLO, no bounty
     db = open_db(tmp_path)
     owner_id = npc_id(db, mark["owner"])
     mems = [r[0] for r in db.execute("SELECT content FROM memory WHERE owner_id = ?", (owner_id,))]
@@ -284,9 +285,38 @@ def test_caught_while_the_player_covers(tmp_path):
     trust = db.execute("SELECT trust FROM v_relationship WHERE from_id = ? AND to_id = ?",
                        (owner_id, npc_id(db, "Torvar"))).fetchone()[0]
     assert trust < 0
+    guard = talk(tmp_path, [GUARD, SALONIA], 4.5)
+    guard_prompt = next(p for p in guard.prompts if p.startswith("# Overview\nYou are Whiterun Guard") or
+                        "keep an eye out for Salonia Carvain" in p)
+    assert "keep an eye out for Salonia Carvain" in guard_prompt and "she is not wanted and there is no bounty" in guard_prompt
+    assert "does not arrest, fine or attack her" in guard_prompt
     report = talk(tmp_path, [SALONIA], 4.6)
     assert "caught Salonia Carvain in the act" in report.prompt() and "may suspect both of them" in report.prompt()
+    assert "nobody is wanted" in report.prompt()
+    later = talk(tmp_path, [GUARD], 8.0)
+    assert not any("keep an eye out" in p for p in later.prompts)        # the lookout is over after 3 days
     talk(tmp_path, [SALONIA], 5.0, said=["Go steal some jewelry."])
     db = open_db(tmp_path)
     nxt = side_jobs.current(db, npc_id(db, "Salonia Carvain"), 5.01)
     assert mark["key"] not in [m["key"] for m in nxt.marks]       # she will not go back there
+
+
+def test_unseen_jobs_leave_the_guards_none_the_wiser(tmp_path):
+    with_salonia(tmp_path)
+    talk(tmp_path, [SALONIA], 4.0, said=["Go steal some jewelry."])
+    talk(tmp_path, [SALONIA], 4.3, said=["The first one."])
+    db = open_db(tmp_path)
+    job = side_jobs.current(db, npc_id(db, "Salonia Carvain"), 4.31)
+    real = side_jobs.random.Random
+
+    class Lucky(_Unlucky):
+        def random(self):
+            return 0.0
+    side_jobs.random.Random = Lucky
+    try:
+        done = talk(tmp_path, [SALONIA], 4.7)
+    finally:
+        side_jobs.random.Random = real
+    assert done.orders[0].split("|")[-1] == "0"
+    guard = talk(tmp_path, [GUARD, SALONIA], 4.8)
+    assert not any("keep an eye out" in p for p in guard.prompts)
