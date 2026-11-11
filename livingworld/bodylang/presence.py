@@ -187,6 +187,9 @@ def observation(p: Presence, player_name: str) -> str:
         return f"{player_name} drew a weapon or readied a spell {dist} away."
     if p.what == "stare":
         return f"{player_name} kept facing them from {dist} away for several seconds."
+    if p.what == "peek":
+        return (f"{p.target.name}'s eyes went down to naked {player_name}'s manhood for a moment, {dist} away."
+                f" Whether {player_name} noticed, and whether {p.target.name} owns up to it, is hers to play.")
     if p.what == "wave":
         return f"{player_name} waved at them."
     if p.what == "nod":
