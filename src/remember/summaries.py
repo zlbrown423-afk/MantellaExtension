@@ -39,6 +39,21 @@ class Summaries(Remembering):
         self.__language_name: str = language_name
         self.__memory_prompt: str = config.memory_prompt
         self.__resummarize_prompt: str = config.resummarize_prompt
+        self.__lw_game_days: float | None = None  # LIVINGWORLD PATCH
+
+    @staticmethod
+    def __living_world():  # LIVINGWORLD PATCH: summaries roll back with the save (livingworld/memory/summary_timeline.py)
+        try:
+            from livingworld.integration import LivingWorld
+            return LivingWorld.latest
+        except Exception:
+            return None
+
+    def __lw_folder(self, file_path: str) -> str:
+        """The NPC's summary folder, relative to the conversation folder (world/name - ref)."""
+        root = str(self.__game.conversation_folder_path).replace(os.sep, '/').rstrip('/')
+        folder = os.path.dirname(file_path).replace(os.sep, '/')
+        return folder[len(root) + 1:] if folder.startswith(root + '/') else folder
 
     def __read_summary_lines(self, file_path: str, deduplicate: bool = False) -> list[str]:
         """Read a summary file and return non-empty stripped lines.
@@ -76,6 +91,11 @@ class Summaries(Remembering):
         for character in characters:
             conversation_summary_file = self.__get_latest_conversation_summary_file_path(character.name, character.ref_id, world_id)
             paragraphs = self.__read_summary_lines(conversation_summary_file, deduplicate=True)
+            lw = self.__living_world()  # LIVINGWORLD PATCH: leave out what was written after this save
+            if lw is not None and paragraphs:
+                kept = lw.summary_lines(world_id, self.__lw_folder(conversation_summary_file), paragraphs)
+                if kept is not None:
+                    paragraphs = kept
             if not paragraphs:
                 continue
             memory = "\n".join(paragraphs)
@@ -104,6 +124,7 @@ class Summaries(Remembering):
             end_timestamp: Optional timestamp to prepend to summaries
             is_radiant: Whether this is a Radiant conversation (bypass min message threshold)
         """
+        self.__lw_game_days = end_timestamp  # LIVINGWORLD PATCH: game time of the summaries written below
         npc_message_threads: Dict[str, CharacterSummaryParameters] = self.get_threads_for_summarization(messages, npcs_in_conversation)
 
         # Filter to only the NPCs the caller wants summarized
@@ -272,6 +293,12 @@ class Summaries(Remembering):
             logger.info(f"{name_ref_path} does not exist. A new summary file will be created.")
         
         latest_file_number = get_latest_file_number(target_folder)
+        lw = self.__living_world()  # LIVINGWORLD PATCH: the newest file this save can see
+        if lw is not None and latest_file_number > 1 and os.path.exists(target_folder):
+            numbers = [int(os.path.splitext(f)[0].split('_')[-1]) for f in os.listdir(target_folder) if f.endswith('.txt')]
+            seen = lw.summary_file_number(world_id, self.__lw_folder(f"{target_folder}/x.txt"), numbers)
+            if seen is not None:
+                latest_file_number = seen
         return f"{target_folder}/{base_name}_summary_{latest_file_number}.txt"
     
     @utils.time_it
@@ -334,6 +361,9 @@ class Summaries(Remembering):
             conversation_summaries = previous_conversation_summaries + new_summary
             with open(conversation_summary_file, 'w', encoding='utf-8') as f:
                 f.write(conversation_summaries)
+            lw = self.__living_world()  # LIVINGWORLD PATCH: note when and on which timeline this was written
+            if lw is not None:
+                lw.summary_written(world_id, self.__lw_folder(conversation_summary_file), new_summary, self.__lw_game_days)
         else:
             conversation_summaries = previous_conversation_summaries
 
@@ -369,6 +399,10 @@ class Summaries(Remembering):
 
             with open(new_conversation_summary_file, 'w', encoding='utf-8') as f:
                 f.write(long_conversation_summary)
+            lw = self.__living_world()  # LIVINGWORLD PATCH: a resummary written after an older save is passed over there
+            if lw is not None:
+                lw.summary_file_started(world_id, self.__lw_folder(new_conversation_summary_file), new_number, self.__lw_game_days)
+                lw.summary_written(world_id, self.__lw_folder(new_conversation_summary_file), long_conversation_summary, self.__lw_game_days)
 
     @utils.time_it
     def __format_timestamp(self, game_days: float) -> str:

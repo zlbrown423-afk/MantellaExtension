@@ -432,6 +432,16 @@ language off). Each reaches the game with the conversation start reply.
 Off switches: `MANTELLA_LW_SURRENDER=0` (also turns the wingman off; reaches the game with the start reply as
 `mantella_lw_surrender_on`), `MANTELLA_LW_WINGMAN=0`.
 
+### Mantella's own summaries roll back with the save
+
+Mantella keeps a summary file and a transcript per NPC, outside the database. Loading an older save hid Living
+World memories but not those: Salonia remembered a Whiterun conversation after a reload (2026-11-11).
+`memory/summary_timeline.py` (migration 015) notes each summary line, each new resummary file and each kept
+transcript with the timeline and game time it was written on; reading leaves out what the current save cannot
+see (lines and transcripts never noted are kept; a resummary from after the save is passed over for the newest
+file it can see). Nothing is deleted, so loading the later save brings it back. `MANTELLA_LW_SUMMARY_ROLLBACK=0`
+switches it off.
+
 ## Memory when talking again
 
 Each conversation is turned into each NPC's own memories and facts by a background extraction call. Before
