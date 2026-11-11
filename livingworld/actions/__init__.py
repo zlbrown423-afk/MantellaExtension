@@ -30,8 +30,9 @@ TASK_RELEASE = "mantella_lw_task_release"
 GUARD_ENLIST = "mantella_lw_guard_enlist"   # guard careers: handled on the server (livingworld/guard); the game hands over the uniform
 GUARD_REPORT = "mantella_lw_guard_report"   # guard duties: server only
 GUARD_PAY = "mantella_lw_guard_pay"         # guard wages: the game hands over the gold the server names
+DECENCY_FINE = "mantella_lw_decency_fine"   # a guard's fine for public nakedness: the game takes the gold the server names
 ALL = (SIT, STAND_UP, GO_THERE, ORDER_DRINKS, UNDRESS, DRESS, TASK_AGREE, TASK_CHECK, TASK_RELEASE, GUARD_ENLIST,
-       GUARD_REPORT, GUARD_PAY)
+       GUARD_REPORT, GUARD_PAY, DECENCY_FINE)
 
 
 def enabled() -> bool:

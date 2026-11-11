@@ -187,3 +187,55 @@ def test_peek_switch_off(tmp_path, monkeypatch):
     monkeypatch.setenv(peek.ENV, "0")
     _, start = talk(tmp_path, [YSOLDA], 3.5)
     assert start[peek.KEY_PEEK_ON] is False
+
+
+# ---- fines paid on the spot, and thanes ----------------------------------------------------------------
+
+def _whiterun_guard():
+    from livingworld.guard import orgs as O
+    from livingworld.integration import KEY_CRIME_FACTION, KEY_CRIME_PLUGIN, KEY_IS_GUARD, KEY_PLAYER_BOUNTY
+    a = actors.actor("Whiterun Guard", 0x000A0DA4, 0x0001A6B2, 0, "Nord", "MaleGuard")
+    a[KEY_IS_GUARD] = True
+    a[KEY_CRIME_FACTION] = int(O.by_key("whiterun_guard").crime_faction, 16)
+    a[KEY_CRIME_PLUGIN] = "Skyrim.esm"
+    a[KEY_PLAYER_BOUNTY] = 0
+    return a
+
+
+def fine_talk(work_dir, day, reply="Hm.", thane=False):
+    from livingworld.integration import KEY_THANE_OF
+    guard = _whiterun_guard()
+    llm = ScriptedLLM(replies=[reply])
+    context = {KEY_EVENTS: [react(guard, PLAYER, day - 0.0005, via="decency")]}
+    if thane:
+        context[KEY_THANE_OF] = ["Whiterun"]
+    with HeadlessSession(str(work_dir), llm) as s:
+        s.start([PLAYER, guard], location="Whiterun", game_days=day, context_extra=context)
+        s.continue_until_player_turn()
+        s.end(game_days=day + 0.001)
+    lines = [r.get(comm_consts.KEY_REPLYTYPE_NPCTALK) or {} for _, r in s.exchanges
+             if r.get(comm_consts.KEY_REPLYTYPE) == comm_consts.KEY_REPLYTYPE_NPCTALK]
+    return llm.dialogue_calls[0].system_prompt, lines
+
+
+def test_a_repeat_fine_can_be_paid_on_the_spot_once(tmp_path):
+    fine_talk(tmp_path, 3.5)
+    prompt, lines = fine_talk(tmp_path, 3.8, reply="PayFine: That's twenty septims. Now cover yourself.")
+    assert "If Torvar agrees to pay on the spot, use PayFine" in prompt
+    paid = [l for l in lines if decency.KEY_FINE_GOLD in l]
+    assert paid and paid[0][decency.KEY_FINE_GOLD] == decency.FINE and paid[0][decency.KEY_FINE_GUARD]
+    db = open_db(tmp_path)
+    assert db.execute("SELECT COUNT(*) FROM world_event WHERE type = ?", (decency.EVENT_FINE,)).fetchone()[0] == 1
+
+
+def test_no_fine_is_taken_for_a_first_warning(tmp_path):
+    _, lines = fine_talk(tmp_path, 3.5, reply="PayFine: Twenty gold.")
+    assert not any(decency.KEY_FINE_GOLD in l for l in lines)
+
+
+def test_a_thane_is_asked_with_deference_and_never_fined(tmp_path):
+    fine_talk(tmp_path, 3.5, thane=True)
+    prompt, lines = fine_talk(tmp_path, 3.8, reply="PayFine: Twenty gold, my Thane.", thane=True)
+    assert "Torvar is Thane of Whiterun" in prompt and "'my Thane'" in prompt
+    assert "the Jarl could come to hear of it" in prompt and "use PayFine" not in prompt.split("Do not use")[0]
+    assert not any(decency.KEY_FINE_GOLD in l for l in lines)

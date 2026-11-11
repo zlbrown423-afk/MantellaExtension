@@ -183,6 +183,7 @@ class LivingWorld:
         self.intimacy = enabled and intimacy_enabled()   # OStim scenes (livingworld/intimacy); MANTELLA_LW_INTIMACY=0 off
         self._scenes_now: list[intimate_scenes.SceneNow] = []   # scenes running near the player, from the game's snapshot
         self.confront = self.intimacy and confront.enabled()   # partners who catch each other speak up; MANTELLA_LW_CONFRONT=0 off
+        self._fine_sent: set[int] = set()           # lines whose PayFine was handled
         self.decency = enabled and decency.enabled()   # guards tell a naked player to cover up; MANTELLA_LW_DECENCY=0 off
         self.peek = enabled and peek_enabled()   # women's eyes drift to a naked player; MANTELLA_LW_PEEK=0 off
         self.fog = enabled and fog.fog_enabled()    # names and places unknown until told (livingworld/fog); MANTELLA_LW_FOG=0 off
@@ -756,6 +757,38 @@ class LivingWorld:
                 keys[KEY_GUARD_ISSUE_COUNTS] = issue.item_counts()
         return keys
 
+    def _thane_hold(self, db, guard_id: int, player_id: int) -> str | None:
+        """The hold ``guard_id`` serves, when the player is its thane (the game's own word, or a debug grant)."""
+        from livingworld.guard import orgs as GO, profiles as GP, store as GS
+        p = GP.get(db, guard_id)
+        org = GO.by_key(p.org_key) if p is not None else None
+        if org is None:
+            return None
+        if org.hold in self._thane_of or GS.last_event_gt(db, "thane", player_id, org.key) is not None:
+            return org.hold
+        return None
+
+    def _decency_fine(self, sentence: Any) -> dict[str, Any]:
+        """PayFine on a guard's line (once): the gold the game takes from the player for public nakedness."""
+        if not self.decency or self._context is None or self.store is None or id(sentence) in self._fine_sent:
+            return {}
+        if not any(isinstance(a, dict) and a.get("identifier") == decency.FINE_ACTION
+                   for a in (getattr(sentence, "actions", None) or [])):
+            return {}
+        self._fine_sent.add(id(sentence))
+        speaker = sentence.speaker
+        player = self._context.npcs_in_conversation.get_player_character()
+        if speaker is None or speaker.is_player_character or player is None:
+            return {}
+        now = self._context.game_days
+        guard_id = self._npc_ids.get(speaker.ref_id) or self._register(speaker, now)
+        player_id = self._npc_ids.get(player.ref_id) or self._register(player, now)
+        with self.store.transaction() as db:
+            gold = decency.pay(db, guard_id, player_id, now, getattr(self._context, "location", None),
+                               thane=self._thane_hold(db, guard_id, player_id) is not None)
+        logger.log(23, f"Living World decency: {speaker.name} PayFine -> {gold} gold")
+        return {decency.KEY_FINE_GOLD: gold, decency.KEY_FINE_GUARD: speaker.name} if gold else {}
+
     def _carried_mood(self, npc_id: int, now: float) -> "moods.Mood | None":
         try:
             with self.store.transaction() as db:
@@ -812,6 +845,11 @@ class LivingWorld:
         if speaker is None or sentence.is_narration:
             return {}
         keys = {}
+        try:
+            keys.update(self._decency_fine(sentence))
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: a decency fine failed; carrying on without it")
         try:
             keys.update(self._guard_actions(sentence))
         except Exception:
@@ -1201,7 +1239,8 @@ class LivingWorld:
             with self.store.transaction() as db:
                 scene_lines = []
                 if self.decency and player_id is not None and npc_id != player_id:
-                    told = decency.line(db, npc_id, name, player_id, player_name or "the player", now)
+                    told = decency.line(db, npc_id, name, player_id, player_name or "the player", now,
+                                        thane_of=self._thane_hold(db, npc_id, player_id))
                     if told:
                         scene_lines.append(told)
                 if self.intimacy and self._scenes_now:
