@@ -464,6 +464,14 @@ see (lines and transcripts never noted are kept; a resummary from after the save
 file it can see). Nothing is deleted, so loading the later save brings it back. `MANTELLA_LW_SUMMARY_ROLLBACK=0`
 switches it off.
 
+### A new reference of a known NPC
+
+`store/rebind.py` (migration 016): the LWSaloniaSurrender plugin swaps Salonia's road-encounter reference (deleted
+by the game later) for a persistent copy and Mantella-Spell queues `type=rebind` (`actor` the copy, `target` the
+old reference). Before anyone is registered, the copy becomes an alias of the old `npc_id` (`npc_ref_alias`) and
+Mantella's own folder for the old reference (summaries, transcript) is copied to the copy's folder name. Both
+references keep resolving to her, so older saves work too.
+
 ## Memory when talking again
 
 Each conversation is turned into each NPC's own memories and facts by a background extraction call. Before

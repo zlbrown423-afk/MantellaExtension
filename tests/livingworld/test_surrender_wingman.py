@@ -203,3 +203,37 @@ def test_in_game_her_yes_carries_follow(tmp_path, reset_actions):
         s.end(game_days=3.502)
     sent = [a for line in said for a in line.actions]
     assert {"identifier": surrender.FOLLOW, "arguments": {"source": ["Salonia Carvain"]}} in sent
+
+
+# ---- the plugin's persistent copy keeps her (2026-11-11: the road-encounter ref is deleted after Whiterun) ----
+
+SALONIA_COPY = actors.actor("Salonia Carvain", 0x000B8149, 0xFF002B02, 1, "Imperial", "FemaleCommoner")
+
+
+def rebind_record(day):
+    return f"v=1|key=rebind-1|type=rebind|gt={day}|actor={actor_field(SALONIA_COPY)}|target={actor_field(SALONIA)}"
+
+
+def test_the_copy_is_the_same_salonia(tmp_path):
+    talk(tmp_path, [SALONIA], 3.5, events=[surrendered(3.4995)])
+    db = open_db(tmp_path)
+    me = npc_id(db, "Salonia Carvain")
+    folder = tmp_path / "data" / "Skyrim" / "conversations" / "HeadlessTest" / "Salonia Carvain - 001A01"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "Salonia Carvain_summary_1.txt").write_text("Torvar spared me on the road.", encoding="utf-8")
+
+    prompt, _ = talk(tmp_path, [SALONIA_COPY], 3.6, events=[rebind_record(3.5995)])
+    assert "has not forgotten that Torvar killed Plautis Carvain" in prompt or "begs Torvar to spare" in prompt
+    assert [r[0] for r in open_db(tmp_path).execute("SELECT npc_id FROM npc WHERE display_name = 'Salonia Carvain'")] == [me]
+    copied = folder.parent / "Salonia Carvain - 002B02" / "Salonia Carvain_summary_1.txt"
+    assert copied.read_text(encoding="utf-8") == "Torvar spared me on the road."
+    assert "Torvar spared me on the road." in prompt
+    old, _ = talk(tmp_path, [SALONIA], 3.7)   # an older save with the road-encounter ref still finds her
+    assert [r[0] for r in open_db(tmp_path).execute("SELECT npc_id FROM npc WHERE display_name = 'Salonia Carvain'")] == [me]
+
+
+def test_a_copy_already_met_as_a_stranger_is_taken_over(tmp_path):
+    talk(tmp_path, [SALONIA], 3.5, events=[surrendered(3.4995)])
+    talk(tmp_path, [SALONIA_COPY], 3.55)   # met before the swap record arrived
+    prompt, _ = talk(tmp_path, [SALONIA_COPY], 3.6, events=[rebind_record(3.5995)])
+    assert "Plautis Carvain" in prompt

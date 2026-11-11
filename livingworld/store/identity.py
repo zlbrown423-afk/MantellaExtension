@@ -107,6 +107,11 @@ class IdentityRegistry:
                 if child:
                     db.execute("UPDATE npc SET is_child = 1 WHERE npc_id = ? AND is_child = 0", (row[0],))
                 return row[0]
+            alias = db.execute(   # another reference of a known NPC (store/rebind.py)
+                "SELECT npc_id FROM npc_ref_alias WHERE plugin = ? AND base_form_id = ? AND ref_form_id = ?",
+                (identity.base.plugin, identity.base.local_id, identity.ref.full)).fetchone()
+            if alias:
+                return alias[0]
             cur = db.execute(
                 "INSERT INTO npc (plugin, base_form_id, ref_form_id, display_name, race, sex, is_player,"
                 " is_generic, created_gt, is_child) VALUES (?,?,?,?,?,?,?,?,?,?)",
