@@ -104,6 +104,26 @@ def test_mood_is_hidden_stored_and_sent_to_the_game(tmp_path):
     assert not any("<mood" in t for (t,) in lines)
 
 
+def test_every_reply_is_reminded_to_carry_a_tag_and_the_reminder_is_not_stored(tmp_path):
+    # 2026-11-08: only the first reply of each conversation had a tag (9 of 89), so grabbing someone
+    # mid-conversation never moved their meter. Each call now ends with a reminder that is not kept.
+    llm = ScriptedLLM(replies=["<mood wary 4> Who are you?"],
+                      rules=[when_player_says("hands off", "<mood angry 2> Hands off me!")])
+    with HeadlessSession(str(tmp_path), llm) as s:
+        s.start([PLAYER, actors.gerdur()], game_days=2.0)
+        s.continue_until_player_turn()
+        s.say("Fine.")
+        lines = s.say("Hands off, then.")
+        assert lines[0].text == "Hands off me!"
+        assert talk_replies(s)[-1][KEY_MOOD] == "Gerdur: angry [==--------]"
+        s.end(game_days=2.01)
+    calls = llm.dialogue_calls
+    assert len(calls) >= 3
+    for call in calls:
+        assert "start with a mood tag for how Gerdur feels" in call.messages[-1]["content"]
+        assert sum("start with a mood tag" in str(m.get("content")) for m in call.messages) == 1
+
+
 def run_once(tmp_path, day, reply="<mood calm 5> Hello.", context_extra=None):
     llm = ScriptedLLM(replies=[reply])
     with HeadlessSession(str(tmp_path), llm) as s:

@@ -237,7 +237,42 @@ class ClientBase(AIClient):
         
         reply = chat_completion.choices[0].message.content
         return reply
-        
+
+    # LIVINGWORLD PATCH: background calls (memory extraction) with their own reply length, so a short
+    # spoken-reply cap such as max_tokens 250 cannot cut their JSON off, and without the dialogue lock,
+    # so a background call never makes an NPC wait to answer.
+    def background_request_call(self, messages: Message | message_thread, params: dict[str, Any] | None = None,
+                                json_mode: bool = False) -> str | None:
+        if isinstance(messages, Message) or isinstance(messages, ImageMessage):
+            openai_messages = [messages.get_openai_message()]
+        else:
+            openai_messages = messages.get_openai_messages()
+        request_params: dict[str, Any] = {k: v for k, v in (self._request_params or {}).items()
+                                          if k not in ("stop", "max_tokens", "max_completion_tokens", "stream")}
+        request_params.update(params or {})
+        attempts = [dict(request_params, response_format={"type": "json_object"}), request_params] if json_mode \
+            else [request_params]
+        with PERF.llm_call("request"):
+            for i, attempt in enumerate(attempts):
+                sync_client = self.generate_sync_client()
+                try:
+                    chat_completion = sync_client.chat.completions.create(
+                        model=self.model_name, messages=openai_messages, **attempt)
+                except BadRequestError as e:
+                    if i + 1 < len(attempts):   # the service does not take JSON mode: ask again without it
+                        logger.log(23, f"Living World: JSON mode refused ({e}); asking without it")
+                        continue
+                    raise
+                finally:
+                    sync_client.close()
+                if chat_completion and chat_completion.choices and chat_completion.choices[0].message.content:
+                    choice = chat_completion.choices[0]
+                    if getattr(choice, "finish_reason", None) == "length":
+                        logger.warning("Living World: a background reply hit its length limit and may be cut off")
+                    return choice.message.content
+                return None
+        return None
+
     
     @utils.time_it
     async def streaming_call(self, messages: Message | message_thread, is_multi_npc: bool, tools: list[dict] = None) -> AsyncGenerator[tuple[str, str | list] | None, None]:

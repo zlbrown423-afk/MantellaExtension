@@ -18,12 +18,19 @@ from typing import Any, Callable
 
 from livingworld.memory.extraction import Extractor
 from livingworld.memory.jobs import JobQueue, JobWorker
+from livingworld.memory import backfill
+from livingworld.memory import settings as memory_settings
 from livingworld.memory.recall import recall_for
 from livingworld import mood as moods
 from livingworld.bodylang import body_language_enabled, gesture_notices, gestures_enabled
 from livingworld.bodylang.presence import is_gesture_record, is_presence
 from livingworld.bodylang.service import BodyLanguage
-from livingworld.dialogue import hearing
+from livingworld.dialogue import hearing, leads as player_leads
+from livingworld.dialogue import promises
+from livingworld import fog
+from livingworld import diary
+from livingworld.diary import service as diaries
+from livingworld.fog import places as fog_places, service as fog_names
 from livingworld.perception import awareness
 from livingworld.perception.intoxication import drink_state
 from livingworld.perception.pipeline import PerceptionPipeline
@@ -31,6 +38,12 @@ from livingworld.social.traits import seed_traits_from_bio
 from livingworld.social.world import SocialWorld
 from livingworld.work import tasks_enabled
 from livingworld.guard import guard_debug_enabled, guard_enabled
+from livingworld.intimacy import intimacy_enabled
+from livingworld.store.minors import is_child
+from livingworld.intimacy import scenes as intimate_scenes
+from livingworld.intimacy import confront
+from livingworld.guard import decency
+from livingworld.bodylang.peek import KEY_PEEK_ON, peek_enabled
 from livingworld.guard.profiles import GuardFacts
 from livingworld.guard.service import ACTIONS as GUARD_ACTIONS, ENLIST as GUARD_ENLIST, Guard, Scene as GuardScene
 from livingworld.work.service import ACTIONS as TASK_ACTIONS, Scene as WorkScene, Work
@@ -43,6 +56,7 @@ from livingworld.store.timeline import resolve_load
 from livingworld.store.identity import ActorIdentity, FormId, IdentityRegistry, VoiceBindingConflict
 from livingworld.store.world_store import WorldStore
 from src import utils
+from src.http.communication_constants import communication_constants as comm_consts
 
 logger = utils.get_logger()
 
@@ -78,6 +92,14 @@ KEY_GUARD_BED_PLUGIN = "mantella_lw_guard_bed_plugin"
 KEY_GUARD_BED_OWN = "mantella_lw_guard_bed_own"          # True: make it the player's; False: unowned again
 KEY_GUARD_CHEST_ID = "mantella_lw_guard_chest_id"        # a footlocker (CONT base, plugin-relative id) to place by the bunk
 KEY_GUARD_CHEST_PLUGIN = "mantella_lw_guard_chest_plugin"
+# G2f arrests: someone the player arrested (by name, as in the conversation) and what the rules decided they do
+KEY_GUARD_ARREST_NAME = "mantella_lw_guard_arrest_name"
+KEY_GUARD_ARREST_MODE = "mantella_lw_guard_arrest_mode"    # 'submit' (follows to the cells) | 'flee' | 'fight'
+KEY_GUARD_ARREST_ID = "mantella_lw_guard_arrest_id"        # int: the arrest (sent back on jail records as task=)
+KEY_GUARD_ARREST_DAYS = "mantella_lw_guard_arrest_days"    # float: game days in the cell
+KEY_GUARD_JAIL_ID = "mantella_lw_guard_jail_id"            # int: the prisoner marker (REFR, plugin-relative) in the cell
+KEY_GUARD_JAIL_PLUGIN = "mantella_lw_guard_jail_plugin"
+KEY_GUARD_RELEASE = "mantella_lw_guard_release"            # int[]: arrests whose prisoner is let out now
 # G2e shift encounters: the watch windows of the duty in hand (task 0 clears them), sent when they change
 KEY_GUARD_WATCH_TASK = "mantella_lw_guard_watch_task"    # int: the duty (task id); 0 = no windows
 KEY_GUARD_WATCH_END = "mantella_lw_guard_watch_end"      # float: game days (+1, like the records' gt) the shift ends
@@ -152,10 +174,28 @@ class LivingWorld:
         self._guard_refreshed: int | None = None    # conv_id whose duties/probation were brought up to date
         self._player_said: str | None = None        # the player's last line (kept with a duty report)
         self._watch_sent: tuple | None = None       # G2e: the watch plan last sent to the game this conversation
+        self.keep_promises = enabled and promises.promises_enabled()   # NPCs do what they say (MANTELLA_LW_KEEP_PROMISES=0 turns off)
         self.hearing = enabled and hearing.hearing_enabled()   # catch misheard speech (MANTELLA_LW_HEARING=0 turns off)
+        self.leads = enabled and player_leads.leads_enabled()  # ask about a lead without its name (MANTELLA_LW_LEADS=0 turns off)
+        self._lead_ask: str | None = None           # the player's last line, while it asks after someone
+        self._lead_learned: set[str] = set()        # names learned from that line and its answers
         self.perf_monitor: PerfMonitor | None = None  # MANTELLA_LW_PERF=1 (see livingworld/perf)
         self.body_language = enabled and body_language_enabled()   # MANTELLA_LW_BODY_LANGUAGE=0 turns off
         self._body: dict[int, BodyLanguage] = {}    # id(store) -> body language for that world
+        self.intimacy = enabled and intimacy_enabled()   # OStim scenes (livingworld/intimacy); MANTELLA_LW_INTIMACY=0 off
+        self._scenes_now: list[intimate_scenes.SceneNow] = []   # scenes running near the player, from the game's snapshot
+        self.confront = self.intimacy and confront.enabled()   # partners who catch each other speak up; MANTELLA_LW_CONFRONT=0 off
+        self._fine_sent: set[int] = set()           # lines whose PayFine was handled
+        self.decency = enabled and decency.enabled()   # guards tell a naked player to cover up; MANTELLA_LW_DECENCY=0 off
+        self.peek = enabled and peek_enabled()   # women's eyes drift to a naked player; MANTELLA_LW_PEEK=0 off
+        self.fog = enabled and fog.fog_enabled()    # names and places unknown until told (livingworld/fog); MANTELLA_LW_FOG=0 off
+        self._fog_labels: dict[str, str | None] = {}   # Mantella's 6-digit ref id -> what the game shows while unknown
+        self._fog_reveal: list[str] = []            # real names the player learned, for the next NPC line
+        self._fog_notes: list[str] = []             # names learned since the player last spoke, for the dialogue model
+        self._fog_game = False                      # the game build hides names (it sends the player's fog label)
+        self.diary = enabled and diary.diary_enabled()   # private diaries (livingworld/diary); MANTELLA_LW_DIARY=0 off
+        self._ref_raw: dict[str, int] = {}          # Mantella's 6-digit ref id -> the form ID exactly as the game sent it
+        self._bios: dict[int, str] = {}             # npc_id -> Mantella bio, for the diary writer
         LivingWorld.latest = self
 
     @classmethod
@@ -187,6 +227,11 @@ class LivingWorld:
         def complete(system: str, user: str) -> str | None:
             messages = message_thread(config, system)
             messages.add_message(VerbatimUserMessage(config, user))
+            background = getattr(client, "background_request_call", None)
+            if background is not None and memory_settings.memory_boost_enabled():
+                # its own reply length and JSON mode: the spoken-reply cap (often 250 tokens) cut extraction off
+                return background(messages, {"max_tokens": memory_settings.extract_max_tokens(), "temperature": 0.2},
+                                  json_mode=True)
             return client.request_call(messages)
         self.complete = complete
 
@@ -204,6 +249,10 @@ class LivingWorld:
         for actor_json in actor_jsons or []:
             identity = ActorIdentity.from_actor_json(actor_json)
             self._identities[identity.ref.mantella_id] = identity
+            try:
+                self._ref_raw[identity.ref.mantella_id] = int(actor_json[comm_consts.KEY_ACTOR_REFID])
+            except (KeyError, TypeError, ValueError):
+                pass
             if self.guard and KEY_IS_GUARD in actor_json:
                 faction = actor_json.get(KEY_CRIME_FACTION)
                 bounty = actor_json.get(KEY_PLAYER_BOUNTY)
@@ -211,6 +260,10 @@ class LivingWorld:
                     bool(actor_json.get(KEY_IS_GUARD)), actor_json.get(KEY_CRIME_PLUGIN) or None,
                     f"0x{int(faction) & 0xFFFFFF:08X}" if faction else None,
                     int(bounty) if bounty is not None else None)
+            if fog.KEY_FOG_LABEL in actor_json:
+                if identity.is_player:
+                    self._fog_game = True
+                self._fog_labels[identity.ref.mantella_id] = str(actor_json.get(fog.KEY_FOG_LABEL) or "").strip() or None
 
     @_never_raises
     def perceived(self, context_json: dict[str, Any] | None) -> int:
@@ -223,6 +276,9 @@ class LivingWorld:
         for marker in perf_markers:   # the game's own timing summaries go to the performance monitor only
             PERF.add_marker(marker)
         attire_raw = records_from_context(context_json, KEY_ATTIRE)
+        if self.intimacy and self.store is not None and isinstance(context_json, dict) \
+                and intimate_scenes.KEY_SCENE in context_json:
+            self._scenes_now = self._scene_snapshot(records_from_context(context_json, intimate_scenes.KEY_SCENE))
         body_raw = [r for r in raw if is_presence(r)]   # body language records never reach the event pipeline
         if not gestures_enabled():   # MANTELLA_LW_GESTURES=0: a game still sending them is ignored
             body_raw = [r for r in body_raw if not is_gesture_record(r)]
@@ -250,6 +306,22 @@ class LivingWorld:
             kinds["attire_snapshot"] = len(attire_raw)
         PERF.records_ingested(kinds, (time.perf_counter() - started) * 1000)
         return stored
+
+    def _scene_snapshot(self, scene_raw: list[str]) -> list[intimate_scenes.SceneNow]:
+        """OStim scenes running near the player right now (an empty list when the game says none are)."""
+        identities = IdentityRegistry(self.store)
+        records, ids = [], {}
+        for raw in scene_raw:
+            try:
+                record = parse_record(raw)
+            except (BadRecord, ValueError) as e:
+                logger.error(f"Living World: scene snapshot skipped ({e}): {raw[:200]}")
+                continue
+            records.append(record)
+            for actor in [record.actor, record.target, record.party] + [w.actor for w in record.witnesses]:
+                if actor is not None and actor.ref_id not in ids:
+                    ids[actor.ref_id] = identities.ensure_npc(actor.identity(), record.game_time)
+        return intimate_scenes.snapshot(records, ids)
 
     def _attire_snapshot(self, attire_raw: list[str], pipeline: PerceptionPipeline) -> dict[int, awareness.AttireNow]:
         records = []
@@ -295,12 +367,15 @@ class LivingWorld:
         self._context = context
         self._pending = True
         self._attire_now = {}
+        self._scenes_now = []
         self._moods_shown = {}
         self._moods_to_send = {}
         self._guard_sent = set()
         self._player_said = None
         self._hints_to_send = []
         self._watch_sent = None
+        self._lead_ask = None
+        self._lead_learned = set()
 
     @_never_raises
     def conversation_started(self, world_id: str, context: Any) -> None:
@@ -344,6 +419,9 @@ class LivingWorld:
             # the schema refuses a line whose voice differs from the speaker's bound voice
             self.errors += 1
             logger.error(f"Living World: line by {speaker.name} not stored: {e}")
+        if self.leads and self._lead_ask:
+            skip = [c.name for c in context.npcs_in_conversation.get_all_characters()]
+            self._learn_leads(player_leads.from_reply(self._lead_ask, text, skip), context.game_days)
 
     @_never_raises
     def player_line(self, text: str, context: Any) -> None:
@@ -355,6 +433,13 @@ class LivingWorld:
         npc_id = self._npc_ids.get(player.ref_id) or self._register(player, context.game_days)
         ConversationLog(self.store).append(self.conv_id, npc_id, text.strip(), None, context.game_days)
         self._player_said = text.strip()
+        if self.leads:
+            self._lead_ask = None
+            self._lead_learned = set()
+            if hearing.is_question(text) and not player_leads.shortcut(text):
+                self._lead_ask = text.strip()
+                names = [c.name for c in context.npcs_in_conversation.get_all_characters() if not c.is_player_character]
+                self._learn_leads(player_leads.from_player(text, names), context.game_days)
         if self.hygiene_debug:
             self._hygiene_debug(text, npc_id, context)
         if self.guard:
@@ -385,6 +470,14 @@ class LivingWorld:
             return
         if game_days is None and context is not None:
             game_days = context.game_days
+        if self.guard and self.store is not None:
+            try:
+                scene = self._guard_scene()
+                if scene is not None:
+                    self._guard_for(self.store).ended(scene)
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not file the written guard report; carrying on")
         self._close(game_days)
 
     @_never_raises
@@ -411,13 +504,23 @@ class LivingWorld:
             npc_id = self._npc_ids.get(character.ref_id) or self._register(character, now)
             key = (self.conv_id, npc_id)
             recall = recall_for(store, npc_id, now, player_id, mark_rehearsed=key not in self._rehearsed,
-                                about_ids=list(present))
+                                about_ids=list(present), current_conv_id=self.conv_id)
             self._rehearsed.add(key)
             self._last_recall[npc_id] = (recall.know_ids, recall.mem_ids)
             text = recall.text()
+            fog_lines: list[str] = []
+            if self._fog_active() and player is not None and player_id is not None:
+                player_p = fog_names.Person(player_id, player.name)
+                me = self._fog_person(character)
+                with store.reading() as db:
+                    text = fog_names.hide_player_name(db, npc_id, player_p, text)
+                    fog_lines = fog_names.prompt_lines(db, me, player_p)
             if text:
                 blocks.append(text)
-            noticed = self._noticed(npc_id, character.name, now, present)
+            if fog_lines:
+                blocks.append(f"Names, for {character.name}:\n" + "\n".join(f"- {line}" for line in fog_lines))
+            noticed = self._noticed(npc_id, character.name, now, present, player_id,
+                                    player.name if player is not None else None)
             if noticed:
                 blocks.append(f"What {character.name} notices right now:\n" + "\n".join(f"- {line}" for line in noticed))
             body = self._body_lines(npc_id, character.name, now)
@@ -431,6 +534,13 @@ class LivingWorld:
             work = self._work_lines(npc_id, character.name, scene)
             if work:
                 blocks.append(f"Work on {character.name}'s mind:\n" + "\n".join(f"- {line}" for line in work))
+            if self.diary:
+                with store.reading() as db:
+                    keeps_diary = diaries.is_keeper(db, npc_id, player_id)
+                if keeps_diary:
+                    blocks.append(f"{character.name} keeps a private diary and writes in it most evenings, about "
+                                  f"their days and the people in them. They carry it or leave it at home, and "
+                                  f"would be upset to find anyone had read it.")
             guard = self._guard_lines(npc_id, character.name)
             if guard:
                 blocks.append(f"The guard, and {character.name}:\n" + "\n".join(f"- {line}" for line in guard))
@@ -442,16 +552,49 @@ class LivingWorld:
         return "\n\n".join(blocks)
 
     @_never_raises
+    def guard_notes(self, text: str, context: Any) -> list[str]:
+        """G2f: notes for the AI on the player's line, such as what someone the player arrests does."""
+        if not self.guard or self.conv_id is None or context is not self._context or not text:
+            return []
+        scene = self._guard_scene()
+        return self._guard_for(self.store).arrest_turn(scene, text) if scene else []
+
+    @_never_raises
     def hearing_note(self, text: str, context: Any) -> str | None:
-        """A narration note naming likely misheard words in the player's line, or None."""
-        if not self.hearing or context is None:
+        """A narration note naming likely misheard words in the player's line, and who they mean by
+        "the man I'm looking for" (leads), or None."""
+        if context is None or not (self.hearing or self.leads):
             return None
         player = context.npcs_in_conversation.get_player_character()
+        player_name = player.name if player else "The player"
         names = [c.name for c in context.npcs_in_conversation.get_all_characters() if not c.is_player_character]
-        note = hearing.note_text(text, names, player.name if player else "The player")
+        current = self._current_leads() if self.leads else []
+        notes = []
+        if self.hearing:
+            notes.append(hearing.note_text(text, names, player_name, [l.name for l in current]))
+        if self.leads:
+            notes.append(player_leads.shortcut_note(text, current, player_name))
+        note = " ".join(n for n in notes if n) or None
         if note:
             logger.log(23, f"Living World: {note}")
         return note
+
+    def _current_leads(self) -> list[player_leads.Lead]:
+        if self.store is None:
+            return []
+        with self.store.reading() as db:
+            return player_leads.current(db)
+
+    def _learn_leads(self, learned: list[player_leads.Learned], game_time: float) -> None:
+        fresh = [l for l in learned if l.name.lower() not in self._lead_learned]
+        if not fresh or self.store is None:
+            return
+        with self.store.transaction() as db:
+            for lead in fresh:
+                player_leads.remember(db, lead, game_time, self.conv_id)
+                self._lead_learned.add(lead.name.lower())
+                heard = f' (heard as "{lead.heard_as}")' if lead.heard_as else ""
+                logger.log(23, f"Living World: new lead, {lead.kind} '{lead.name}'{heard}")
 
     def _social_for(self, store: WorldStore) -> SocialWorld:
         if id(store) not in self._social:
@@ -618,6 +761,38 @@ class LivingWorld:
                 keys[KEY_GUARD_ISSUE_COUNTS] = issue.item_counts()
         return keys
 
+    def _thane_hold(self, db, guard_id: int, player_id: int) -> str | None:
+        """The hold ``guard_id`` serves, when the player is its thane (the game's own word, or a debug grant)."""
+        from livingworld.guard import orgs as GO, profiles as GP, store as GS
+        p = GP.get(db, guard_id)
+        org = GO.by_key(p.org_key) if p is not None else None
+        if org is None:
+            return None
+        if org.hold in self._thane_of or GS.last_event_gt(db, "thane", player_id, org.key) is not None:
+            return org.hold
+        return None
+
+    def _decency_fine(self, sentence: Any) -> dict[str, Any]:
+        """PayFine on a guard's line (once): the gold the game takes from the player for public nakedness."""
+        if not self.decency or self._context is None or self.store is None or id(sentence) in self._fine_sent:
+            return {}
+        if not any(isinstance(a, dict) and a.get("identifier") == decency.FINE_ACTION
+                   for a in (getattr(sentence, "actions", None) or [])):
+            return {}
+        self._fine_sent.add(id(sentence))
+        speaker = sentence.speaker
+        player = self._context.npcs_in_conversation.get_player_character()
+        if speaker is None or speaker.is_player_character or player is None:
+            return {}
+        now = self._context.game_days
+        guard_id = self._npc_ids.get(speaker.ref_id) or self._register(speaker, now)
+        player_id = self._npc_ids.get(player.ref_id) or self._register(player, now)
+        with self.store.transaction() as db:
+            gold = decency.pay(db, guard_id, player_id, now, getattr(self._context, "location", None),
+                               thane=self._thane_hold(db, guard_id, player_id) is not None)
+        logger.log(23, f"Living World decency: {speaker.name} PayFine -> {gold} gold")
+        return {decency.KEY_FINE_GOLD: gold, decency.KEY_FINE_GUARD: speaker.name} if gold else {}
+
     def _carried_mood(self, npc_id: int, now: float) -> "moods.Mood | None":
         try:
             with self.store.transaction() as db:
@@ -636,6 +811,14 @@ class LivingWorld:
         return moods.MoodFilter(lambda mood: self._mood_seen(character, mood))
 
     @_never_raises
+    def mood_messages(self, messages: Any, character: Any) -> Any:
+        """The messages for this NPC's AI call, with a reminder to open with a mood tag (never stored)."""
+        try:
+            return moods.with_reminder(messages, character.name)
+        except Exception:
+            logger.exception("Living World: could not add the mood reminder; sending the messages as they are")
+            return messages
+
     def _mood_seen(self, character: Any, mood: "moods.Mood") -> None:
         now = self._context.game_days
         npc_id = self._npc_ids.get(character.ref_id) or self._register(character, now)
@@ -667,6 +850,11 @@ class LivingWorld:
             return {}
         keys = {}
         try:
+            keys.update(self._decency_fine(sentence))
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: a decency fine failed; carrying on without it")
+        try:
             keys.update(self._guard_actions(sentence))
         except Exception:
             self.errors += 1
@@ -674,6 +862,12 @@ class LivingWorld:
         text = self._moods_to_send.pop(speaker.ref_id, None)
         if text:
             keys[KEY_MOOD] = text
+        if self._fog_active() and self.store is not None and self.conv_id is not None:
+            try:
+                keys.update(self._fog_line_keys(sentence))
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not check an NPC line for names and places; carrying on")
         profiles = self._body_profiles()
         if profiles:
             keys[KEY_BODY] = profiles
@@ -697,6 +891,12 @@ class LivingWorld:
                 logger.exception("Living World: could not check the barracks bunk; carrying on")
         if self.guard and self.store is not None:
             try:
+                keys.update(self._arrest_keys())
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not send a guard arrest to the game; carrying on")
+        if self.guard and self.store is not None:
+            try:
                 keys.update(self._watch_keys())
             except Exception:
                 self.errors += 1
@@ -706,6 +906,25 @@ class LivingWorld:
         if self._hints_to_send:
             keys[KEY_HINTS] = self._hints_to_send
             self._hints_to_send = []
+        return keys
+
+    def _arrest_keys(self) -> dict[str, Any]:
+        """G2f: an arrest the rules decided on (one per line) and prisoners to let out."""
+        guard = self._guard_for(self.store)
+        orders, releases = guard.take_arrest_orders()
+        keys: dict[str, Any] = {}
+        if orders:
+            o = orders[0]
+            guard.arrest_orders = orders[1:] + guard.arrest_orders   # any others go with the next line
+            keys.update({KEY_GUARD_ARREST_NAME: o.name, KEY_GUARD_ARREST_MODE: o.mode, KEY_GUARD_ARREST_ID: o.arrest_id,
+                         KEY_GUARD_ARREST_DAYS: o.days})
+            if o.jail is not None and o.jail.form_id:
+                keys[KEY_GUARD_JAIL_ID] = int(o.jail.form_id, 16)
+                keys[KEY_GUARD_JAIL_PLUGIN] = o.jail.plugin
+            logger.log(23, f"Living World guard: arrest {o.arrest_id} sent to the game: {o.name} {o.mode}")
+        if releases:
+            keys[KEY_GUARD_RELEASE] = releases
+            logger.log(23, f"Living World guard: prisoners to let out: arrests {releases}")
         return keys
 
     def _watch_keys(self) -> dict[str, Any]:
@@ -736,11 +955,211 @@ class LivingWorld:
         keys[KEY_BODY_ON] = bool(self.body_language)
         keys[KEY_GESTURES_ON] = bool(self.body_language and gestures_enabled())
         keys[KEY_GESTURE_NOTICES] = gesture_notices()
+        keys[intimate_scenes.KEY_INTIMACY_ON] = bool(self.intimacy)
+        keys[confront.KEY_CONFRONT_ON] = bool(self.confront)
+        keys[decency.KEY_DECENCY_ON] = bool(self.decency)
+        keys[KEY_PEEK_ON] = bool(self.peek and self.body_language)
+        if self.confront and self.store is not None:
+            try:
+                with self.store.reading() as db:
+                    keys[confront.KEY_COUPLES] = confront.couples(db)
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not list the couples for the game; carrying on")
+        if self.intimacy:
+            from livingworld.intimacy import arousal
+            keys[arousal.KEY_AROUSAL_KEY] = arousal.arousal_key()
         if self.body_language and self.store is not None:
             self._body_for(self.store).forget_sent()   # the first NPC line sends every participant's profile again
         wanting = self._wants_a_word()
         if wanting:
             keys[KEY_WANTS_A_WORD] = wanting
+        keys[fog.KEY_FOG_ON] = bool(self.fog)
+        if self.fog and self.store is not None:
+            try:
+                with self.store.reading() as db:
+                    player = fog_names.player_id(db)
+                    keys[fog.KEY_FOG_KNOWN] = fog_names.known_to_player(db, player) if player is not None else []
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not list the people the player knows; carrying on")
+        self._fog_reveal = []
+        self._fog_notes = []
+        keys.update(self._diary_keys())
+        return keys
+
+    # ---- diaries (livingworld/diary) ----
+    def _diary_keepers(self) -> list[tuple[Any, int]]:
+        """(character, npc_id) for each participant who keeps a diary now."""
+        if not self.diary or self.store is None or self._context is None:
+            return []
+        out = []
+        with self.store.reading() as db:
+            player = diaries.player_id(db)
+            for c in self._context.npcs_in_conversation.get_all_characters():
+                if c.is_player_character:
+                    continue
+                npc_id = self._npc_ids.get(c.ref_id)
+                if npc_id is not None and diaries.is_keeper(db, npc_id, player):
+                    out.append((c, npc_id))
+        return out
+
+    def _diary_keys(self) -> dict[str, Any]:
+        keys: dict[str, Any] = {diary.KEY_DIARY_ON: bool(self.diary)}
+        if not self.diary:
+            return keys
+        try:
+            refs, ids, titles = [], [], []
+            keepers = self._diary_keepers()
+            with self.store.reading() as db:
+                player = diaries.player_id(db)
+                for character, npc_id in keepers:
+                    raw = self._ref_raw.get(character.ref_id)
+                    if raw is None:
+                        continue
+                    refs.append(raw)
+                    ids.append(npc_id)
+                    titles.append(diaries.title(db, npc_id, player, self._fog_active()))
+            if refs:
+                keys[diary.KEY_DIARY_REF_IDS] = refs
+                keys[diary.KEY_DIARY_NPC_IDS] = ids
+                keys[diary.KEY_DIARY_TITLES] = titles
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not list the diary keepers; carrying on")
+        return keys
+
+    def _queue_diaries(self, game_days: float) -> None:
+        """After a conversation: each keeper in it writes (or rewrites) the day's entry, after the extraction
+        job has stored this conversation's memories (jobs run in the order queued)."""
+        with self.store.reading() as db:
+            player = diaries.player_id(db)
+            people = [r[0] for r in db.execute("SELECT npc_id FROM participant WHERE conv_id = ?", (self.conv_id,))]
+            keepers = [n for n in people if diaries.is_keeper(db, n, player)]
+        queue = JobQueue(self.store)
+        for npc_id in keepers:
+            queue.enqueue(diary.JOB, {"npc_id": npc_id, "player_id": player, "conv_id": self.conv_id,
+                                      "day": int(game_days), "game_days": game_days,
+                                      "bio": self._bios.get(npc_id)},
+                          f"diary:conv:{self.conv_id}:{npc_id}")
+
+    def diary_read(self, request: dict[str, Any]) -> dict[str, Any]:
+        """The game opened a diary: the pages to show, and who (if anyone) caught the player reading it.
+        Never answers with an error reply (the game would end a running conversation on one)."""
+        reply: dict[str, Any] = {comm_consts.KEY_REPLYTYPE: diary.REPLY_READ, diary.KEY_PAGES: [],
+                                 diary.KEY_TITLE: "Diary"}
+        if not self.diary:
+            reply[diary.KEY_PAGES] = ["The pages are blank."]
+            return reply
+        try:
+            world_id = str(request.get(diary.KEY_WORLD_ID) or "")
+            store = self._store_for(world_id) if world_id else self.store
+            if store is None:
+                reply[diary.KEY_PAGES] = ["The handwriting is too cramped to make out."]
+                return reply
+            owner = int(request.get(diary.KEY_OWNER_NPC_ID) or 0)
+            with store.reading() as db:
+                player = diaries.player_id(db)
+                known = db.execute("SELECT 1 FROM npc WHERE npc_id = ? AND is_player = 0", (owner,)).fetchone()
+                if not known or player is None:
+                    reply[diary.KEY_PAGES] = ["The handwriting is too cramped to make out."]
+                    return reply
+                reply[diary.KEY_TITLE] = diaries.title(db, owner, player, self._fog_active())
+                reply[diary.KEY_PAGES] = diaries.pages(db, owner) or [
+                    "Only a few lines so far, crossed out and written over. Nothing you can make out."]
+            game_time = request.get(diary.KEY_GAME_DAYS)
+            if game_time is None:
+                game_time = store.scalar("SELECT MAX(game_time) FROM utterance") or 0.0
+            diaries.record_read(store, owner, player, bool(request.get(diary.KEY_SEEN_BY_OWNER)),
+                                list(request.get(diary.KEY_WITNESS_REF_IDS) or []),
+                                list(request.get(diary.KEY_WITNESS_NAMES) or []),
+                                request.get(diary.KEY_LOCATION) or None, float(game_time))
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not open the diary; carrying on")
+            if not reply[diary.KEY_PAGES]:
+                reply[diary.KEY_PAGES] = ["The handwriting is too cramped to make out."]
+        return reply
+
+    # ---- fog: names and places unknown until told (livingworld/fog) ----
+    def _fog_active(self) -> bool:
+        """Fog is on and the game build takes part (an older game build shows every name, so the NPCs are not
+        told to pretend otherwise)."""
+        return bool(self.fog and self._fog_game)
+
+    @_never_raises
+    def fog_summary(self, characters: list[Any], text: str) -> str:
+        """Mantella's own summaries name the player; when none of the NPCs here was told that name, they read
+        'the stranger' instead."""
+        if not self._fog_active() or self.store is None or self._context is None or not text:
+            return text
+        player = self._context.npcs_in_conversation.get_player_character()
+        if player is None:
+            return text
+        player_id = self._npc_ids.get(player.ref_id) or self._register(player, self._context.game_days)
+        player_p = fog_names.Person(player_id, player.name)
+        npcs = [self._npc_ids.get(c.ref_id) or self._register(c, self._context.game_days)
+                for c in characters if not c.is_player_character]
+        with self.store.reading() as db:
+            if not npcs or any(fog_names.known_name(db, n, player_id) is not None for n in npcs):
+                return text
+            return fog_names.hide_player_name(db, npcs[0], player_p, text)
+
+    def _fog_person(self, character: Any) -> "fog_names.Person":
+        """Registers the character if need be, so call it outside a transaction."""
+        npc_id = self._npc_ids.get(character.ref_id) or self._register(character, self._context.game_days)
+        label = self.store.scalar("SELECT stranger_label FROM npc WHERE npc_id = ?", (npc_id,))
+        return fog_names.Person(npc_id, character.name, label)
+
+    def _fog_people(self, context: Any) -> tuple["fog_names.Person", list["fog_names.Person"]]:
+        player = context.npcs_in_conversation.get_player_character()
+        people = [self._fog_person(c) for c in context.npcs_in_conversation.get_all_characters()]
+        player_p = next(p for p in people if player is not None and p.npc_id == self._npc_ids.get(player.ref_id))
+        return player_p, people
+
+    def _fog_note(self, learned: "fog_names.Learned") -> None:
+        for line in learned.log:
+            logger.log(23, f"Living World fog: {line}")
+        self._fog_reveal += [n for n in learned.player_learned if n not in self._fog_reveal]
+        self._fog_notes += [n for n in learned.notes if n not in self._fog_notes]
+
+    @_never_raises
+    def fog_notes(self, text: str, context: Any) -> list[str]:
+        """Notes for the dialogue model with the player's line: names learned since the last one, the player's
+        own introduction included. The system prompt is written once per conversation, so this is how a name
+        learned mid-conversation reaches it."""
+        if not self._fog_active() or self.conv_id is None or context is not self._context:
+            return []
+        if text and text.strip():
+            player_p, present = self._fog_people(context)
+            with self.store.transaction() as db:
+                self._fog_note(fog_names.player_line(db, player_p, text.strip(), present, context.game_days,
+                                                     self.conv_id))
+        notes, self._fog_notes = self._fog_notes, []
+        return notes
+
+    def _fog_line_keys(self, sentence: Any) -> dict[str, Any]:
+        """Names and places said in this NPC line: the player learns them as the line is spoken."""
+        context = self._context
+        text = (sentence.text or "").strip()
+        keys: dict[str, Any] = {}
+        if text and context is not None and context.npcs_in_conversation.get_player_character() is not None:
+            player_p, present = self._fog_people(context)
+            with self.store.transaction() as db:
+                speaker = next((p for p in present if p.npc_id == self._npc_ids.get(sentence.speaker.ref_id)), None)
+                if speaker is not None:
+                    self._fog_note(fog_names.npc_line(db, speaker, text, present, player_p, context.game_days,
+                                                      self.conv_id))
+                    markers = fog_places.npc_line(db, text, speaker.npc_id, context.game_days, self.conv_id)
+                    if markers:
+                        keys[fog.KEY_FOG_MARKER_IDS] = [m.form_int for m in markers]
+                        keys[fog.KEY_FOG_MARKER_PLUGINS] = [m.plugin for m in markers]
+                        keys[fog.KEY_FOG_MARKER_NAMES] = [m.name for m in markers]
+                        logger.log(23, f"Living World fog: {speaker.name} told the player about "
+                                       + ", ".join(m.name for m in markers))
+        if self._fog_reveal:
+            keys[fog.KEY_FOG_REVEAL] = self._fog_reveal
+            self._fog_reveal = []
         return keys
 
     def _wants_a_word(self) -> str:
@@ -766,7 +1185,7 @@ class LivingWorld:
     def _body_for(self, store: WorldStore) -> BodyLanguage:
         key = id(store)
         if key not in self._body:
-            self._body[key] = BodyLanguage(store)
+            self._body[key] = BodyLanguage(store, peek=bool(self.peek))
         return self._body[key]
 
     def _body_lines(self, npc_id: int, name: str, now: float) -> list[str]:
@@ -792,7 +1211,8 @@ class LivingWorld:
                     continue
                 npc_id = self._npc_ids.get(c.ref_id) or self._register(c, now)
                 lines = self._body_for(self.store).prompt_lines(npc_id, c.name, now)
-                out += [f"{c.name} noticed: {line}" if not line.startswith("Because of this") else line
+                out += [f"{c.name} noticed: {line}"
+                        if not (line.startswith("Because of this") or line.startswith(c.name)) else line
                         for line in lines]
             if out:
                 logger.log(23, "Living World body language: " + " / ".join(out))
@@ -819,10 +1239,37 @@ class LivingWorld:
             logger.exception("Living World: could not work out body language profiles; the game keeps its last ones")
             return []
 
-    def _noticed(self, npc_id: int, name: str, now: float, present: dict[int, str]) -> list[str]:
+    def _noticed(self, npc_id: int, name: str, now: float, present: dict[int, str], player_id: int | None = None,
+                 player_name: str | None = None) -> list[str]:
         try:
             with self.store.transaction() as db:
-                return awareness.lines_for(db, npc_id, name, now, present, self._attire_now, hygiene=self.hygiene)
+                scene_lines = []
+                if self.decency and player_id is not None and npc_id != player_id:
+                    told = decency.line(db, npc_id, name, player_id, player_name or "the player", now,
+                                        thane_of=self._thane_hold(db, npc_id, player_id))
+                    if told:
+                        scene_lines.append(told)
+                if self.intimacy and self._scenes_now:
+                    from livingworld.perception.attire import sex_of
+                    from livingworld.intimacy.common import partner_in, partners_of
+                    watched_by = set()
+                    if self.confront:
+                        for s in self._scenes_now:
+                            if npc_id in s.people:
+                                watched_by |= {w for w in s.seen_by if partner_in(db, w, [npc_id]) == npc_id}
+                    scene_lines = intimate_scenes.lines_for(npc_id, name, self._scenes_now, present,
+                                                            is_woman=sex_of(db, npc_id) == "female",
+                                                            partners=partners_of(db, npc_id, self._scenes_now),
+                                                            confront=self.confront, watched_by=watched_by)
+                if self.confront and not is_child(db, npc_id):
+                    scene_lines += confront.grievance_lines(db, npc_id, name, now, present)
+                if self.intimacy and not is_child(db, npc_id):
+                    from livingworld.intimacy import arousal, climax
+                    with_player = any(npc_id in s.people and s.player_id is not None for s in self._scenes_now)
+                    scene_lines += arousal.lines_for(db, npc_id, name, present, self._attire_now, with_player)
+                    scene_lines += climax.lines_for(db, npc_id, name, now, present, self._attire_now)
+                return scene_lines + awareness.lines_for(db, npc_id, name, now, present, self._attire_now,
+                                                         hygiene=self.hygiene)
         except Exception:
             self.errors += 1
             logger.exception("Living World: could not work out what an NPC notices; leaving it out")
@@ -879,6 +1326,12 @@ class LivingWorld:
                 " VALUES (?,?,?,?,?,?,?,?,?)",
                 (timeline, "dialogue", str(model or "unknown"), npc_id, self.conv_id, trace, latency_ms, status, error))
 
+    def promise_parser(self, actions: list) -> Any:
+        """A reply parser that starts Sit / Drink when the NPC says they are about to (dialogue/promises.py)."""
+        if not self.keep_promises:
+            return None
+        return promises.make_parser(actions)
+
     def voice_allowed(self, character: Any) -> bool:
         """False if this NPC's bound voice differs from the voice Mantella is about to use."""
         if not self.enabled or self.store is None or character.is_player_character:
@@ -916,16 +1369,28 @@ class LivingWorld:
             self._stores[world_id] = store
             worker = JobWorker(store, lambda kind, payload, store=store: self._run_job(store, kind, payload))
             self._workers[world_id] = worker
+            try:   # conversations whose extraction learned nothing (the old reply cap) get one more go
+                queued = backfill.queue_backfill(store)
+                if queued:
+                    logger.log(23, f"Living World: queued {queued} past conversations to extract memories from again")
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not queue the memory backfill; carrying on")
             if self.start_workers:
                 worker.start()
         return self._stores[world_id]
 
     def _run_job(self, store: WorldStore, kind: str, payload: dict[str, Any]) -> None:
+        if kind == diary.JOB:
+            if self.complete is None:
+                raise RuntimeError("no LLM attached for the diary")
+            diaries.write_entry(store, self.complete, payload)
+            return
         if kind != EXTRACT_JOB:
             raise ValueError(f"unknown job kind {kind}")
         if self.complete is None:
             raise RuntimeError("no LLM attached for extraction")
-        Extractor(store, self.complete).extract_conversation(payload["conv_id"])
+        Extractor(store, self.complete).extract_conversation(payload["conv_id"], bool(payload.get("backfill")))
 
     def _close(self, game_days: float | None) -> None:
         if game_days is None:
@@ -944,6 +1409,12 @@ class LivingWorld:
         logger.log(23, f"Living World: conversation {self.conv_id} closed at game day {game_days:.2f}")
         if self.store.scalar("SELECT COUNT(*) FROM utterance WHERE conv_id = ?", (self.conv_id,)):
             JobQueue(self.store).enqueue(EXTRACT_JOB, {"conv_id": self.conv_id}, f"extract:conv:{self.conv_id}")
+            if self.diary:
+                try:
+                    self._queue_diaries(game_days)
+                except Exception:
+                    self.errors += 1
+                    logger.exception("Living World: could not queue the diary entries; carrying on")
             for world_id, store in self._stores.items():
                 if store is self.store:
                     self._workers[world_id].notify()
@@ -957,6 +1428,9 @@ class LivingWorld:
             npc_id = self._npc_ids.get(character.ref_id) or self._register(character, context.game_days)
             now_present.add(npc_id)
             log.add_participant(self.conv_id, npc_id)
+            if character.ref_id in self._fog_labels:
+                with self.store.transaction() as db:
+                    fog_names.set_label(db, npc_id, self._fog_labels[character.ref_id])
         for npc_id in self._present - now_present:
             log.mark_left(self.conv_id, npc_id)
         self._present = now_present
@@ -975,7 +1449,11 @@ class LivingWorld:
                 self.errors += 1
                 logger.error(f"Living World: {character.name}: {e}")
         self._npc_ids[character.ref_id] = npc_id
+        if character.ref_id in self._fog_labels:
+            with self.store.transaction() as db:
+                fog_names.set_label(db, npc_id, self._fog_labels[character.ref_id])
         if not character.is_player_character and getattr(character, "bio", None):
+            self._bios[npc_id] = str(character.bio)
             try:
                 with self.store.transaction() as db:
                     seed_traits_from_bio(db, npc_id, character.bio, game_time)

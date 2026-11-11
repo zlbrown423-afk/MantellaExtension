@@ -7,6 +7,7 @@ An event the game sends twice (same key on the same timeline) is stored once.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -21,6 +22,14 @@ from livingworld.store.minors import is_child
 from livingworld.store.world_store import WorldStore
 
 logger = utils.get_logger()
+
+# Spells that land as a "hit" but do no harm: animation and expression spells (Anim: Kneel, Face: Gasp)
+# and our own test spells (Debug Bath). The game side skips non-hostile spells; this catches the rest.
+_HARMLESS_SPELL = re.compile(r"^\s*(?:anim|animation|face|expression|emote|pose|debug)\b", re.IGNORECASE)
+
+
+def harmless_spell(name: str | None) -> bool:
+    return bool(name) and bool(_HARMLESS_SPELL.match(name))
 
 
 @dataclass
@@ -57,6 +66,18 @@ class PerceptionPipeline:
             return self._hygiene(record)
         if record.type == "watch":
             return self._guard_watch(record)
+        if record.type == "react":
+            return self._reaction(record)
+        if record.type == "jail":
+            return self._guard_jail(record)
+        if record.type == "scene":
+            return self._scene(record)
+        if record.type in ("climax", "arousal", "eyes"):
+            return self._intimacy(record)
+        if record.type == "hit" and harmless_spell(record.item):
+            # an animation, expression or test spell cast on someone is not an attack
+            logger.log(23, f"Living World: hit record {record.key} is a harmless spell ({record.item}); not stored")
+            return Outcome(None)
         timeline = self.store.active_timeline_id()
         # The game can send a record again after an older save is loaded (the save still has it queued).
         # Look on every timeline the active one can see, not only the active one, or the NPCs get the
@@ -188,6 +209,63 @@ class PerceptionPipeline:
         logger.log(23, f"Living World guard: watch window {record.win} of duty {record.task} ({record.via}) -> "
                        f"event {event_id}")
         return Outcome(event_id, duplicate=event_id is None)
+
+    def _guard_jail(self, record: PerceptionRecord) -> Outcome:
+        """G2f: the game locked up someone the player arrested, or let them out (``task`` = the arrest)."""
+        from livingworld.guard import guard_enabled
+        if not guard_enabled():
+            return Outcome(None)
+        from livingworld.guard import arrest as AR
+        with self.store.transaction() as db:
+            event_id = AR.record_jail(db, record.task, record.via, record.game_time, record.location)
+        logger.log(23, f"Living World guard: arrest {record.task} {record.via} -> event {event_id}")
+        return Outcome(event_id, duplicate=event_id is None)
+
+    def _reaction(self, record: PerceptionRecord) -> Outcome:
+        """Someone reacted on the spot to the player's hands on them (``react`` record). Kept as a world event so a
+        guard knows whether colleagues have already had to step in (see ``guard/peace.py``)."""
+        gt = record.game_time
+        existing = self.store.scalar(
+            "SELECT e.event_id FROM world_event e JOIN v_timeline_scope s ON s.timeline_id = e.timeline_id"
+            " WHERE e.game_key = ? AND e.game_time <= s.cutoff_gt", (record.key,))
+        if existing is not None:
+            return Outcome(existing, duplicate=True)
+        reactor = self.identities.ensure_npc(record.actor.identity(), gt)
+        player = self.identities.ensure_npc(record.target.identity(), gt)
+        victim = self.identities.ensure_npc(record.party.identity(), gt) if record.party else reactor
+        if any(self._child(i) for i in (reactor, victim)):
+            return Outcome(None)
+        timeline = self.store.active_timeline_id()
+        with self.store.transaction() as db:
+            event_id = db.execute(
+                "INSERT INTO world_event (timeline_id, type, location, actors_json, payload_json, source, game_time,"
+                " game_key, real_time, duration_s, confidence) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (timeline, "reaction", record.location, json.dumps([reactor, player, victim]),
+                 json.dumps({"role": record.via, "area": record.area}), "game", gt, record.key,
+                 datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"), record.duration_s, 1.0)).lastrowid
+        what = "being naked in public" if record.via == "decency" else "grab"
+        logger.log(23, f"Living World: {record.actor.name} reacts ({record.via}) to {record.target.name}'s {what}"
+                       f" -> event {event_id}")
+        return Outcome(event_id)
+
+    def _scene(self, record: PerceptionRecord) -> Outcome:
+        """An OStim scene ended (``intimacy/``). A live snapshot (``via=now``) is never stored."""
+        from livingworld.intimacy import intimacy_enabled
+        if record.via != "end" or not intimacy_enabled():
+            return Outcome(None)
+        from livingworld.intimacy import scenes
+        return scenes.record_scene(self, record)
+
+    def _intimacy(self, record: PerceptionRecord) -> Outcome:
+        """A climax, the player's arousal, or the player covering their eyes (``intimacy/``)."""
+        from livingworld.intimacy import intimacy_enabled
+        if not intimacy_enabled():
+            return Outcome(None)
+        if record.type == "climax":
+            from livingworld.intimacy.climax import record_climax
+            return record_climax(self, record)
+        from livingworld.intimacy import arousal
+        return arousal.record_arousal(self, record) if record.type == "arousal" else arousal.record_eyes(self, record)
 
     # ---- internals ----
     def _child(self, npc_id: int | None) -> bool:

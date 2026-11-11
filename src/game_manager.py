@@ -16,13 +16,17 @@ from src.conversation.context import Context
 from src.character_manager import Character
 import src.utils as utils
 from src.http.communication_constants import communication_constants as comm_consts
-from src.stt.stt import Transcriber
+from src.stt.stt import ListenAborted, Transcriber
 from src.actions.function_manager import FunctionManager
 from src.random_llm_selector import RandomLLMSelector, LLMSelection
 from src.llm.client_base import ClientBase
 from livingworld.integration import LivingWorld # LIVINGWORLD PATCH
 
 logger = utils.get_logger()
+
+# LIVINGWORLD PATCH: reply to a player input request that stopped waiting because the conversation is ending.
+# The game ignores reply types it does not know, and its own end request cleans up.
+LISTEN_ABORTED = "mantella_lw_listen_aborted"
 
 
 class CharacterDoesNotExist(Exception):
@@ -57,6 +61,13 @@ class GameStateManager:
             self.__chat_manager.living_world = self.__living_world # LIVINGWORLD PATCH
         self.__rememberer: Remembering = self.__living_world.wrap_memory(Summaries(game, config, client, language_info['language'], summary_client)) # LIVINGWORLD PATCH
 
+
+    def living_world_diary_read(self, input_json: dict[str, Any]) -> dict[str, Any]: # LIVINGWORLD PATCH: the game opened an NPC's diary
+        from livingworld import diary # LIVINGWORLD PATCH
+        world_id = input_json.get(diary.KEY_WORLD_ID) # LIVINGWORLD PATCH
+        if world_id: # LIVINGWORLD PATCH
+            input_json = {**input_json, diary.KEY_WORLD_ID: self.WORLD_ID_CLEANSE_REGEX.sub("", str(world_id))} # LIVINGWORLD PATCH
+        return self.__living_world.diary_read(input_json) # LIVINGWORLD PATCH
 
     @utils.time_it
     def start_conversation(self, input_json: dict[str, Any]) -> dict[str, Any]:
@@ -196,7 +207,11 @@ class GameStateManager:
         
         player_text: str = input_json.get(comm_consts.KEY_REQUESTTYPE_PLAYERINPUT, '')
         self.__update_context(input_json)
-        updated_player_text, update_events, player_spoken_sentence = self.__talk.process_player_input(player_text)
+        try:
+            updated_player_text, update_events, player_spoken_sentence = self.__talk.process_player_input(player_text)
+        except ListenAborted:  # LIVINGWORLD PATCH: the game is ending the conversation; its end request follows
+            logger.log(23, "Stopped waiting for the player to speak: the conversation is ending")
+            return {comm_consts.KEY_REPLYTYPE: LISTEN_ABORTED}
         if update_events:
             return {comm_consts.KEY_REPLYTYPE: comm_consts.KEY_REQUESTTYPE_TTS, comm_consts.KEY_TRANSCRIBE: updated_player_text}
         self.__living_world.player_line(updated_player_text, self.__talk.context) # LIVINGWORLD PATCH
@@ -238,6 +253,11 @@ class GameStateManager:
             return {comm_consts.KEY_REPLYTYPE: comm_consts.KEY_REPLYTYPE_NPCTALK}
 
     @utils.time_it
+    def abort_player_wait(self) -> bool:
+        """LIVINGWORLD PATCH: called before an end request is queued, so a request blocked waiting for speech lets go."""
+        talk = self.__talk
+        return bool(talk) and talk.abort_player_wait()
+
     def end_conversation(self, input_json: dict[str, Any]) -> dict[str, Any]:
         if(self.__talk):
             # Extract end timestamp from game client

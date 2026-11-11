@@ -315,6 +315,9 @@ class ChatManager:
                 sentence_length_parser(self.__config.number_words_tts),
                 max_count_sentences_parser(max_response_sentences, not characters.contains_player_character(), self.__config.narration_handling == NarrationHandlingEnum.CUT_NARRATIONS)
             ])
+            promise_parser = getattr(self, "living_world", None) and self.living_world.promise_parser(actions) # LIVINGWORLD PATCH: NPCs do what they say they will
+            if promise_parser: # LIVINGWORLD PATCH: right after the actions parser, so "Sit:" counts as already done
+                parser_chain.insert(next(i for i, p in enumerate(parser_chain) if isinstance(p, actions_parser)) + 1, promise_parser) # LIVINGWORLD PATCH
 
             cut_indicators: set[str] = set()
             for parser in parser_chain:
@@ -341,7 +344,7 @@ class ChatManager:
                 while not has_text_response and retries < max_retries:
                     try:
                         start_time = time.time()
-                        async for item in active_client.streaming_call(messages=messages, is_multi_npc=is_multi_npc, tools=current_tools):
+                        async for item in active_client.streaming_call(messages=living_world.mood_messages(messages, active_character) if mood_filter else messages, is_multi_npc=is_multi_npc, tools=current_tools): # LIVINGWORLD PATCH: mood reminder
                             if self.__stop_generation.is_set():
                                 break
                             if not item:
@@ -417,6 +420,8 @@ class ChatManager:
                                             settings.stop_generation = True
 
                                         logger.log(23, f"Parsed actions: {parsed_tools}")
+                                        if promise_parser: # LIVINGWORLD PATCH: a tool call already did it
+                                            promise_parser.keeper.note_actions(parsed_tools) # LIVINGWORLD PATCH
                                         action_only_sentence = SentenceContent(active_character, "", SentenceTypeEnum.SPEECH, True, parsed_tools)
                                         blocking_queue.put(Sentence(action_only_sentence, "", 0))
                             else:

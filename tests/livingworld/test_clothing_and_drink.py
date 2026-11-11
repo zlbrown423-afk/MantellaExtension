@@ -285,6 +285,6 @@ def test_npc_knows_who_else_is_nearby(tmp_path):
         dressed(PLAYER, 3.51), dressed(actors.gerdur(), 3.51), dressed(actors.hod(), 3.51), dressed(frodnar(), 3.51)])
     assert "Also nearby, not part of this conversation: Hod." in prompt
     alone = talk(tmp_path, [actors.gerdur()], 3.52, snapshot=[dressed(PLAYER, 3.52), dressed(actors.gerdur(), 3.52)])
-    assert "No one else is nearby" in alone
+    assert "No one else is close by" in alone
     no_snapshot = talk(tmp_path, [actors.gerdur()], 3.53)
-    assert "Also nearby" not in no_snapshot and "No one else is nearby" not in no_snapshot
+    assert "Also nearby" not in no_snapshot and "No one else is close by" not in no_snapshot

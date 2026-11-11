@@ -113,6 +113,15 @@ def test_sensitive_area_from_position_reads_as_threatening():
     assert "backside" in memory.content and memory.valence <= -0.5
 
 
+def test_a_quick_hand_on_the_face_is_unwelcome_but_not_holding_on():
+    # 2026-11-08: Olava's 0.4 s face touch was remembered as "held on and would not let go"
+    rec = parse_record(grab(actors.player("Torvar"), actors.gerdur(), node="NPC Head [Head]", seconds=0.4,
+                            game_days=3.5, area="face"))
+    memory = grab_for_target(rec, Bond(status="stranger"))
+    assert "put a hand on my face without asking" in memory.interpretation and memory.valence <= -0.5
+    assert "would not let go" not in memory.interpretation
+
+
 def test_item_categories_treat_alcohol_separately():
     assert item_category("Nord Mead", True) == "alcohol"
     assert item_category("Alto Wine", True) == "alcohol"

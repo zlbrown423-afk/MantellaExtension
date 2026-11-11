@@ -3,13 +3,15 @@ list leaders who would invite the player, and run the in-conversation test comma
 its own transaction."""
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 
-from livingworld.guard import debug as D, duty as DU, encounter as ENC, incident as INC, orgs as O, prompts as P, profiles, recruit as R, store as S
+from livingworld.guard import arrest as AR, debug as D, duty as DU, encounter as ENC, incident as INC, reports as RP, training as TR, orgs as O, peace as PEACE, prompts as P, profiles, recruit as R, store as S
 from livingworld.guard.profiles import GuardFacts
 from livingworld.social import claims, processor
 from livingworld.store.minors import is_child
 from livingworld.store.world_store import WorldStore
+from livingworld.work import tasks as T
 from src import utils
 
 logger = utils.get_logger()
@@ -31,6 +33,16 @@ class Scene:
     facts: dict[int, GuardFacts] = field(default_factory=dict)   # npc_id -> what the game reported
     thane_of: tuple[str, ...] = ()                                # holds the game reports the player is thane of
     said: str | None = None                                       # the player's last line in this conversation
+
+
+@dataclass
+class ArrestOrder:
+    """What the game does with someone the player arrested (reply keys mantella_lw_guard_arrest_*)."""
+    name: str
+    mode: str              # 'submit' (follows to the cells) | 'flee' | 'fight'
+    arrest_id: int
+    days: float
+    jail: O.Item | None
 
 
 @dataclass
@@ -64,7 +76,11 @@ class Guard:
         self.notices: list[str] = []          # on-screen notes for the player (shift started / over)
         self.summary: ENC.Summary | None = None   # G2e: the shift summary filed with that report
         self._encounters: dict[int, ENC.Encounter] = {}   # npc_id -> why they came over (this conversation)
+        self._report_lines: list[str] = []      # what the player said after a filed report (written report)
         self._watch_soon: tuple[int, float] | None = None   # "debug guard watch": (task id, when asked)
+        self.arrest_orders: list[ArrestOrder] = []   # G2f: for the game, sent with the next NPC line
+        self.release_orders: list[int] = []          # G2f: arrest ids whose prisoner the game lets out now
+        self.bookings: list[AR.Booking] = []         # G2f: prisoners booked with the superior this conversation
 
     def take_notices(self) -> list[str]:
         out, self.notices = self.notices, []
@@ -116,11 +132,16 @@ class Guard:
         enc_line = self._encounter_line(db, npc_id, name, p, svc, scene)
         if enc_line:
             out.append(enc_line)
+        out += self._prisoner_lines(db, npc_id, name, scene)
         if p is None:
             return out
         org = O.by_key(p.org_key)
         if org is None:
             return out
+        stepped_in = PEACE.line(db, npc_id, name, scene.player_id, player, scene.now,
+                                fellow=org.name if svc is not None and svc.org_key == org.key else None)
+        if stepped_in:
+            out.append(stepped_in)
         if p.given_name:
             out.append(P.given_name(name, org, p))
         if svc is not None and svc.org_key == org.key:
@@ -143,6 +164,73 @@ class Guard:
                         scene.location, witnesses=[])
         return out
 
+    def _prisoner_lines(self, db, npc_id: int, name: str, scene: Scene) -> list[str]:
+        if not AR.enabled():
+            return []
+        a = AR.held(db, npc_id, scene.now)
+        if a is None:
+            return []
+        org = O.by_key(a.org_key)
+        st = AR.status(db, a, scene.now)
+        j = AR.jailed(db, a)
+        return [P.prisoner_line(name, self._name(db, a.member_id) or scene.player_name, a, st,
+                                float(j["until"]) if j else None, scene.now, self._jail_name(org))]
+
+    @staticmethod
+    def _jail_name(org: O.Org | None) -> str:
+        return org.jail.name if org is not None and org.jail is not None else "the cells"
+
+    def arrest_turn(self, scene: Scene, text: str) -> list[str]:
+        """G2f: the player, serving, says someone present is under arrest. The rules decide what that person does;
+        returns notes for the AI (added to the player's line)."""
+        if scene.player_id is None or not AR.enabled() or not AR.wants_arrest(text):
+            return []
+        with self.store.transaction() as db:
+            svc = S.current(db, scene.player_id)
+            org = O.by_key(svc.org_key) if svc else None
+            if org is None or svc.status not in ("probation", "active"):
+                return []
+            names = {i: self._name(db, i) or "" for i in scene.present if i != scene.player_id and not is_child(db, i)}
+            boss = DU.superior_id(db, org, svc)
+            said = text.lower()
+            named = [i for i, n in names.items() if n and (n.lower() in said or n.split()[0].lower() in said.split()
+                                                           or n.split()[0].lower() + "," in said)]
+            civilians = [i for i in names if i != boss and profiles.get(db, i) is None]
+            target = named[0] if len(named) == 1 else civilians[0] if len(civilians) == 1 and not named else None
+            if target is None or target == boss:
+                return []
+            guards = sum(1 for i in names if i != target and profiles.get(db, i) is not None)
+            witnesses = [i for i in names if i != target]
+            d = AR.decide(db, org, svc, target, names[target], scene.now, guards_present=guards,
+                          location=scene.location, witnesses=witnesses)
+            if d is None:
+                return []
+            a = d.arrest
+            logger.log(23, f"Living World guard: arrest {a.event_id} of {a.name}: {a.response} (charge {a.charge}, "
+                           f"evidence {len(d.evidence)}, p_submit {d.p_submit:.2f}, wrongful {a.wrongful})")
+            jail = self._jail_name(org)
+            self.notices.append(P.arrest_notice(a.name, d, jail))
+            if a.response != AR.ARGUE:
+                self.arrest_orders.append(ArrestOrder(a.name, a.response, a.event_id, a.days, org.jail))
+            processor.process(db, {"appraisal": claims.appraise})
+            return [P.arrest_note(a.name, scene.player_name, org, d, jail)]
+
+    def _debug_suspect(self, db, org: O.Org, svc: S.Service | None, scene: Scene) -> str:
+        if svc is None:
+            return "not serving"
+        others = [i for i in scene.present if i != scene.player_id and profiles.get(db, i) is None
+                  and not is_child(db, i)]
+        if len(others) != 1:
+            return "talk to exactly one person who is not a guard to make them a suspect"
+        name = self._name(db, others[0]) or ""
+        inc = _suspect_incident(db, O.by_key(svc.org_key) or org, name, scene.now)
+        return f"incident {inc.event_id}: {inc.title}; suspect {name}" if inc else "no incident names suspects"
+
+    def take_arrest_orders(self) -> tuple[list[ArrestOrder], list[int]]:
+        out, rel = self.arrest_orders, self.release_orders
+        self.arrest_orders, self.release_orders = [], []
+        return out, rel
+
     def _encounter_line(self, db, npc_id: int, name: str, p, svc: S.Service | None, scene: Scene) -> str | None:
         """G2e: the reason this NPC came over to the player on their shift, if they did just now."""
         if svc is None or not ENC.enabled():
@@ -156,8 +244,13 @@ class Guard:
                                 is_superior=npc_id == DU.superior_id(db, org, svc), is_guard=p is not None)
 
     def player_spoke(self, scene: Scene) -> int:
-        """G2e: the player answered whoever came over; each such matter counts as dealt with (once)."""
-        if not self._encounters or scene.player_id is None:
+        """The player said something: an answer to whoever came over on shift (G2e), an answer in the training
+        quiz (G2g), or part of their written report after a filed duty report."""
+        if scene.player_id is None:
+            return 0
+        if scene.said:
+            self._quiz_or_report(scene)
+        if not self._encounters:
             return 0
         n = 0
         with self.store.transaction() as db:
@@ -166,6 +259,50 @@ class Guard:
                     n += 1
                     del self._encounters[npc_id]
         return n
+
+    def _quiz_or_report(self, scene: Scene) -> None:
+        with self.store.transaction() as db:
+            svc = S.current(db, scene.player_id)
+            org = O.by_key(svc.org_key) if svc else None
+            boss = DU.superior_id(db, org, svc) if org else None
+            if org is None or boss is None or boss not in scene.present:
+                return
+            if self.filed is not None and self.filed.task is not None and not TR.is_training(self.filed.task.template):
+                self._report_lines.append(scene.said)
+                return
+            task = DU.in_hand(db, svc.member_id)
+            d = DU.duty_for(db, task) if task else None
+            if d is None or d.need != "quiz":
+                return
+            person = org.superior(svc.rank_key)
+            result = TR.answer(db, org, task, scene.said, person.name if person else "", scene.now)
+            logger.log(23, f"Living World guard: training quiz answer: {result}")
+            witnesses = [i for i in scene.present if i != scene.player_id]
+            if result == "passed":
+                r = DU.report(db, org, svc, boss, scene.now, None, location=scene.location, witnesses=witnesses)
+                self.notices.append("Training: law and orders quiz passed." +
+                                    (" Training complete!" if r.trained else ""))
+            elif result == "failed":
+                T.change(db, task, "failed", "failed the training quiz", scene.now, witnesses=witnesses)
+                self.notices.append("Training: quiz failed. Ask to try it again.")
+            processor.process(db, {"appraisal": claims.appraise})
+
+    def ended(self, scene: Scene) -> RP.Judged | None:
+        """At the end of a conversation: keep what the player said after a filed report as their written report."""
+        lines, self._report_lines = self._report_lines, []
+        if not lines or self.filed is None or self.filed.task is None or scene.player_id is None:
+            return None
+        with self.store.transaction() as db:
+            svc = S.current(db, scene.player_id)
+            org = O.by_key(svc.org_key) if svc else None
+            if org is None:
+                return None
+            j = RP.file(db, org, svc, self.filed.task, DU.superior_id(db, org, svc), " ".join(lines), scene.now,
+                        scene.location, [i for i in scene.present if i != scene.player_id])
+            if j is not None:
+                logger.log(23, f"Living World guard: written report on duty {self.filed.task.task_id}: {j.verdict} "
+                               f"({j.covered}/{j.items} covered, made up: {j.made_up})")
+            return j
 
     def watch_plan(self, scene: Scene) -> ENC.Plan | None:
         """G2e: the watch windows still to come on the duty in hand, for the game (task 0 = none: clear)."""
@@ -203,11 +340,18 @@ class Guard:
             return out
         if self.filed is not None and self.filed.task is not None:
             out.append(P.filed_line(name, player, self.filed, self.summary))
+        if self.bookings:
+            out.append(P.booked_line(name, player, self.bookings))
+        held = AR.prisoners(db, org, scene.now) if AR.enabled() else []
+        if held:
+            out.append(P.prisoners_line(name, org, held, self._jail_name(org)))
         checks = DU.checks(db, org, svc, scene.now) if task is None else []
         if task is None and all(c.ok for c in checks):
             prev = DU.last(db, svc.member_id)
             incs = INC.for_member(db, org, svc, scene.now)
-            d = DU.incident_duty(incs[0]) if incs else DU.pick(org, svc, prev.template if prev else None, scene.now)
+            step = TR.next_step(db, org, svc)
+            d = (DU.training_duty(step) if step else DU.incident_duty(incs[0]) if incs
+                 else DU.pick(org, svc, prev.template if prev else None, scene.now))
             if d is None:
                 nxt = DU.next_start(org, svc, scene.now)
                 out.append(P.no_duty_line(name, player, f"no duty for {org.a_title(svc.rank_key)} at this hour",
@@ -217,7 +361,10 @@ class Guard:
                                  witnesses=[i for i in scene.present if i != svc.member_id])
                 self._assigned.add(task.task_id)
                 boss_name = self._name(db, npc_id) or "your superior"
-                if d.incident_id is not None:
+                if d.training:
+                    n, total = TR.progress(db, org, svc)
+                    self.notices.append(f"Training {n + 1}/{total}: {d.title}.")
+                elif d.incident_id is not None:
                     self.notices.append(f"Trouble: {d.title}. " + ("Fight them there" if d.need == "fight" else
                                         "Go there") + f", then report back to {boss_name}.")
                 else:
@@ -238,12 +385,25 @@ class Guard:
                                f"{DU.assigned_gt(db, task):.4f} ({P.clock(DU.assigned_gt(db, task))}), ends "
                                f"{P.clock(DU.shift_end(db, task, d))}, now day {scene.now:.4f} ({P.clock(scene.now)}), "
                                f"seen {DU.seen_count(db, task)}, new={task.task_id in self._assigned}")
-                done = DU.fought_count(db, task) if d.need == "fight" else DU.seen_count(db, task)
-                out.append(P.duty_line(name, player, task, d, DU.shift_end(db, task, d), scene.now,
-                                       new=task.task_id in self._assigned, seen=done > 0))
+                done = DU.done_count(db, task, d)
+                if d.training:
+                    n, total = TR.progress(db, org, svc)
+                    c = TR.course(org.key)
+                    if d.need == "quiz":
+                        right, wrong = TR.answers(db, task)
+                        out.append(P.quiz_line(name, player, org, c.questions, right, wrong, n + 1, total, c.pass_right))
+                    else:
+                        out.append(P.training_line(name, player, d, n + 1, total, new=task.task_id in self._assigned,
+                                                   seen=done > 0))
+                else:
+                    out.append(P.duty_line(name, player, task, d, DU.shift_end(db, task, d), scene.now,
+                                           new=task.task_id in self._assigned, seen=done > 0))
                 if task.task_id in self._assigned and ENC.enabled() and ENC.wants_windows(d):
                     out.append(P.watch_line(name, player))
         out.append(P.record_line(name, player, DU.record(db, svc)))
+        past = RP.recent(db, svc)
+        if past:
+            out.append(P.reports_line(name, player, past))
         if org.pay:
             out.append(P.pay_line(name, player, DU.pay(db, org, svc, scene.now)))
         return out
@@ -256,6 +416,8 @@ class Guard:
         self.filed = None
         self.summary = None
         self._encounters = {}
+        self._report_lines = []
+        self.bookings = []
         with self.store.transaction() as db:
             svc = S.current(db, scene.player_id) if scene.player_id is not None else None
             org = O.by_key(svc.org_key) if svc else None
@@ -264,6 +426,19 @@ class Guard:
                 result["incidents"] = [i.event_id for i in INC.spawn(db, org, scene.now, since=svc.joined_gt)]
                 result["cold"] = INC.expire(db, org, scene.now)
             boss = DU.superior_id(db, org, svc) if org else None
+            if AR.enabled():
+                result["slipped"] = AR.slipped(db, scene.now)
+                if org is not None and boss is not None and boss in scene.present:
+                    self.bookings = AR.book(db, org, svc, boss, scene.now, scene.location,
+                                            [i for i in scene.present if i != scene.player_id])
+                    for b in self.bookings:
+                        if b.wrongful:
+                            self.release_orders.append(b.arrest.event_id)
+                            self.notices.append(f"Booked: {b.arrest.name} let out. Wrongful arrest: reprimanded.")
+                        else:
+                            self.notices.append(f"Booked: {b.arrest.name} for {b.arrest.charge}.")
+                    result["booked"] = [b.arrest.event_id for b in self.bookings]
+                    svc = S.get(db, svc.service_id)
             # reporting to the superior is not standing the post: only other conversations count as sightings
             held = DU.in_hand(db, svc.member_id) if svc is not None else None
             first = held is not None and DU.seen_count(db, held) == 0
@@ -287,6 +462,8 @@ class Guard:
                                                     scene.now, scene.location, witnesses)
                 self.notices.append(P.filed_notice(self._name(db, boss) or "your superior", self.filed, d,
                                                    self.summary))
+                if self.filed.trained:
+                    self.notices.append("Training complete!")
                 d = None
             if d is not None and d.incident_id is not None:
                 done = (DU.fought_count(db, held) if d.need == "fight" else DU.seen_count(db, held)) > 0
@@ -359,6 +536,8 @@ class Guard:
                 d = DU.duty_for(db, held) if held is not None else None
                 r = DU.report(db, org, svc, npc_id, scene.now, scene.said, location=scene.location,
                               witnesses=witnesses)
+                if r.outcome == "done" and r.task is not None:
+                    self.filed = r            # what the player says next is their written report
                 if r.outcome == "done" and ENC.enabled() and ENC.wants_windows(d):
                     sm = ENC.file_summary(db, org, S.get(db, svc.service_id), r.task, npc_id, scene.now,
                                           scene.location, witnesses)
@@ -459,7 +638,25 @@ class Guard:
                     return "no routine duty in hand (watch windows come with routine duties)"
                 self._watch_soon = (held.task_id, scene.now)
                 return f"watch windows of duty {held.task_id} brought forward (sent with the next line)"
+            if cmd.verb == "suspect":
+                return self._debug_suspect(db, org, svc, scene)
             return run(db, cmd, org, scene.player_id, scene.now, scene.location)
+
+
+def _suspect_incident(db, org: O.Org, name: str, now: float) -> INC.Incident | None:
+    """Open a theft incident that names ``name`` as the suspect (test command)."""
+    k = next((k for k in INC.kinds(org.key) if k.suspects), None)
+    if k is None:
+        return None
+    seed = INC._roll(org.key, now, k.key, name)
+    inc = INC._open(db, org, k, int(now), now, seed)
+    payload = json.loads(db.execute("SELECT payload_json FROM world_event WHERE event_id = ?", (inc.event_id,)).fetchone()[0])
+    if payload.get("suspect") == name:
+        return inc
+    INC.close(db, inc, "went cold", now)
+    payload.update({"suspect": name, "culprit": name, "why": payload["why"].split(". Word is")[0] + f". Word is it was {name}"})
+    event_id = S.event(db, "incident", [], payload, now, inc.where[0] if inc.where else org.hold, [], "admin")
+    return INC.get(db, event_id)
 
 
 def run(db, cmd: D.Command, org: O.Org, player_id: int, now: float, location: str | None) -> str:
@@ -532,11 +729,17 @@ def _run_duty(db, cmd: D.Command, org: O.Org, svc: S.Service, now: float, locati
         who = person.name if person else "a superior"
         return f"{who} is not known to the world yet; talk to them once first"
     held = DU.in_hand(db, svc.member_id)
+    if cmd.verb == "training":
+        if TR.trained(db, svc):
+            return "training already completed"
+        S.change(db, svc, "developer: training completed", now, kind="trained", source="admin")
+        return "recruit training counted as completed"
     if cmd.verb == "duty":
         if held is not None:
             return f"already on duty: {held.title}"
         prev = DU.last(db, svc.member_id)
-        d = DU.pick(org, svc, prev.template if prev else None, now, any_hour=True)
+        step = TR.next_step(db, org, svc)
+        d = DU.training_duty(step) if step else DU.pick(org, svc, prev.template if prev else None, now, any_hour=True)
         if d is None:
             return "no duty fits this rank"
         task = DU.assign(db, org, svc, boss, d, now, source="admin")
@@ -545,6 +748,11 @@ def _run_duty(db, cmd: D.Command, org: O.Org, svc: S.Service, now: float, locati
         return "no duty in hand"
     if cmd.verb == "seen":
         d = DU.duty_for(db, held)
+        if d is not None and d.need == "quiz":
+            c = TR.course(org.key)
+            for q in c.questions[:c.pass_right]:
+                T.change(db, held, "in_progress", f"quiz answer: right: {q.key}", now, source="admin")
+            return f"quiz answers counted right for: {held.title}"
         if d is not None and d.need == "fight":
             DU.mark_fought(db, svc.member_id, d.where[0] if d.where else location, now)
             return f"fought at the place of: {held.title}"

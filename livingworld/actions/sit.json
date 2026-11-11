@@ -1,7 +1,7 @@
 {
     "identifier": "mantella_lw_npc_sit",
     "name": "Sit",
-    "description": "Sit down on, or use, a piece of furniture nearby: a chair, bench, stool or bed, or the one the player is pointing at. Only if the NPC is willing; they can refuse in character instead.",
+    "description": "Sit down on, or use, a piece of furniture nearby: a chair, bench, stool or bed, or the one the player is pointing at. Use it whenever the NPC says they will sit down now, whether the player asked or it was their own idea. Only if the NPC is willing; they can refuse in character instead.",
     "note": "Living World (MANTELLA_LIVING_WORLD=1). The game picks the nearest free furniture of that kind, or what the player points at in VR.",
     "key": "Sit",
     "parameters": {
@@ -18,7 +18,7 @@
         }
     },
     "required": ["source", "furniture"],
-    "prompt": "If the player asks you to sit down (or to sit 'there'), and you are willing to, begin your response with '{key}:'",
+    "prompt": "If you sit down now, because the player asks you to (or to sit 'there') or because you decide to yourself (for example to sit and share a drink), and you are willing to, begin your response with '{key}:'. Never say you are sitting down without it.",
     "allowed_games": ["skyrim"],
     "requires_response": false,
     "is-interrupting": false,

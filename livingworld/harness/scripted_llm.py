@@ -83,6 +83,8 @@ class ScriptedLLM(AIClient):
     calls: list[LLMCall] = field(default_factory=list)
     # Living World extraction: NPC name -> scripted extraction for that NPC's memory
     extractions: dict[str, "ScriptedExtraction"] = field(default_factory=dict)
+    # Living World diaries: NPC name -> the entry they write (JSON reply); others write a stock entry
+    diary_entries: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._reply_index = 0
@@ -110,6 +112,10 @@ class ScriptedLLM(AIClient):
             scripted = self.extractions.get(match.group(1))
             user = _content_text(openai_messages[-1].get("content"))
             reply = scripted.reply(user) if scripted else '{"facts": [], "memories": []}'
+        diary = DIARY_HEADER.match(system)
+        if diary:
+            entry = self.diary_entries.get(diary.group(1), f"Another day. {diary.group(1)} wrote a few tired lines.")
+            reply = json.dumps({"entry": entry})
         self.calls.append(LLMCall("request", openai_messages, reply))
         return reply
 
@@ -186,6 +192,7 @@ def when_player_says(phrase: str, reply: str) -> ReplyRule:
 
 
 EXTRACTION_HEADER = re.compile(r"You maintain the memory of one character in Skyrim, (.+?)\.\n")
+DIARY_HEADER = re.compile(r"You keep the private diary of (.+?), a person living in Skyrim\.\n")
 
 
 @dataclass

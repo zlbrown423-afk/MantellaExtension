@@ -355,3 +355,35 @@ def test_children_never_hold_or_get_a_reputation(tmp_path):
     assert db.execute("SELECT COUNT(*) FROM world_event WHERE type = 'violence'").fetchone()[0] == 0
     assert db.execute("SELECT COUNT(*) FROM standing_change WHERE holder_id = ? OR subject_id = ?",
                       (child, child)).fetchone()[0] == 0
+
+
+def test_a_harmless_spell_is_not_an_attack(tmp_path):
+    meet_everyone(tmp_path)
+    recs = [hit(PLAYER, actors.hod(), 3.5, weapon=w, via="conversation", witnesses=[seen(actors.gerdur(), 4.0)])
+            for w in ("Anim: Kneel", "Face: Gasp", "Debug Bath (Target)")]
+    talk(tmp_path, [actors.hod()], 3.5, records=recs)
+    db = open_db(tmp_path)
+    assert db.execute("SELECT COUNT(*) FROM world_event WHERE type = 'violence'").fetchone()[0] == 0
+    assert standing(db, "Hod", "Torvar", "gentleness") == 0
+
+
+def test_the_cleanup_undoes_harmless_spells_already_stored(tmp_path, monkeypatch):
+    import os
+    from livingworld.perception import pipeline
+    meet_everyone(tmp_path)
+    # stored the way an older build did, before harmless spells were skipped
+    monkeypatch.setattr(pipeline, "harmless_spell", lambda name: False)
+    rec = hit(PLAYER, actors.hod(), 3.5, weapon="Anim: Kneel", witnesses=[seen(actors.gerdur(), 4.0, rank_to_target=4)])
+    talk(tmp_path, [actors.hod()], 3.5, records=[rec])
+    db = open_db(tmp_path)
+    hod, torvar = npc_id(db, "Hod"), npc_id(db, "Torvar")
+    before = db.execute("SELECT trust FROM v_relationship WHERE from_id = ? AND to_id = ?", (hod, torvar)).fetchone()[0]
+    assert before < 0 and standing(db, "Hod", "Torvar", "gentleness") < 0
+    folder = os.path.join(os.path.dirname(reputation.__file__), "..", "store", "migrations")
+    sql = open(os.path.join(folder, "010_harmless_spells.sql"), encoding="utf-8").read()
+    db.executescript(sql.split("INSERT INTO schema_version")[0])
+    after = db.execute("SELECT trust FROM v_relationship WHERE from_id = ? AND to_id = ?", (hod, torvar)).fetchone()[0]
+    assert after > before
+    assert standing(db, "Hod", "Torvar", "gentleness") == 0
+    event = db.execute("SELECT event_id FROM world_event WHERE type = 'violence'").fetchone()[0]
+    assert db.execute("SELECT COUNT(*) FROM memory WHERE event_id = ? AND superseded_by IS NULL", (event,)).fetchone()[0] == 0

@@ -119,6 +119,9 @@ def appraise(db, event) -> int | None:
         if guarded is None:
             return None
         act_name, detail, magnitude, sensitivity, valence = guarded
+    elif etype == "intimacy.forced" and obj is not None:
+        act_name, detail, magnitude, sensitivity, valence = "forced", f" in {payload.get('place_name') or 'a quiet place'}", \
+            0.9, "private", -0.9
     elif etype.startswith("romance."):
         romantic = _romance_claim(etype, payload)
         if romantic is None:
@@ -133,14 +136,16 @@ def appraise(db, event) -> int | None:
         (event["timeline_id"], subject, act_name, obj, detail, valence, magnitude, event["location"],
          event["game_time"], event["event_id"], sensitivity)).lastrowid
     perceivers = db.execute(
-        "SELECT w.npc_id, m.confidence, n.is_player FROM event_witness w JOIN npc n ON n.npc_id = w.npc_id"
+        "SELECT w.npc_id, m.confidence, n.is_player, w.how FROM event_witness w JOIN npc n ON n.npc_id = w.npc_id"
         " LEFT JOIN memory m ON m.event_id = w.event_id AND m.owner_id = w.npc_id"
         " WHERE w.event_id = ? AND n.is_child = 0", (event["event_id"],)).fetchall()
-    for npc_id, confidence, is_player in perceivers:
+    for npc_id, confidence, is_player, how in perceivers:
         if is_player or npc_id == subject or is_child(db, npc_id):
             continue
         share = "yes"
-        if npc_id == obj and act_name in ("spent_night", "caught_with"):
+        if how == "participated" and act_name in ("caught_with", "forced") and etype in ("romance.scene", "intimacy.forced"):
+            share = "trusted_only" if act_name == "forced" else "no"   # their own scene (livingworld/intimacy)
+        elif npc_id == obj and act_name in ("spent_night", "caught_with"):
             share = "no"             # their own night is not something they pass on
         elif npc_id == obj and sensitivity == "private":
             share = "trusted_only"   # embarrassing for them: only told to people they are close to
@@ -197,6 +202,9 @@ def _romance_claim(etype: str, payload: dict) -> tuple[str, str, float, str, flo
     if etype == "romance.encounter":
         return "spent_night", f" at {payload.get('place_name') or 'a private place'}", 0.6, "private", \
             -0.3 if secret else 0.0
+    if etype == "romance.scene":
+        # an OStim scene someone saw (livingworld/intimacy)
+        return "caught_with", f" in {payload.get('place_name') or 'a private place'}", 0.7, "private", -0.1
     if etype == "romance.interrupted":
         return "caught_with", f" at {payload.get('place_name') or 'a private place'}", 0.8, "private", \
             -0.5 if secret else -0.1
@@ -279,7 +287,8 @@ def sentence(db, claim: dict, viewer: int, second_person: bool = False) -> str:
     def name(npc_id):
         if npc_id == viewer:
             return "you" if second_person else "me"
-        return db.execute("SELECT display_name FROM npc WHERE npc_id = ?", (npc_id,)).fetchone()[0]
+        from livingworld.fog.service import shown_name   # names the viewer has not learned stay descriptions
+        return shown_name(db, viewer, npc_id)
     if claim["subject_id"] == viewer:
         subject = "you" if second_person else "I"
     else:

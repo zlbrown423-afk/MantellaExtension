@@ -222,6 +222,18 @@ Code: `dialogue/hearing.py`.
 | Rule | Each prompt tells the NPCs the player's words can arrive garbled. A line that makes no sense gets an in-character check ("Thane, you say?") or a request to say it again, not a literal answer. A clear line with one wrong word is just answered. |
 | Note | Each player line is checked against a list of commonly misheard Skyrim words ("stain of white run" -> "thane of Whiterun", "Kai's" -> "Caius", "yarl" -> "Jarl") and against near misses of the names of the people present ("Gerdar" -> "Gerdur"). Hits are added before the line as a narration note. The player's words are never rewritten. Add words to `MISHEARD`. |
 
+## Leads: ask about someone without saying their name
+
+On with `MANTELLA_LIVING_WORLD=1`. Switch off with `set MANTELLA_LW_LEADS=0`. No extra AI call.
+Code: `dialogue/leads.py`, table `player_lead` (migration 011).
+
+| Part | What it does |
+| --- | --- |
+| Learning | When the player asks after someone ("Do you know where vault is?"), a name in the NPC's answer that sounds like one of the player's words ("Vald? He owes Maven...") becomes a lead, spelled the way the NPC spelled it. Names the misheard list fixes in a question ("named Wald") count too, and so does a name said right that the NPC repeats. Kind (person, place, thing) comes from the name and the words around it. |
+| Phrases | "the man/woman/one I'm looking for" (newest person), "the place I'm looking for" (newest place), "what I'm after" / "my lead" (newest of any kind). The line carries a note: `When Torvar says "the man I'm looking for", they mean Vald, ...`. |
+| Hearing | In a question, the newest leads are matched more loosely than other names ("Where's vault hiding?" -> "Vald"). |
+| Saves | Rows carry the timeline: loading an older save forgets leads learned after it. The newest five are kept in play. |
+
 
 Both are on with `MANTELLA_LIVING_WORLD=1`. Switch either off with `set MANTELLA_LW_MOOD_METER=0` or
 `set MANTELLA_LW_QUIET_CHATTER=0`.
@@ -279,14 +291,14 @@ after a test hold.
 
 | File | Change |
 | --- | --- |
-| `src/http/routes/mantella_route.py` | Optional traffic recording (does nothing unless `MANTELLA_RECORD_TRAFFIC` is set); request timing for the performance monitor |
+| `src/http/routes/mantella_route.py` | Optional traffic recording (does nothing unless `MANTELLA_RECORD_TRAFFIC` is set); request timing for the performance monitor; the diary read request, answered outside the conversation lock |
 | `src/llm/client_base.py` | Counts LLM calls waiting or in flight for the performance monitor |
 | `src/actions/function_manager.py` | Also loads `livingworld/actions/*.json` (does nothing unless `MANTELLA_LIVING_WORLD` is set) |
 | `tests/conftest.py` | Registers the `baseline_behaviour` test marker |
 | `src/output_manager.py` | Hands each turn to the Living World when it is on (group turns), refuses synthesis in the wrong voice, keeps the "generating" flag up across a multi-speaker turn, and cuts mood tags out of the streamed reply |
 | `src/conversation/context.py` | `focused_on(character)`: a copy of the context holding only the player and one NPC, for building that NPC's own prompt |
 | `src/actions/function_manager.py` | Skips actions marked `living_world` unless `MANTELLA_LIVING_WORLD` is set |
-| `src/game_manager.py` | Calls the Living World hooks at conversation start, on each request's context (perception records), each spoken line (plus its mood meter), player input, actor changes and conversation end, adds the quiet-chatter key to the start reply, and wraps Mantella's memory with the recall (does nothing unless `MANTELLA_LIVING_WORLD` is set) |
+| `src/game_manager.py` | Calls the Living World hooks at conversation start, on each request's context (perception records), each spoken line (plus its mood meter), player input, actor changes and conversation end, adds the quiet-chatter key to the start reply, answers the game's diary read request, and wraps Mantella's memory with the recall (does nothing unless `MANTELLA_LIVING_WORLD` is set) |
 
 ## Body language, step 1 (BL1): proximity and gaze
 
@@ -323,3 +335,92 @@ one goes to the NPC you made it to as a presence record, like the rest:
 
 `MANTELLA_LW_GESTURES=0` turns gestures off; `MANTELLA_LW_GESTURE_NOTICES=0` stops the game showing a
 notice for each gesture it recognised (shown by default while the thresholds are tuned in game).
+
+## Intimate scenes (OStim)
+
+NPCs know when an OStim scene is running, who is in it and what is happening in it (kissing, sex, spanking
+and so on, from OStim's own action types), and remember it afterwards as a scene. While the player is in a
+scene with someone, Mantella-Spell counts the player's hands on that partner (HIGGS grabs) and slaps on them
+into the scene instead of sending them as grabs and hits: no "pulls away" reaction, no guard, no grab or
+assault gossip, no drop in how decent or gentle they think the player is. Grabs and hits outside a scene, or
+on anyone who is not the player's partner in it, are handled exactly as before.
+
+| Piece | File | What it does |
+| --- | --- | --- |
+| Records | `perception/records.py` | `type=scene`: `via=end` once per finished scene, `via=now` in the `mantella_lw_scene` snapshot with every request |
+| Memories | `intimacy/scenes.py` | Each NPC in it remembers it as shared ("the grabbing and the slaps were part of it, not violence"); a little intimacy and affinity, never trust or attraction. Bystanders who saw it remember it, and the claim is `caught_with`, so a partner reacts as to an affair. Clothes coming off for it (`attire` with `via=scene`) make no "naked" memories |
+| Forced scenes | `intimacy/scenes.py` | A scene an animation pack tags `aggressive` is remembered by the person it was done to as being forced (large loss of trust); bystanders remember an assault (claim `forced`). Stock OStim has no such scenes |
+| Dialogue | `integration.py` | While a scene runs, each NPC in it is told what is going on and that touching, slaps and rough play are part of it (and that they can still say if something is too much); bystanders who can see it are told so |
+| The player's size | `intimacy/size.py` | When the player is a man with The New Gentleman, the game sends the scale TNG gives his genitals; women in the scene with him notice it (5 inches or less unimpressive, more impressive, and thin under 4.25 around or thick from 5.25) in the scene's prompt and remember it. `MANTELLA_LW_TNG_LENGTH_IN` (default 6.0) and `MANTELLA_LW_TNG_GIRTH_IN` (default 4.75) say what TNG's medium size measures with your BodySlide build |
+
+| Witnesses | Mantella-Spell `LwSceneSample` | Every 4 s while any followed scene runs (the player's or one between NPCs), the adults near it are looked at and the best view each had is kept, so someone who walked in and out still saw it. Uses Papyrus Extender's `FindAllReferencesWithKeyword` (falls back to Mantella's five nearest) |
+| Betrayal | `intimacy/scenes.py`, `intimacy/common.py` | A witness whose spouse or partner (seeded spouse, or a romance bond short of an affair) is in the scene with someone else remembers it as a betrayal, loses trust in the partner and liking for the other; live, they are told it is their own partner |
+| Climax | `intimacy/climax.py` | `type=climax` from OStim's `ostim_actor_orgasm`, with the scene's acts at that moment: where a man's climax landed (face, chest, inside, body; the way OCum places it, guessed, not read from OCum). Remembered by both, and by bystanders who saw it. Afterwards, for up to 4 game hours or until that person bathes or swims, people around notice it where it shows (the face always; the rest only on someone with nothing on) |
+| Arousal | `intimacy/arousal.py` | Rapid taps of the arousal key raise the player's erection with The New Gentleman's own `SOSBend` animation events; one lone tap lets it go down; it fades by itself after 2 minutes. Seen only when the player has nothing on the body: witnesses remember it, and in a conversation each NPC notices it; women also take in his size, and how anyone reacts is their own. Noticing it never makes anyone more willing. `MANTELLA_LW_AROUSAL_KEY` (DirectX scan code, default 76 = NumPad 5, 0 off) |
+| Covered eyes | `intimacy/arousal.py`, Mantella-Spell `Tools/LWCoverEyes` | The LWCoverEyes power darkens the player's screen (sound plays on) and sends `LivingWorld_EyesCovered`; NPCs around know the player cannot see but can hear |
+
+`MANTELLA_LW_INTIMACY=0` turns it off (the game hears it with the conversation start reply, and then sends
+grabs and hits as before). Children are never part of any of it: not in a scene, not as a witness.
+
+### Caught in the act, decency, wandering eyes
+
+| Piece | File | What it does |
+| --- | --- | --- |
+| Walking in | `intimacy/confront.py`, `intimacy/scenes.py`, Mantella-Spell `LwConfront` | The start reply lists every couple (`mantella_lw_couples`, "Hod\|Gerdur": spouses and courting, dating, partners or betrothed bonds; vanilla lovers count too in game). A witness with a clear view of their own partner in a scene, within 10 m, confronts them: they join the running conversation, or one starts with them, the couple and the player (when near). Once per scene, at most once every 2 minutes. The witness is told they walked in and do not stay silent; the partner in the scene is told who caught them. How either reacts is their own. Forced scenes are not confrontations |
+| Not letting it go | `intimacy/confront.py` | For 4 game days after, the witness's prompt says what they saw; within the first day, with their partner or the other person present, they bring it up |
+| Decency | `guard/decency.py`, `actions/decency_fine.json`, Mantella-Spell `LwDecencyTick` | The player has had nothing on the body slot for 5 s outside water, a scene or their own house, no conversation is running, and a guard within 35 m can see them (Papyrus Extender, else every person in the player's cell): the guard runs over (`react` record `via=decency`) and a conversation starts. The first time in two days a warning; after that a 20 gold fine the player can pay on the spot (the guard's PayFine: the game moves the gold, as much as the player has, `mantella_lw_fine_gold`), or, refused, ReportCrime. A thane of the guard's hold is asked with deference ('my Thane') and never fined. At most once every 2 minutes |
+| Wandering eyes | `bodylang/peek.py`, Mantella-Spell `LwBodyPeek` | A sixth field in each woman's body-language profile: how readily her eyes drift to a naked player (attraction, liking, familiarity, her mood, bold or reserved nature; fear, dislike and irritation stop it). The game makes her glance at his groin for about 1.5 s now and then while he is naked, has TNG's bone and is within 6 m, also mid-conversation, and sends `presence` `what=peek` so her next line knows she looked (no feelings change). Never makes anyone more willing |
+
+Off switches: `MANTELLA_LW_CONFRONT=0`, `MANTELLA_LW_DECENCY=0`, `MANTELLA_LW_PEEK=0` (peek is also off with body
+language off). Each reaches the game with the conversation start reply.
+
+## Memory when talking again
+
+Each conversation is turned into each NPC's own memories and facts by a background extraction call. Before
+this, that call used the spoken-reply settings (`max_tokens` 250 and the `#` stop sequence in
+`llm_params`), so its JSON was often cut off, and memories written as plain sentences were thrown away:
+across 127 conversations NPCs kept 8 memories of what was said. Recall also showed only the 8 newest
+memories, so a run of grabs pushed every memory of what was said out of the prompt.
+
+| Piece | File | What it does |
+| --- | --- | --- |
+| Reply length | `src/llm/client_base.py` (`background_request_call`), `integration.py` | Extraction gets its own `max_tokens` (`MANTELLA_LW_EXTRACT_MAX_TOKENS`, default 1500), low temperature, JSON mode (asked again without it if the service refuses), no stop sequence, and does not wait on the dialogue lock, so it never delays an NPC's reply |
+| Mending | `memory/extraction.py` | A cut-off or sloppy reply keeps every complete entry; memories as plain sentences are kept; an unusable reply is asked for once more straight away; a fact given the wrong line number is matched to the line by that speaker that really holds it (nothing unsaid is accepted); memories come first in the reply and are asked to be specific |
+| Recall | `memory/recall.py` | Six slots for memories of what was said and six for things seen or done, by importance and recency; the same thing repeated is shown once with a count ("18 times, most recently yesterday") |
+| Recap | `memory/recall.py` | When the player talked to this NPC in the last 2 game days, the last 8 lines of that conversation go into the prompt word for word, so talking again picks up where it stopped, even before extraction has run |
+| Backfill | `memory/backfill.py` | Past conversations (in the current timeline, up to 60) that left no memory of what was said are extracted once more at start-up, each only once. They add memories and facts, never gossip, and never replace a fact learned later. `MANTELLA_LW_MEMORY_BACKFILL=0` skips it |
+
+`MANTELLA_LW_MEMORY_BOOST=0` turns the reply-length, retry, line-matching, recall and recap changes off. The
+reply mending stays on: it only keeps what the old code threw away.
+
+## Fog: names and places unknown until told
+
+On with `MANTELLA_LIVING_WORLD=1` and the matching Mantella-Spell build (`LivingWorldFog.psc`). Switch off with
+`set MANTELLA_LW_FOG=0` (the game then shows every name again). No extra AI call. Code in `livingworld/fog/`,
+tables in migration 012 (`name_known`, `place_known`, `npc.stranger_label`), all on the save timeline.
+
+| Part | Where | What it does |
+|---|---|---|
+| Strangers | game (`LivingWorldFog.psc`) | A named adult NPC the player has not met shows as "Nord woman" over the crosshair and in subtitles (`SetDisplayName`). Generic NPCs and children never change. Everything sent to the server uses the real name, so memory and actions still work |
+| Learning names | `fog/names.py`, `fog/service.py` | The player learns a name when the NPC says it in a line, when someone in the conversation names a person who is there, or when the player says it. An NPC learns the player's name when the player introduces themselves ("my name is", "call me Wolf": an alias is kept as what that NPC calls them), when someone present who knows it says it, or through gossip about the player |
+| Prompts | `integration.py` | Each NPC is told whether the player knows their name (introduce yourself when it fits) and whether they know the player's (never say it until told). Names learned mid-conversation reach the model as notes with the player's next line. Memories and Mantella summaries read "the stranger" for an NPC who was never told the player's name |
+| Hints | `social/hints.py`, `social/claims.py` | Overheard hints call people the player has not met "a Nord woman"; what an NPC heard about the player calls them "a stranger" until they know the name |
+| Places | `fog/places.py`, `fog/data/map_markers.json` | A place an NPC names gets its map marker added for the player (not visited), once per timeline. The list comes from the game's own masters via `fog/extract_map_markers.py`; names shared by several markers are left out |
+| Existing saves | migration 012 | Everyone the player already talked to through Mantella counts as met, both ways |
+
+An older game build sends no descriptions, and then nothing changes: no prompts about names, no hidden names.
+
+## Diaries
+
+People the player spends time with keep a private diary the player can find and read in the game. On with
+`MANTELLA_LIVING_WORLD=1`; switch off with `set MANTELLA_LW_DIARY=0`. The book itself is the LWDiary companion
+plugin (Mantella-Spell `Tools/LWDiary`) plus two small hooks in `MantellaConversation.psc`. Code in
+`livingworld/diary/`, tables in migration 013 (`diary_entry`, `diary_read`), all on the save timeline.
+
+| Part | Where | What it does |
+|---|---|---|
+| Who | `diary/service.py` | Any adult NPC who was in at least `MANTELLA_LW_DIARY_MIN_TALKS` (default 5) conversations with the player. Children never. The start reply lists the participants who keep one (`mantella_lw_diary_ref_ids`, `_npc_ids`, `_titles`); the game gives each a book "Gerdur's Diary" (with fog on and the name unknown: "Nord woman's Diary") |
+| Writing | `diary/service.py`, job `diary_entry` | After a conversation, each keeper in it (re)writes that day's entry with the background model, from their own memories of the day, what they were told, and how they feel about the player. The first entry looks back over the most important memories so far. A day is rewritten only when there are new memories, at most `MANTELLA_LW_DIARY_REWRITES` (default 3) times. One short call (JSON reply) per entry |
+| Prompt | `integration.py` | A keeper knows they keep a diary and would be upset if it were read |
+| Reading | `src/http/routes/mantella_route.py` | The game's request `mantella_lw_diary_read` (outside any conversation, not behind the conversation lock) gets the newest six days as pages, newest first. It never answers with an error reply |
+| Caught | `diary/service.py` | If the owner saw the player reading it: a memory ("I caught Torvar reading my diary"), trust -0.25, liking -0.15, suspicion +0.25. Others the game saw watching: a memory and a little suspicion. Stored as a `diary.read` world event |
