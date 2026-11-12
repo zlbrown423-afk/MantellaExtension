@@ -18,6 +18,9 @@
                                                           (on screen, and every check in the server log)
 * "debug guard promote"                                 - make a promotion to the next rank due now, skipping the
                                                           board: your superior announces it when you next talk
+* "debug guard bully"                                   - the next guard you talk to alone heckles you, if you are
+                                                          on duty (banter.py; skips temperament, gaps and chance)
+* "debug guard gossip"                                  - the next guard you talk to alone is a gossip, this once
 
 "debug" (or "test") and "guard" must both be in the line, so normal speech never triggers it. The hold
 defaults to the hold of a guard leader or guard in the conversation, else the first configured hold.
@@ -31,7 +34,7 @@ from dataclasses import dataclass
 from livingworld.guard import orgs as O
 
 COMMANDS = ("enlist", "rank", "dismiss", "reinstate", "thane", "status", "duty", "seen", "report", "pay", "record",
-            "probation", "incident", "watch", "training", "suspect", "board", "promote")
+            "probation", "incident", "watch", "training", "suspect", "board", "promote", "bully", "gossip")
 
 
 @dataclass(frozen=True)

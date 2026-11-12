@@ -873,8 +873,14 @@ class LivingWorld:
             f = self._guard_facts.get(c.ref_id)
             if f is not None:
                 facts[self._npc_ids.get(c.ref_id) or self._register(c, scene.now)] = f
-        return GuardScene(scene.now, scene.player_id, scene.player_name, scene.present,
-                          getattr(self._context, "location", None), facts, self._thane_of, self._player_said)
+        location = getattr(self._context, "location", None)
+        uniform_org = None
+        if uniform.enabled() and scene.player_id is not None:
+            mine = self._attire_now.get(scene.player_id)
+            worn = uniform.uniform_for(mine.body if mine and mine.covered else None, location)
+            uniform_org = worn.org if worn is not None else None
+        return GuardScene(scene.now, scene.player_id, scene.player_name, scene.present, location, facts,
+                          self._thane_of, self._player_said, uniform_org)
 
     def _refresh_guard(self) -> None:
         """Once per conversation: missed duties, probation, and whether the player is at their post."""
