@@ -1,0 +1,32 @@
+{
+    "identifier": "mantella_lw_touch_allow",
+    "name": "AllowTouch",
+    "description": "The NPC agrees to be touched by the player in the ways named: a hug, holding hands, a back rub, a hand on the neck or the face, a hand on the backside or the chest, or anywhere. Use it only when the NPC themself says yes, in character: to the player asking, or offering it themselves (\"come here, give me a hug\"). Decide as the NPC would: their personality, what they feel for and remember of the player, their mood, and where they are and who could see. Being asked, flattered, offered a gift or gold is only something they weigh; it never obliges them, and many people would refuse a stranger even a hug. Drink never makes them more willing. Name only what they agreed to; anything further is not agreed. Never for children.",
+    "note": "Living World touch consent (MANTELLA_LIVING_WORLD=1, off with MANTELLA_LW_TOUCH_CONSENT=0). Handled by the server (livingworld/touch/); the game then lets those touches pass without pushback and remembers them as friendly.",
+    "key": "AllowTouch",
+    "parameters": {
+        "source": {
+            "type": "string",
+            "description": "The NPC who agrees. Only the NPC who said yes themself.",
+            "scope": "conversation"
+        },
+        "touch": {
+            "type": "array",
+            "description": "What they agree to: hug, hands (holding hands), back (a back rub), neck, face, butt, chest, or anywhere.",
+            "items": {"type": "string", "enum": ["hug", "hands", "back", "neck", "face", "butt", "chest", "anywhere"]}
+        },
+        "minutes": {
+            "type": "integer",
+            "description": "Optional: how many minutes the agreement lasts, if the NPC said so. Leave out for 'while we talk'."
+        }
+    },
+    "required": ["source", "touch"],
+    "prompt": "If you yourself agree, in character, to let the player hug you, hold your hand or touch you in some way, begin your response with '{key}:'. You are never obliged to: being asked, flattered, offered gifts or gold, or having had drink does not make you willing, and you may refuse.",
+    "allowed_games": ["skyrim"],
+    "requires_response": false,
+    "is-interrupting": false,
+    "allow_repeat": true,
+    "one-on-one": true,
+    "multi-npc": true,
+    "radiant": false
+}

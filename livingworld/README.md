@@ -561,3 +561,20 @@ Three fixes from the 2026-11-10 play session. All server side, no compile.
 | Heckling | A bully heckles the player only when the conversation **starts** with just the player and that guard (never when the guard joins a running conversation), the player serves in that guard, is on duty (a routine or training duty in hand, or wearing their own guard's uniform), is Guardsman or below, and has no incident duty or prisoner escort under way. At most once per bully per 4 game days, once per 1.5 days across all bullies, and only half of eligible conversations. Words only: no blows, threats or accusations, never holds the player up, drops it at once for real trouble or an order. Stored as a `guard.heckle` event (rolls back with the save) |
 | Gossip | A gossip guard trades town rumours and passes on guard news about the player from the last 10 days (enlisted, trained, promoted, commended, reprimanded, arrests, a wrongful arrest, a bully's heckling), two items at a time, each once (`guard.gossip_told`), and warns a member about the bullies by name |
 | Test | "debug guard bully" / "debug guard gossip": the next guard you talk to alone heckles you (if on duty) / gossips |
+
+## Touch consent: a hug the NPC agreed to is not a grab
+
+An NPC can agree in the conversation to being hugged or touched, and then it reads as what it is. Code:
+`livingworld/touch/`, `actions/touch_allow.json` / `touch_withdraw.json`; game side Mantella-Spell
+`MantellaRepository.psc` (LIVINGWORLD PATCH: touch consent) and `LivingWorldPlanck.psc`.
+
+| Piece | What it does |
+| --- | --- |
+| Agreeing | `AllowTouch` (`touch`: hug, hands, back, neck, face, butt, chest, anywhere; optional `minutes`) when the NPC says yes in character. Because the model often answers in words only, `touch/words.py` also turns the player asking ("can I hug you?", "may I hold your hand?") and the NPC's plain yes ("Of course, come here."), or the NPC's own offer ("give me a hug", "take my hand"), into `AllowTouch`. `StopTouch`, or the NPC saying "stop that" / "hands off", takes it back. Every answer is written to `consent_decision` (kind `touch`) |
+| Never read | Gifts, gold, rank, how often the player asked. A drunk NPC cannot agree to butt, chest or anywhere. Children are left out |
+| To the game | `mantella_lw_touch_allow` ("Name\|hug,hands\|minutes") and `mantella_lw_touch_withdraw` on the NPC's line. The game keeps it for the conversation and 3 minutes after (or the minutes named) and drops it on every load |
+| In game | PLANCK leaves them alone (`PLANCK.AddAggressionIgnoredActor`: no "stop that", no shove, no growing anger), no pull-away reaction or guard stepping in, no body-language step back or folded arms. A hug has them open their arms (`IdleCO2Ceremony1Welcome`); the VR gesture `open_arms` (both hands wide at chest height) toward someone who agreed has them open theirs, toward anyone else it is a hug offered (a `presence` record) |
+| Remembered | Grab records carry `consent=<kind>`: the person remembers it warmly ("Torvar hugged me ..., as I had agreed"), onlookers as friendly and welcome (a partner seeing intimate touches minds), gossip says "hugged" / "held hands with" / "was getting close and personal with", never "grabbed". Work quality does not count it as rough |
+| Going further | A hand on a sensitive place outside the agreement (`consent=breach`, `allowed=`) ends it on the spot and is remembered as worse than a grab: they had trusted the player with less |
+
+Off switch: `MANTELLA_LW_TOUCH_CONSENT=0` (the actions are not offered and the game side is off).

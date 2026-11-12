@@ -33,6 +33,11 @@ fight ends: ``hp`` is the lowest share of health they fell to (0..1). A ``swim``
 stops swimming: ``dur`` is how long, in seconds. Both only change how clean someone is (see ``hygiene/``).
 An ``attire`` record also carries ``sex`` (``m`` or ``f``), the actor's sex in game.
 
+Touch consent (``livingworld/touch``) adds ``consent`` to a grab: the kind of touch the person grabbed had
+agreed to (``hug``, ``hands``, ``back``, ``neck``, ``face``, ``butt``, ``chest``, ``anywhere``) when the hand was
+inside it, or ``breach`` when they had agreed to something (``allowed=hug,hands``) and the hand went to a
+sensitive place outside it. No ``consent`` means nothing was agreed.
+
 A ``react`` record is someone reacting on the spot to the player's hands on them, outside any conversation:
 ``actor`` is who reacts, ``target`` the player, ``via`` is ``victim`` (the person grabbed speaks up) or ``guard``
 (a guard who saw it steps in, and ``party`` is the person grabbed); ``area`` and ``dur`` are the grab's. The game
@@ -184,6 +189,8 @@ class PerceptionRecord:
     level: int | None = None        # arousal: TNG's bend, -10 (soft) .. 9
     dead: list[GameActor] = field(default_factory=list)   # react via=surrender: other dead companions (d=)
     killer: str | None = None       # react via=surrender: 'player' | 'other'
+    consent: str | None = None      # grab: the kind of touch the target had agreed to ('hug'), or 'breach' (livingworld/touch)
+    allowed: list[str] = field(default_factory=list)   # grab with consent=breach: what they had agreed to
     witnesses: list[Witness] = field(default_factory=list)
     raw: str = ""
 
@@ -263,6 +270,7 @@ def parse_record(text: str) -> PerceptionRecord:
         player_size=_scale(fields.get("psize")), erect=fields.get("erect") == "1", eyes_covered=fields.get("eyes") == "1",
         level=_level(fields.get("level")),
         dead=dead, killer=(fields.get("killer") or "").strip().lower() or None,
+        consent=_consent(fields.get("consent")), allowed=_kinds(fields.get("allowed")),
         witnesses=witnesses, raw=text)
     if kind == "scene" and (record.via not in ("end", "now") or record.target is None):
         raise BadRecord("a scene record needs via=end or now and at least two people (actor and target)")
@@ -311,6 +319,18 @@ def _acts(text: str | None) -> list[str]:
         if word and re.fullmatch(r"[a-z0-9_]{1,40}", word) and word not in acts:
             acts.append(word)
     return acts
+
+
+def _consent(text: str | None) -> str | None:
+    """A touch kind the target agreed to, 'breach', or None (nothing agreed, or a value we do not know)."""
+    from livingworld.touch import KINDS
+    word = (text or "").strip().lower()
+    return word if word in KINDS or word == "breach" else None
+
+
+def _kinds(text: str | None) -> list[str]:
+    from livingworld.touch import normalize_kinds
+    return normalize_kinds(text) if text else []
 
 
 def _level(text: str | None) -> int | None:

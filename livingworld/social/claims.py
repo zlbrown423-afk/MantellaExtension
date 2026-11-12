@@ -63,6 +63,18 @@ def _grab_claim(payload: dict) -> tuple[str, str, float, str]:
     return act_name, detail, min(1.0, magnitude), "private" if sensitive else "public"
 
 
+def _agreed_claim(payload: dict) -> tuple[str, str, float, str, float]:
+    """(act, detail, magnitude, sensitivity, valence) for an agreed touch."""
+    kind = payload.get("consent")
+    if kind == "hug":
+        return "hugged", "", 0.2, "public", 0.2
+    if kind == "hands":
+        return "held_hands", "", 0.3, "public", 0.2
+    if kind == "back":
+        return "rubbed_back", "", 0.25, "public", 0.15
+    return "caressed", "", 0.45, "private", 0.1
+
+
 def appraise(db, event) -> int | None:
     """Make a claim from one event and give each perceiver a copy. Returns the claim id, or None when the
     event is not something people talk about."""
@@ -76,9 +88,14 @@ def appraise(db, event) -> int | None:
     if is_child(db, subject) or is_child(db, obj):
         return None
     valence = 0.0
-    if etype == "physical_interaction":
+    if etype == "physical_interaction" and payload.get("consent") not in (None, "breach"):
+        # livingworld/touch: a touch the person had agreed to is talked about as affection, never as a grab
+        act_name, detail, magnitude, sensitivity, valence = _agreed_claim(payload)
+    elif etype == "physical_interaction":
         act_name, detail, magnitude, sensitivity = _grab_claim(payload)
         valence = -0.3 if act_name == "touched" else -0.6
+        if payload.get("consent") == "breach":   # went past what they had agreed to: worse, and worth telling
+            magnitude, valence = min(1.0, magnitude + 0.2), -0.7
     elif etype == "consumption" and payload.get("category") == "alcohol":
         act_name, detail, magnitude, sensitivity = "drank", f" {payload.get('item') or 'drink'}", 0.15, "public"
         obj = None
