@@ -1,0 +1,71 @@
+{
+  "npc": "Fralia Gray-Mane",
+  "at": "after_latest",
+  "reason": "Zachary Lex freed Thorald from Northwatch Keep and saw him relocated safely (set by hand, 2026-11-12)",
+  "memories": [
+    {
+      "content": "Zachary Lex kept his promise to me: he went into Northwatch Keep, the Thalmor prison, and brought my son Thorald out alive.",
+      "importance": 1.0,
+      "valence": 0.95,
+      "intensity": 0.9,
+      "about": [
+        "player",
+        "Thorald Gray-Mane"
+      ]
+    },
+    {
+      "content": "Thorald is safe now. Zachary Lex got him away and settled him somewhere safe, away from Whiterun, where the Thalmor and the Battle-Borns cannot reach him. I no longer have to fear for my son.",
+      "importance": 0.95,
+      "valence": 0.9,
+      "intensity": 0.8,
+      "about": [
+        "player",
+        "Thorald Gray-Mane"
+      ]
+    },
+    {
+      "content": "I owe Zachary Lex more than I can ever repay. I have grown very fond of him, I trust him, and I am glad whenever he comes by.",
+      "importance": 0.9,
+      "valence": 0.85,
+      "intensity": 0.7,
+      "about": [
+        "player"
+      ]
+    },
+    {
+      "content": "I am drawn to Zachary Lex as a woman is drawn to a man, and I desire him. I keep it from prying eyes in Whiterun, but it is there whenever he is near.",
+      "importance": 0.9,
+      "valence": 0.7,
+      "intensity": 0.7,
+      "about": [
+        "player"
+      ]
+    }
+  ],
+  "feelings": {
+    "affinity": 0.85,
+    "trust": 0.7,
+    "respect": 0.7,
+    "admiration": 0.5,
+    "attraction": 0.85,
+    "familiarity": 0.7,
+    "fear": 0.0,
+    "suspicion": 0.0
+  },
+  "standing": {
+    "reliability": 0.6,
+    "decency": 0.0,
+    "gentleness": 0.0
+  },
+  "facts": [
+    {
+      "predicate": "son_status",
+      "value": "rescued from Northwatch Keep by Zachary Lex and living safely away from Whiterun",
+      "importance": 0.9
+    }
+  ],
+  "drop_facts": [
+    "feels_uneasy"
+  ],
+  "summary": "Fralia Gray-Mane now knows the whole truth about her son: Zachary Lex kept his word, freed Thorald from the Thalmor prison at Northwatch Keep and saw him relocated somewhere safe, away from Whiterun, where neither the Thalmor nor the Battle-Borns can reach him. Her long worry for Thorald is over. She is deeply grateful to Zachary, has grown highly fond of him and trusts him, and she is attracted to him and desires him, though she keeps that private in front of others."
+}
