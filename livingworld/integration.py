@@ -43,7 +43,7 @@ from livingworld.intimacy import intimacy_enabled
 from livingworld.store.minors import is_child
 from livingworld.intimacy import scenes as intimate_scenes
 from livingworld.intimacy import confront
-from livingworld.guard import decency
+from livingworld.guard import decency, enlist_words
 from livingworld.social import side_jobs, surrender, wingman
 from livingworld.bodylang.peek import KEY_PEEK_ON, peek_enabled
 from livingworld.guard.profiles import GuardFacts
@@ -1619,6 +1619,9 @@ class LivingWorld:
         if self._desk is not None:
             from src.actions.function_manager import FunctionManager
             also.append(side_jobs.TravelWatcher(self._desk, FunctionManager._actions.keys()))
+        if self.guard and enlist_words.enabled():
+            from src.actions.function_manager import FunctionManager
+            also.append(enlist_words.EnlistWatcher(actions, FunctionManager._actions.keys()))
         if self.surrender and (self._surrender_pending or self._surrender_all):
             from src.actions.function_manager import FunctionManager
             also.append(surrender.FollowWatcher(self._surrender_pending, player_said or self._player_said,
