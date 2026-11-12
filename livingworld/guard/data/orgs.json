@@ -61,6 +61,20 @@
       "bed": {"_verified": "Read from the player's Skyrim.esm on 2026-11-09: WhiterunGuardHouse 0x00036ED6 ('Guard Barracks', owned by GuardFactionWhiterun); 0x000D46B7 is its only persistent bed (CommonBed01L).", "name": "Guard Barracks bunk", "plugin": "Skyrim.esm", "ref": "0x000D46B7"},
       "chest": {"_verified": "Read from the player's Skyrim.esm on 2026-11-09: PlayerHouseChest 0x000F3923 ('Chest', UpperChest01.nif), DATA flags 0x00 (never respawns), empty. Placed once by the game at the player's feet the first time they stand by their bunk.", "name": "footlocker", "plugin": "Skyrim.esm", "base": "0x000F3923"},
       "jail": {"_verified": "Read from the player's Skyrim.esm on 2026-11-09: CrimeFactionWhiterun JAIL leads to WhiterunPrisonMarker 0x000267E4 (persistent) in WhiterunDragonsreachBasement 0x0004A376 'Dragonsreach Dungeon', inside the cell behind WRJailDoor01 0x000A7618 (Adept lock, WhiterunJailKey).", "name": "Dragonsreach Dungeon", "plugin": "Skyrim.esm", "ref": "0x000267E4"},
+      "promotion": {
+        "_about": "The promotion board (G3), read by guard/promotion.py. To move up to a rank, a member needs to be past probation, ranks[].min_days in their current rank, no reprimand in the last clean_days days, and what that rank asks for below (default applies to every rank, a rank's own entry adds to it): duties = duties completed in the current rank; merit = merit earned in the current rank, where each kind of duty pays full merit for its first halves_after completions in a rank, then half, then a quarter...; reports = written reports filed in the current rank; deeds = commendations, incidents dealt with and arrests booked in the current rank; view = the superior's standing of the member (0.5 x trust + 0.5 x respect + what they have heard, -1..1); training = recruit training finished; jarl = the Jarl's standing of the member. Ranks with seats need an open one. A passed board is announced by the superior the next time the member talks to them; turning it down makes the board wait decline_days.",
+        "halves_after": 3,
+        "clean_days": 7,
+        "decline_days": 7,
+        "ranks": {
+          "default": {"view": 0.0},
+          "guardsman": {"training": true, "duties": 5, "merit": 5},
+          "sergeant": {"duties": 12, "merit": 14, "reports": 3, "deeds": 1, "view": 0.15},
+          "lieutenant": {"duties": 20, "merit": 22, "reports": 6, "deeds": 3, "view": 0.3},
+          "captain": {"duties": 30, "merit": 32, "reports": 10, "deeds": 5, "view": 0.45},
+          "commander": {"duties": 40, "merit": 45, "reports": 15, "deeds": 8, "view": 0.55, "jarl": 0.4}
+        }
+      },
       "recruit": {
         "min_standing": -0.1,
         "sponsor_bonus": 0.25,
