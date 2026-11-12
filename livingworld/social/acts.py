@@ -23,6 +23,11 @@ ACTS: dict[str, Act] = {
     "held": Act("grabbed and held", 0.7, {"trust": -0.25, "suspicion": 0.3, "fear": 0.06}, harms_object=True,
                 domains={"gentleness": -0.22, "decency": -0.12}),
     "drank": Act("was drinking", 0.15),
+    # touch consent (livingworld/touch): a touch the other person had agreed to. Never harms them.
+    "hugged": Act("hugged", 0.2, {"affinity": 0.01}),
+    "held_hands": Act("held hands with", 0.4),
+    "rubbed_back": Act("rubbed the back of", 0.25),
+    "caressed": Act("was getting close and personal with", 0.55),
     "bought_round": Act("bought a round of drinks for", 0.3, {"affinity": 0.05, "respect": 0.02},
                         domains={"generosity": 0.18}),
     "helped": Act("helped", 0.35, {"affinity": 0.04, "respect": 0.04, "trust": 0.03},

@@ -19,7 +19,8 @@ The game sends one ``type=presence`` record per meaningful moment, never per tic
 
 Gestures (BL2, read in VR through VRIK; ``target`` is the NPC the gesture was made to, ``about`` is who
 was pointed at, as a name): ``wave``, ``nod``, ``shake`` (head), ``point``, ``beckon``, ``hands_up``,
-``thumbs_up``, ``thumbs_down``.
+``thumbs_up``, ``thumbs_down``, ``open_arms`` (both hands held out wide at chest height, offering a hug;
+``agreed=1`` when the NPC had already agreed to one, see ``livingworld/touch``).
 
 Apart from ``peek``, only the player's behaviour is ever a percept (see the loop guards in ``__init__``).
 """
@@ -31,7 +32,7 @@ from livingworld.bodylang.state import Feelings
 from livingworld.perception.records import RECORD_VERSION, BadRecord, GameActor, _actor
 
 KIND = "presence"
-GESTURES = ("wave", "nod", "shake", "point", "beckon", "hands_up", "thumbs_up", "thumbs_down")
+GESTURES = ("wave", "nod", "shake", "point", "beckon", "hands_up", "thumbs_up", "thumbs_down", "open_arms")
 WHATS = ("approach", "crowd", "backed_off", "weapon", "stare", "peek") + GESTURES
 OBSERVATION_MINUTES = 15.0   # older observations are not worth telling the dialogue model
 ANSWERS = ("nod", "shake")   # a silent yes or no only means something right after a question
@@ -61,6 +62,7 @@ class Presence:
     duration_s: float | None = None
     count: int = 1
     about: str | None = None   # who the player pointed at (a name)
+    agreed: bool = False       # open_arms: the NPC had already agreed to a hug
 
     @property
     def is_gesture(self) -> bool:
@@ -97,7 +99,8 @@ def parse(raw: str) -> Presence:
         count = 1
     return Presence(key=fields["key"], game_time=float(fields["gt"]), location=fields.get("loc") or None,
                     actor=actor, target=target, what=what, distance_m=_float(fields.get("dist")),
-                    duration_s=_float(fields.get("dur")), count=count, about=_about(fields.get("about")))
+                    duration_s=_float(fields.get("dur")), count=count, about=_about(fields.get("about")),
+                    agreed=fields.get("agreed") == "1")
 
 
 def _about(value: str | None) -> str | None:
@@ -210,6 +213,11 @@ def observation(p: Presence, player_name: str) -> str:
         return f"{player_name} gave them a thumbs up."
     if p.what == "thumbs_down":
         return f"{player_name} gave them a thumbs down."
+    if p.what == "open_arms":
+        if p.agreed:
+            return f"{player_name} opened their arms for the hug they had agreed to, and they opened theirs back."
+        return (f"{player_name} opened their arms wide toward them, offering a hug. Whether to accept is entirely "
+                f"their own choice.")
     return ""
 
 

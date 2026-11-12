@@ -300,6 +300,10 @@ class PerceptionPipeline:
             payload = {"interaction": "touch" if dur < formation.BRIEF_S else ("hold" if dur >= formation.LONG_S else "grab"),
                        "body_part": grab_area(record), "node": record.node, "area": record.area, "hand": record.hand,
                        "intent": "intentional", "detector": "higgs_grab"}
+            if record.consent:   # livingworld/touch: agreed to (a kind), or past what was agreed ('breach')
+                payload["consent"] = record.consent
+                if record.allowed:
+                    payload["allowed"] = record.allowed
         elif record.type == "purchase":
             payload = {"item": record.item, "item_form": record.item_form, "quantity": record.quantity,
                        "gold": record.gold, "payer": record.payer, "party": record.party.name if record.party else None,
