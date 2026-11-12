@@ -81,6 +81,7 @@ class Guard:
         self.arrest_orders: list[ArrestOrder] = []   # G2f: for the game, sent with the next NPC line
         self.release_orders: list[int] = []          # G2f: arrest ids whose prisoner the game lets out now
         self.bookings: list[AR.Booking] = []         # G2f: prisoners booked with the superior this conversation
+        self._first_orders: int | None = None        # service id enlisted in this conversation, first duty not given yet
         self.promoted: tuple[str, str, int] | None = None   # G3: (rank from, rank to, superior) given this conversation
         self._declined: tuple[str, str] | None = None        # G3: (from, to) turned down this conversation
 
@@ -181,6 +182,35 @@ class Guard:
     @staticmethod
     def _jail_name(org: O.Org | None) -> str:
         return org.jail.name if org is not None and org.jail is not None else "the cells"
+
+    def turn_notes(self, scene: Scene, text: str) -> list[str]:
+        """Notes for the AI on the player's line: first orders right after enlisting, and arrests (G2f)."""
+        return self.first_orders(scene) + self.arrest_turn(scene, text)
+
+    def first_orders(self, scene: Scene) -> list[str]:
+        """The player enlisted earlier in this conversation. The prompt was written before that, so the superior
+        knows of no duty and would make one up; on the player's next line, if the superior is here, the duty is
+        given now (training step, incident or routine duty, by the usual rules) and the AI is told what it is."""
+        service_id, self._first_orders = self._first_orders, None
+        if service_id is None or scene.player_id is None:
+            return []
+        with self.store.transaction() as db:
+            svc = S.current(db, scene.player_id)
+            org = O.by_key(svc.org_key) if svc else None
+            if org is None or svc.service_id != service_id:
+                return []
+            boss = DU.superior_id(db, org, svc)
+            if boss is None or boss not in scene.present:
+                return []
+            name = self._name(db, boss) or "the superior"
+            lines = self._duty_lines(db, boss, name, org, svc, scene)
+        if not lines:
+            return []
+        logger.log(23, f"Living World guard: first orders from {name} in the enlistment conversation")
+        return [f"{scene.player_name} has just joined the guard, so here is what the guard's record says for "
+                f"{name} now. These are {scene.player_name}'s real first orders: {name} gives exactly this, "
+                f"and any other duty mentioned earlier in this conversation is replaced by it:\n"
+                + "\n".join(f"- {line}" for line in lines)]
 
     def arrest_turn(self, scene: Scene, text: str) -> list[str]:
         """G2f: the player, serving, says someone present is under arrest. The rules decide what that person does;
@@ -448,6 +478,7 @@ class Guard:
         """Missed duties, probation, and whether the player is at their post right now."""
         self._assigned = set()
         self.notices = []
+        self._first_orders = None
         self.filed = None
         self.summary = None
         self._encounters = {}
@@ -576,6 +607,7 @@ class Guard:
                            recruiter_id=npc_id, sponsor_id=d.sponsor_id, location=scene.location,
                            witnesses=[i for i in scene.present if i != scene.player_id])
             processor.process(db, {"appraisal": claims.appraise})   # news at once
+            self._first_orders = svc.service_id
             return f"service {svc.service_id}: {org.name}, {org.title(first)} ({d.path})", Issue(list(O.uniform_for(org, first)))
 
     def _duty_action(self, identifier: str, npc_id: int, scene: Scene) -> tuple[str, Issue | None]:
