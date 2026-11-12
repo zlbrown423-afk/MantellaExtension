@@ -33,6 +33,7 @@ class NpcSettings:
     private: list[str] = field(default_factory=list)
     adult_confirmed: bool = False
     note: str = ""
+    dialogue: dict[str, Any] = field(default_factory=dict)   # dialogue.py: toggles, sliders, vocabulary, remove
 
 
 @dataclass
@@ -41,6 +42,7 @@ class Settings:
     default_mode: str = "hybrid"
     evolution_enabled: bool = True
     evolution_rate: float = 1.0
+    dialogue_enabled: bool = True             # the dialogue personality module (dialogue.py)
     baseline: dict[str, float] = field(default_factory=dict)
     npcs: dict[str, NpcSettings] = field(default_factory=dict)
     problems: list[str] = field(default_factory=list)
@@ -97,6 +99,9 @@ def parse(data: Any, path: str | None = None) -> Settings:
             s.evolution_enabled = evo["enabled"]
         if isinstance(evo.get("rate"), (int, float)) and 0 <= evo["rate"] <= 3:
             s.evolution_rate = float(evo["rate"])
+    dia = data.get("dialogue") or {}
+    if isinstance(dia, dict) and isinstance(dia.get("enabled"), bool):
+        s.dialogue_enabled = dia["enabled"]
     for key, value in (data.get("baseline") or {}).items():
         if key in schema.NUMBERS and isinstance(value, (int, float)) and -50 <= value <= 50:
             s.baseline[key] = float(value)
@@ -124,6 +129,10 @@ def parse(data: Any, path: str | None = None) -> Settings:
             else:
                 s.problems.append(f"npcs.{key}.private: unknown attribute {item!r}")
         entry.adult_confirmed = raw.get("adult_confirmed") is True
+        if "dialogue" in raw:
+            from livingworld.personality import dialogue
+            entry.dialogue, found = dialogue.validate(raw["dialogue"])
+            s.problems += [f"npcs.{key}.{p}" for p in found]
         entry.note = str(raw.get("note") or "")
         if raw.get("plugin") and raw.get("base_id") and "|" not in key:
             # 'Gerdur': {"plugin": ..., "base_id": ...} is the same as the key 'Skyrim.esm|0x...'
@@ -135,6 +144,7 @@ def parse(data: Any, path: str | None = None) -> Settings:
 def to_json(s: Settings) -> dict[str, Any]:
     out: dict[str, Any] = {"version": schema.PROFILE_VERSION, "enabled": s.enabled, "default_mode": s.default_mode,
                            "evolution": {"enabled": s.evolution_enabled, "rate": s.evolution_rate},
+                           "dialogue": {"enabled": s.dialogue_enabled},
                            "baseline": dict(s.baseline), "npcs": {}}
     for key, e in s.npcs.items():
         entry: dict[str, Any] = {}
@@ -150,6 +160,8 @@ def to_json(s: Settings) -> dict[str, Any]:
             entry["adult_confirmed"] = True
         if e.note:
             entry["note"] = e.note
+        if e.dialogue:
+            entry["dialogue"] = e.dialogue
         out["npcs"][key] = entry
     return out
 

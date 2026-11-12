@@ -453,3 +453,121 @@ def test_service_flow(world, tmp_path):
         out = svc.debug(db, "debug profile", present, ids["player"], 1)
     assert out and "Aela" in out
     assert (tmp_path / "personality-inspect" / "Aela.json").exists()
+
+
+# ---- dialogue personality ----
+
+from livingworld.personality import dialogue as D   # noqa: E402
+
+
+def _dialogue(store, npc, manual=None, s=None, traits=None):
+    with store.transaction() as db:
+        p = P.resolve(db, npc, s or Settings(), 1)
+        from livingworld.social.traits import traits_of
+        return D.resolve(p, traits if traits is not None else traits_of(db, npc), manual)
+
+
+def test_dialogue_is_individual_and_stable(world):
+    store, ids = world
+    a1, a2 = _dialogue(store, ids["aela"]), _dialogue(store, ids["aela"])
+    dinya = _dialogue(store, ids["dinya"])
+    assert a1.toggles == a2.toggles and a1.sliders == a2.sliders and a1.vocabulary == a2.vocabulary
+    assert a1.sliders != dinya.sliders
+    assert a1.sliders["confidence"] > dinya.sliders["confidence"]
+    assert not dinya.toggles["suggestive"]                     # a modest priestess
+    assert set(a1.toggles) == set(D.TOGGLES) and set(a1.sliders) == set(D.SLIDERS)
+
+
+def test_toggles_are_independent_and_hand_set_wins(world):
+    store, ids = world
+    base = _dialogue(store, ids["aela"])
+    off = _dialogue(store, ids["aela"], {"toggles": {"teasing": False}})
+    assert off.toggles["teasing"] is False and off.sources["toggles.teasing"] == "manual"
+    assert {k: v for k, v in off.toggles.items() if k != "teasing"} == \
+           {k: v for k, v in base.toggles.items() if k != "teasing"}
+    slid = _dialogue(store, ids["aela"], {"sliders": {"flirtation": 5}})
+    assert slid.sliders["flirtation"] == 5 and slid.sliders["playfulness"] == base.sliders["playfulness"]
+    lines = "\n".join(D.style_lines(off, "Aela", "D", D.Moment(trust=0.8, attraction=0.6), topic=True))
+    assert "She never uses:" in lines and "playful teasing" in lines.split("She never uses:")[1]
+
+
+def test_vocabulary_merge_no_duplicates_and_forbidden_wins(world):
+    store, ids = world
+    manual, problems = D.validate({"vocabulary": {"terms_of_affection": ["My Heart", "my  heart", "pup"],
+                                                  "forbidden": ["pup"]},
+                                   "remove": {"expressions": ["by the Nine"]}, "toggles": {"nope": True}})
+    assert problems and manual["vocabulary"]["terms_of_affection"] == ["My Heart", "pup"]
+    d = _dialogue(store, ids["ysolda"], manual)
+    terms = [D._norm(x) for x in d.vocabulary["terms_of_affection"]]
+    assert terms.count("my heart") == 1 and "pup" not in terms
+    assert "by the nine" not in [D._norm(x) for x in d.vocabulary.get("expressions", [])]
+    lines = "\n".join(D.style_lines(d, "Ysolda", "D", D.Moment(trust=0.9, attraction=0.8), topic=True))
+    assert '"pup"' in lines.split("She never says:")[1] and "not lines to repeat" in lines
+
+
+def test_dialogue_follows_change_over_time_but_not_randomly(world):
+    store, ids = world
+    s = Settings()
+    before = _dialogue(store, ids["ysolda"], s=s)
+    with store.transaction() as db:
+        P.add_change(db, ids["ysolda"], "initiation", "drift", "test", 1.5, delta=10)
+    after = _dialogue(store, ids["ysolda"], s=s)
+    assert after.sliders["initiative"] == min(100, before.sliders["initiative"] + 10)
+    assert after.sliders["playfulness"] == before.sliders["playfulness"]
+    assert after.vocabulary == before.vocabulary
+
+
+def test_dialogue_off_switches_and_manual_mode(world):
+    store, ids = world
+    assert not _dialogue(store, ids["aela"], {"enabled": False}).enabled
+    with store.transaction() as db:
+        p = P.resolve(db, ids["aela"], Settings(), 1)
+        assert not D.resolve(p, {}, None, module_on=False).enabled
+        manual = P.resolve(db, ids["ysolda"], settings(Ysolda={"mode": "manual", "values": {"libido": 40}}), 1)
+        d = D.resolve(manual, {}, {"toggles": {"teasing": True}})
+    assert d.toggles["teasing"] and not d.toggles["suggestive"] and d.sliders == {}
+
+
+def test_how_far_depends_on_trust_company_and_mood(world):
+    store, ids = world
+    d = _dialogue(store, ids["aela"], {"sliders": {"flirtation": 80, "suggestiveness": 80, "privacy": 90}})
+    close = D.license_for(d, D.Moment(trust=0.9, attraction=0.8))
+    crowd = D.license_for(d, D.Moment(trust=0.9, attraction=0.8, others_listening=True))
+    stranger = D.license_for(d, D.Moment())
+    sad = D.license_for(d, D.Moment(trust=0.9, attraction=0.8, mood_score=1))
+    assert close > crowd and close > stranger and close > sad
+    assert D.style_lines(d, "Aela", "D", D.Moment(), topic=False) == []        # no interest, nothing said
+
+
+def test_dialogue_editor_round_trip(world, tmp_path):
+    store, ids = world
+    sfile = SettingsFile(str(tmp_path / "personality.json"))
+    key = "Skyrim.esm|" + store.scalar("SELECT base_form_id FROM npc WHERE npc_id = ?", (ids["aela"],))
+    admin.set_dialogue(sfile, key, "toggles", "suggestive", False)
+    admin.set_dialogue(sfile, key, "sliders", "flirtation", 77)
+    admin.phrase(sfile, key, "add", "terms_of_affection", "shield-sibling")
+    admin.phrase(sfile, key, "add", "terms_of_affection", "Shield-Sibling")
+    admin.phrase(sfile, key, "remove", "expressions", "by the Nine")
+    with pytest.raises(ValueError):
+        admin.set_dialogue(sfile, key, "sliders", "flirtation", 300)
+    entry = sfile.get().npcs[key]
+    assert entry.dialogue["toggles"] == {"suggestive": False} and entry.dialogue["sliders"] == {"flirtation": 77.0}
+    assert entry.dialogue["vocabulary"]["terms_of_affection"] == ["Shield-Sibling"]
+    with store.transaction() as db:
+        shown = admin.inspect(db, sfile.get(), ids["aela"], 1)["dialogue"]
+    assert shown["toggles"]["suggestive"] is False and shown["sliders"]["flirtation"] == 77.0
+    admin.reset_dialogue(sfile, key)
+    assert sfile.get().npcs[key].dialogue == {}
+
+
+def test_service_notes_carry_dialogue_style(world, tmp_path):
+    store, ids = world
+    (tmp_path / "personality.json").write_text(json.dumps({"npcs": {"Aela": {"dialogue": {
+        "toggles": {"double_entendres": False}, "vocabulary": {"forbidden": ["wench"]}}}}}))
+    svc = PersonalityService(str(tmp_path), str(tmp_path / "personality.json"))
+    with store.transaction() as db:
+        rel(db, ids["aela"], ids["player"], gt=0.5, trust=0.7, attraction=0.6, familiarity=0.5)
+        notes = svc.notes(db, "You're beautiful, you know.", {ids["aela"]: "Aela"}, ids["player"], "D", 1)
+        standing = svc.standing(db, ids["aela"], ids["player"], "D", 1)
+    assert "double entendres" in notes[0].split("She never uses:")[1] and '"wench"' in notes[0]
+    assert any(line.startswith("Her way with flirting") for line in standing)

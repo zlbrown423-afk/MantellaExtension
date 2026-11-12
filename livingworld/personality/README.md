@@ -175,6 +175,62 @@ In game, say or type in a conversation:
 
 Turn these commands off with `MANTELLA_LW_PERSONALITY_DEBUG=0`.
 
+## Dialogue personality (`dialogue.py`)
+
+This controls how she talks when attraction comes up. It has three parts:
+
+- **16 toggles:** flirtatious, teasing, suggestive, romantic_expressions, direct_attraction, coy, confident,
+  assertive, dominant_tone, submissive_tone, double_entendres, intimate_compliments, initiate_flirtation,
+  initiate_intimate_talk, discuss_preferences, private_vocabulary.
+- **9 sliders (0-100):** flirtation, suggestiveness, playfulness, confidence, romantic_expression, assertiveness,
+  vocabulary_variety, initiative, privacy.
+- **A phrase library** with these categories: expressions, terms_of_affection, flirtatious, teasing, romantic,
+  suggestive, disliked, forbidden, custom.
+
+Precedence, strongest first:
+
+1. Toggles switched off, and forbidden words.
+2. Values set by hand under `"dialogue"` in the settings file.
+3. Her profile.
+4. Change over time. Each slider follows one profile attribute (flirtation and initiative follow initiation,
+   confidence follows sexual_confidence, and so on).
+5. Generated defaults, worked out from her generated profile and traits and seeded per woman.
+
+Generated defaults never change between conversations.
+
+How far she goes right now depends on her sliders and on the moment: her trust and attraction toward the player,
+whether others are listening (her privacy slider), her mood, and whether she is courting or partnered with the
+player. The prompt gives:
+
+- what she does, and what she never does (toggles that are off);
+- a few of her own phrases (more when vocabulary_variety is high), marked as guidance, not lines to repeat;
+- what she dislikes and never says.
+
+The phrases are re-picked from her library per player line, so she varies. In normal talk, the only dialogue
+line is a short "her way with flirting", and only when she is attracted to the player.
+
+```json
+"Aela the Huntress": {"dialogue": {
+  "toggles": {"teasing": true, "coy": false},
+  "sliders": {"confidence": 85, "privacy": 40},
+  "vocabulary": {"terms_of_affection": ["shield-sibling"], "forbidden": ["wench"]},
+  "remove": {"terms_of_affection": ["sweetling"]}
+}}
+```
+
+Switch the whole module off with `"dialogue": {"enabled": false}` at the top of the file, or for one woman with
+`"dialogue": {"enabled": false}` in her entry. Editor commands (all of them write the settings file, and changes
+take effect from the next line with no regeneration):
+
+```
+python -m livingworld.personality --world W.sqlite dialogue Aela
+python -m livingworld.personality --world W.sqlite toggle Aela suggestive off
+python -m livingworld.personality --world W.sqlite slider Aela flirtation 70
+python -m livingworld.personality --world W.sqlite phrase Aela add terms_of_affection "shield-sibling"
+python -m livingworld.personality --world W.sqlite phrase Aela remove teasing "you wish"
+python -m livingworld.personality --world W.sqlite reset-dialogue Aela
+```
+
 ## Integration points
 
 - `integration.py`:
@@ -202,5 +258,5 @@ Turn these commands off with `MANTELLA_LW_PERSONALITY_DEBUG=0`.
   "wants a word". Inside a conversation, she does take the first move when her profile and attraction say so.
 - Men have no profiles in this subsystem. Romance keeps using its own traits for them.
 - Hand-set values apply to every world. There are no per-world overrides yet.
-- The dialogue personality (vocabulary, toggles, sliders) and the intimacy action preferences with the OStim
-  adapter are the next two milestones.
+- The dialogue editor is the command line plus the JSON file. There is no in-game menu.
+- Intimacy action preferences with the OStim adapter are the next milestone.

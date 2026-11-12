@@ -9,7 +9,7 @@ import logging
 import os
 from typing import Any
 
-from livingworld.personality import admin, bridge, debug, discovery, evolve, prompt
+from livingworld.personality import admin, bridge, debug, dialogue, discovery, evolve, prompt
 from livingworld.personality import profile as P
 from livingworld.personality.config import SettingsFile, default_path
 
@@ -54,7 +54,20 @@ class PersonalityService:
         p = self.profiles(db, [npc_id], now).get(npc_id)
         if p is None:
             return []
-        return prompt.standing_lines(db, p, player_id, player_name, _sex(db, player_id))
+        lines = prompt.standing_lines(db, p, player_id, player_name, _sex(db, player_id))
+        if player_id is not None:
+            style = dialogue.style_lines(self.dialogue_of(db, p), p.name, player_name,
+                                         moment(db, p.npc_id, player_id, False, now), topic=False)
+            if style:
+                lines = style + lines if lines else style
+        return lines
+
+    def dialogue_of(self, db, p: P.Profile) -> "dialogue.Dialogue":
+        from livingworld.personality.profile import entry_for
+        from livingworld.social.traits import traits_of
+        entry = entry_for(db, self.settings(), p.npc_id)
+        return dialogue.resolve(p, traits_of(db, p.npc_id), entry.dialogue if entry else None,
+                                self.settings().dialogue_enabled)
 
     def notes(self, db, text: str, present: dict[int, str], player_id: int, player_name: str, now: float) -> list[str]:
         """Notes for the AI on the player's line, one block per woman present, only when the line is on topic."""
@@ -65,6 +78,9 @@ class PersonalityService:
             lines = prompt.topic_lines(db, p, player_id, player_name, text, listening, _sex(db, player_id))
             if not lines:
                 continue
+            style = dialogue.style_lines(self.dialogue_of(db, p), p.name, player_name,
+                                         moment(db, npc_id, player_id, listening, now), topic=True, salt=text)
+            lines = style + lines
             g = discovery.gate(db, p, player_id, listening)
             self._shareable[npc_id] = discovery.shareable(p, g)
             blocks.append(f"{p.name}'s heart and desires (hers alone; {player_name} cannot see this):\n"
@@ -123,3 +139,14 @@ def _sex(db, npc_id: int | None) -> str | None:
         return None
     row = db.execute("SELECT sex FROM npc WHERE npc_id = ?", (npc_id,)).fetchone()
     return row[0] if row else None
+
+
+def moment(db, npc_id: int, player_id: int, others_listening: bool, now: float) -> "dialogue.Moment":
+    """What weighs on how far she goes right now: her trust and attraction toward the player, company, mood."""
+    from livingworld.social.consent import _mood
+    row = db.execute("SELECT r.trust, r.attraction, b.status FROM v_relationship r JOIN relationship b"
+                     " ON b.from_id = r.from_id AND b.to_id = r.to_id WHERE r.from_id = ? AND r.to_id = ?",
+                     (npc_id, player_id)).fetchone()
+    trust, attraction, status = row if row else (0.0, 0.0, None)
+    score, _label = _mood(db, npc_id, now)
+    return dialogue.Moment(trust, attraction, others_listening, score, status in ("courting", "partner", "spouse"))

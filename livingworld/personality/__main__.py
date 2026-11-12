@@ -12,6 +12,12 @@
     python -m livingworld.personality --world W.sqlite disable Gerdur  |  enable Gerdur
     python -m livingworld.personality --world W.sqlite reset Gerdur [--clear-manual]
     python -m livingworld.personality --world W.sqlite regenerate Gerdur
+    python -m livingworld.personality --world W.sqlite dialogue Gerdur                 (her dialogue personality)
+    python -m livingworld.personality --world W.sqlite toggle Gerdur suggestive off
+    python -m livingworld.personality --world W.sqlite slider Gerdur flirtation 70
+    python -m livingworld.personality --world W.sqlite phrase Gerdur add terms_of_affection "my bear"
+    python -m livingworld.personality --world W.sqlite phrase Gerdur remove teasing "you wish"
+    python -m livingworld.personality --world W.sqlite reset-dialogue Gerdur
     python -m livingworld.personality schema > personality.schema.json
 
 The settings file defaults to personality.json next to the world database (--settings to choose another).
@@ -45,7 +51,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--world", help="the world database (.sqlite)")
     ap.add_argument("--settings", help="the settings file (default: personality.json next to the database)")
     ap.add_argument("command", choices=("list", "inspect", "history", "known", "export", "import", "set", "mode",
-                                        "enable", "disable", "reset", "regenerate", "schema"))
+                                        "enable", "disable", "reset", "regenerate", "schema", "dialogue", "toggle",
+                                        "slider", "phrase", "reset-dialogue"))
     ap.add_argument("args", nargs="*")
     ap.add_argument("--take", default="manual", choices=("manual", "values"))
     ap.add_argument("--clear-manual", action="store_true")
@@ -115,6 +122,25 @@ def main(argv: list[str] | None = None) -> int:
             admin.set_enabled(sfile, admin.key_for(db, npc), a.command == "enable", db, npc)
         elif a.command == "reset":
             admin.reset(db, sfile, one(a.args[0]), now, clear_manual=a.clear_manual)
+        elif a.command == "dialogue":
+            print(json.dumps(admin.inspect(db, settings, one(a.args[0]), now).get("dialogue", {}), indent=2,
+                             ensure_ascii=False))
+        elif a.command == "toggle":
+            npc = one(a.args[0])
+            admin.set_dialogue(sfile, admin.key_for(db, npc), "toggles", a.args[1], a.args[2].lower() in ("on", "true", "1", "yes"))
+            admin.audit(db, npc, "dialogue_toggle", {"toggle": a.args[1], "value": a.args[2]})
+        elif a.command == "slider":
+            npc = one(a.args[0])
+            admin.set_dialogue(sfile, admin.key_for(db, npc), "sliders", a.args[1], float(a.args[2]))
+            admin.audit(db, npc, "dialogue_slider", {"slider": a.args[1], "value": a.args[2]})
+        elif a.command == "phrase":
+            npc = one(a.args[0])
+            admin.phrase(sfile, admin.key_for(db, npc), a.args[1], a.args[2], " ".join(a.args[3:]))
+            admin.audit(db, npc, "dialogue_phrase", {"action": a.args[1], "category": a.args[2]})
+        elif a.command == "reset-dialogue":
+            npc = one(a.args[0])
+            admin.reset_dialogue(sfile, admin.key_for(db, npc))
+            admin.audit(db, npc, "dialogue_reset", {})
         elif a.command == "regenerate":
             print(json.dumps(admin.regenerate(db, one(a.args[0]), now), indent=2))
     store.close()
