@@ -283,7 +283,7 @@ def test_irileth_sends_her_recruit_to_caius_for_duties(tmp_path):
 def test_on_screen_notes_when_a_shift_starts_and_ends(tmp_path):
     enlisted(tmp_path)
     talk(tmp_path, DAY + 0.01)
-    assert any(h.startswith("Duty: ") and "report back to Commander Caius" in h for h in talk.hints), talk.hints
+    assert any(h.startswith("Duty: ") and "tell Commander Caius you're reporting back" in h for h in talk.hints), talk.hints
     talk(tmp_path, DAY + 0.05, npcs=[whiterun_guard()])
     assert "On duty: seen at your post (Whiterun)." in talk.hints
     talk(tmp_path, DAY + 0.3, npcs=[whiterun_guard()], location="Riverwood")

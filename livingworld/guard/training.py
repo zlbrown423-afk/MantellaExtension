@@ -58,10 +58,11 @@ class Course:
     complete_merit: float = 2.0
     early_probation: bool = True
     for_ranks: tuple[str, ...] = ()       # ranks that train (default: the first)
+    retired: tuple[Step, ...] = ()        # old steps: no longer given, but one already in hand still resolves
 
     def step(self, key: str | None) -> Step | None:
         k = (key or "").removeprefix(PREFIX)
-        return next((s for s in self.steps if s.key == k), None)
+        return next((s for s in self.steps + self.retired if s.key == k), None)
 
 
 @functools.lru_cache(maxsize=None)
@@ -71,14 +72,16 @@ def course(org_key: str) -> Course:
         return Course()
     raw = json.loads(resources.files("livingworld.guard").joinpath("data", org.duty_file).read_text(encoding="utf-8"))
     t = raw.get("training") or {}
-    steps = tuple(Step(s["key"], s["title"], s.get("why", ""), s.get("instructions", ""), tuple(s.get("where") or ()),
-                       s.get("need", "seen"), float(s.get("shift_hours", 2)), float(s.get("merit", 0.5)))
-                  for s in t.get("steps") or ())
+    def steps_of(name: str) -> tuple[Step, ...]:
+        return tuple(Step(s["key"], s["title"], s.get("why", ""), s.get("instructions", ""),
+                          tuple(s.get("where") or ()), s.get("need", "seen"), float(s.get("shift_hours", 2)),
+                          float(s.get("merit", 0.5))) for s in t.get(name) or ())
+    steps = steps_of("steps")
     qs = tuple(Question(q["key"], q["ask"], q.get("answer", ""), tuple(w.lower() for w in q.get("words") or ()))
                for q in t.get("questions") or ())
     return Course(steps, qs, int(t.get("pass_right", 2)), int(t.get("fail_wrong", 3)),
                   float(t.get("complete_merit", 2.0)), bool(t.get("early_probation", True)),
-                  tuple(t.get("for_ranks") or ([org.ranks[0].key] if org.ranks else [])))
+                  tuple(t.get("for_ranks") or ([org.ranks[0].key] if org.ranks else [])), steps_of("retired_steps"))
 
 
 def is_training(template: str | None) -> bool:
