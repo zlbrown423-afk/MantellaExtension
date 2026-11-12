@@ -578,3 +578,12 @@ An NPC can agree in the conversation to being hugged or touched, and then it rea
 | Going further | A hand on a sensitive place outside the agreement (`consent=breach`, `allowed=`) ends it on the spot and is remembered as worse than a grab: they had trusted the player with less |
 
 Off switch: `MANTELLA_LW_TOUCH_CONSENT=0` (the actions are not offered and the game side is off).
+## Personality profiles (adult women)
+
+Individual, persistent profiles for adult women: desire, confidence, initiation, selectiveness, privacy, romance,
+ease with closeness, faithfulness, pace, what draws and repels her, and her boundaries. Modes are manual,
+automatic and hybrid, and hand-set values always win. Profiles change slowly with what happens to her, on the save
+timeline. The player discovers them through trust: private, suspected, known, or a disclosed boundary. Romance and
+consent read the profile, and desire is never a yes. Settings file: `data/livingworld/personality.json`. Admin
+tool: `python -m livingworld.personality`. Migration 017. Off with `MANTELLA_LW_PERSONALITY=0`. Full details:
+`livingworld/personality/README.md`.

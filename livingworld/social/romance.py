@@ -105,7 +105,8 @@ def traits(db, npc_id: int) -> dict:
     out["sex"] = sex
     if "attracted_to" not in out:
         out["attracted_to"] = [{"male": "female", "female": "male"}[sex]] if sex in ("male", "female") else []
-    return out
+    from livingworld.personality.bridge import romance_traits as profile_traits   # adult women's profiles win
+    return profile_traits(db, npc_id, out)
 
 
 def rel(db, a: int, b: int) -> dict:
