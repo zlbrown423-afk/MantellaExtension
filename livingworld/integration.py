@@ -43,7 +43,7 @@ from livingworld.intimacy import intimacy_enabled
 from livingworld.store.minors import is_child
 from livingworld.intimacy import scenes as intimate_scenes
 from livingworld.intimacy import confront
-from livingworld.guard import decency, enlist_words, training_words, uniform
+from livingworld.guard import decency, enlist_words, names as guard_names, training_words, uniform
 from livingworld.social import side_jobs, surrender, wingman
 from livingworld.bodylang.peek import KEY_PEEK_ON, peek_enabled
 from livingworld.guard.profiles import GuardFacts
@@ -222,6 +222,8 @@ class LivingWorld:
         self._fog_game = False                      # the game build hides names (it sends the player's fog label)
         self.diary = enabled and diary.diary_enabled()   # private diaries (livingworld/diary); MANTELLA_LW_DIARY=0 off
         self._ref_raw: dict[str, int] = {}          # Mantella's 6-digit ref id -> the form ID exactly as the game sent it
+        self.guard_names = self.guard and guard_names.enabled()   # generic guards show their own name; MANTELLA_LW_GUARD_NAMES=0 off
+        self._guard_names_sent: dict[int, str] = {}  # npc_id -> the name sent to the game this conversation
         self._bios: dict[int, str] = {}             # npc_id -> Mantella bio, for the diary writer
         LivingWorld.latest = self
 
@@ -442,6 +444,7 @@ class LivingWorld:
         self._moods_shown = {}
         self._moods_to_send = {}
         self._guard_sent = set()
+        self._guard_names_sent = {}
         self._held_actions = {}
         self._player_said = None
         self._help_offered = False
@@ -1125,6 +1128,7 @@ class LivingWorld:
             except Exception:
                 self.errors += 1
                 logger.exception("Living World: could not check an NPC line for names and places; carrying on")
+        keys.update(self._guard_name_keys())
         profiles = self._body_profiles()
         if profiles:
             keys[KEY_BODY] = profiles
@@ -1251,6 +1255,8 @@ class LivingWorld:
                 logger.exception("Living World: could not list the people the player knows; carrying on")
         self._fog_reveal = []
         self._fog_notes = []
+        keys[guard_names.KEY_ON] = bool(self.guard_names)
+        keys.update(self._guard_name_keys())
         keys.update(self._diary_keys())
         return keys
 
@@ -1401,6 +1407,10 @@ class LivingWorld:
             with self.store.transaction() as db:
                 self._fog_note(fog_names.player_line(db, player_p, text.strip(), present, context.game_days,
                                                      self.conv_id))
+                if self.guard_names:
+                    for line in guard_names.player_line(db, text.strip(), [p.npc_id for p in present],
+                                                        player_p.npc_id, context.game_days, self.conv_id):
+                        logger.log(23, f"Living World guard names: {line}")
         notes, self._fog_notes = self._fog_notes, []
         return notes
 
@@ -1416,6 +1426,10 @@ class LivingWorld:
                 if speaker is not None:
                     self._fog_note(fog_names.npc_line(db, speaker, text, present, player_p, context.game_days,
                                                       self.conv_id))
+                    if self.guard_names:
+                        for line in guard_names.npc_line(db, speaker.npc_id, text, [p.npc_id for p in present],
+                                                         player_p.npc_id, context.game_days, self.conv_id):
+                            logger.log(23, f"Living World guard names: {line}")
                     markers = fog_places.npc_line(db, text, speaker.npc_id, context.game_days, self.conv_id)
                     if markers:
                         keys[fog.KEY_FOG_MARKER_IDS] = [m.form_int for m in markers]
@@ -1427,6 +1441,38 @@ class LivingWorld:
             keys[fog.KEY_FOG_REVEAL] = self._fog_reveal
             self._fog_reveal = []
         return keys
+
+    def _guard_name_keys(self) -> dict[str, Any]:
+        """Guards in this conversation the game should now show by their own name (livingworld/guard/names.py):
+        each one once per conversation, keyed by the reference form ID exactly as the game sent it."""
+        context = self._context
+        if not self.guard_names or self.store is None or context is None:
+            return {}
+        ids: list[int] = []
+        shown: list[str] = []
+        try:
+            people = [c for c in context.npcs_in_conversation.get_all_characters()
+                      if not c.is_player_character and c.ref_id in self._npc_ids and c.ref_id in self._ref_raw]
+            if not people:
+                return {}
+            player = context.npcs_in_conversation.get_player_character()
+            player_id = self._npc_ids.get(player.ref_id) if player is not None else None
+            with self.store.reading() as db:
+                for c in people:
+                    npc_id = self._npc_ids[c.ref_id]
+                    name = guard_names.shown(db, npc_id, player_id, self._fog_active())
+                    if name and self._guard_names_sent.get(npc_id) != name:
+                        self._guard_names_sent[npc_id] = name
+                        ids.append(self._ref_raw[c.ref_id])
+                        shown.append(name)
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not work out which guards to show by name; carrying on")
+            return {}
+        if not ids:
+            return {}
+        logger.log(23, f"Living World guard names: showing {', '.join(shown)}")
+        return {guard_names.KEY_IDS: ids, guard_names.KEY_NAMES: shown}
 
     def _wants_a_word(self) -> str:
         """'Gerdur|Skyrim.esm|0x0001347C;...': people with work they would offer the player now."""
