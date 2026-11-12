@@ -382,6 +382,24 @@ one goes to the NPC you made it to as a presence record, like the rest:
 `MANTELLA_LW_GESTURES=0` turns gestures off; `MANTELLA_LW_GESTURE_NOTICES=0` stops the game showing a
 notice for each gesture it recognised (shown by default while the thresholds are tuned in game).
 
+### Handshake, salute and adult gestures
+
+Three more groups, read in the same VRIK tick but each behind its own switch, independent of
+`MANTELLA_LW_GESTURES` (so the set above can stay off while these are on):
+
+| Gesture | Switch | How the game reads it | What happens |
+| --- | --- | --- | --- |
+| `handshake` | `MANTELLA_LW_HANDSHAKE` (on unless `0`) | open right hand (grip let go) held out still toward someone within 1.8 m, about waist height | someone willing (not hostile, not disliking you, not guarded, not fighting, sitting or in a scene) holds out their hand (IdleGive, Skyrim.esm 0x0B5E20; Skyrim has no handshake animation); for 8 s a HIGGS hold on their hand is an agreed handshake (`consent=handshake`, remembered as "shook my hand") |
+| `salute` | `MANTELLA_LW_SALUTE` (on unless `0`) | flat hand at the brow, or a fist over the heart, held still | a guard returns it (IdleSalute, Skyrim.esm 0x0B240C); the NPC is told either way |
+| `stroke` | `MANTELLA_LW_ADULT_GESTURES` (off unless `1`) | closed right hand at your own groin moving back and forth; five strokes make one | the NPC you face is told, in plain words; `n` counts sets in a row |
+| `point_down` | `MANTELLA_LW_ADULT_GESTURES` | index finger pointing down at your own groin | the NPC's eyes follow it for 2 s, and they are told |
+
+The adult two are adults only (the game never sends one about a child, and the server drops any that
+come), never during an intimate scene, and only ever tell the NPC what happened. The prompt says how they
+take it is theirs alone (their personality, boundaries and how they feel about you) and that it obliges
+them to nothing; nothing is started or agreed because of them. Modest, reserved people are the most
+embarrassed; someone close to you much less; someone hostile is annoyed.
+
 ## Intimate scenes (OStim)
 
 NPCs know when an OStim scene is running, who is in it and what is happening in it (kissing, sex, spanking

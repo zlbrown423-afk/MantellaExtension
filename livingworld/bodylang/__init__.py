@@ -17,6 +17,12 @@ Step 2 (BL2) adds the player's hand and head gestures, read in VR through VRIK: 
 point, beckon, hands up, thumbs up and thumbs down. They are presence records like the rest, so the same
 guards hold (the game adds a cooldown per gesture).
 
+Later gestures have switches of their own, independent of ``MANTELLA_LW_GESTURES`` (so the BL2 set can stay
+off while these are on): ``MANTELLA_LW_HANDSHAKE`` (offering a hand to shake; on unless ``0``),
+``MANTELLA_LW_SALUTE`` (a salute, returned by guards; on unless ``0``) and ``MANTELLA_LW_ADULT_GESTURES``
+(adult-only, OFF unless ``1``: a stroking motion at the groin and pointing down at it, which the NPC's eyes
+follow). See ``presence.py``.
+
 ``MANTELLA_LW_BODY_LANGUAGE=0`` turns all of it off, the mood clamp included. ``MANTELLA_LW_GESTURES=0``
 turns off only the gestures, and ``MANTELLA_LW_GESTURE_NOTICES=0`` stops the game showing each gesture it
 recognised (on while gestures are being tuned).
@@ -28,7 +34,11 @@ import os
 ENV = "MANTELLA_LW_BODY_LANGUAGE"
 ENV_GESTURES = "MANTELLA_LW_GESTURES"
 ENV_GESTURE_NOTICES = "MANTELLA_LW_GESTURE_NOTICES"
+ENV_HANDSHAKE = "MANTELLA_LW_HANDSHAKE"
+ENV_SALUTE = "MANTELLA_LW_SALUTE"
+ENV_ADULT_GESTURES = "MANTELLA_LW_ADULT_GESTURES"
 _OFF = {"0", "false", "no", "off"}
+_ON = {"1", "true", "yes", "on"}
 
 
 def body_language_enabled() -> bool:
@@ -41,3 +51,16 @@ def gestures_enabled() -> bool:
 
 def gesture_notices() -> bool:
     return os.environ.get(ENV_GESTURE_NOTICES, "").strip().lower() not in _OFF
+
+
+def handshake_enabled() -> bool:
+    return body_language_enabled() and os.environ.get(ENV_HANDSHAKE, "").strip().lower() not in _OFF
+
+
+def salute_enabled() -> bool:
+    return body_language_enabled() and os.environ.get(ENV_SALUTE, "").strip().lower() not in _OFF
+
+
+def adult_gestures_enabled() -> bool:
+    """Off unless switched on (``MANTELLA_LW_ADULT_GESTURES=1``)."""
+    return body_language_enabled() and os.environ.get(ENV_ADULT_GESTURES, "").strip().lower() in _ON
