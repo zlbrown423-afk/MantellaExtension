@@ -55,8 +55,9 @@ def recruit_lines(name: str, player: str, d: R.Decision, recruiters: list[str], 
         out = [f"If {player} asks to join {org.name}, {name} is willing to take them on as a "
                f"{org.ranks[0].title} on probation for {org.probation_days:g} days.{how} {name} may ask a question or "
                f"two first, and expects a recruit to keep the peace, follow orders and serve the Jarl. If {name} accepts "
-               f"and {player} still wants it, begin the reply with '{ENLIST_KEY}:'. A recruit gets the guard's "
-               f"armour, but no authority over anyone yet."]
+               f"and {player} still wants it, begin the reply with '{ENLIST_KEY}:'. That hands {player} the guard's "
+               f"armour, helmet, shield and sword then and there, so there is nothing to fetch from the barracks and "
+               f"no reason to put it off. A recruit has no authority over anyone yet."]
         boss = org.superior(org.ranks[0].key)
         if boss is not None:
             out[0] += (f" A recruit takes duties and wages from {boss.name}" +

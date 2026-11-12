@@ -39,6 +39,10 @@ _PATTERNS = (
     re.compile(r"\bwelcome\b[^.!?;]{0,40}?\bas\s+(?:a|our|the)\s+(?:new\s+)?recruit\b", re.IGNORECASE),
     re.compile(r"\byou\s*(?:'re|\s+are)\s+(?:now\s+)?(?:a\s+(?:new\s+)?recruit|one\s+of\s+us|part\s+of\s+the\s+(?:\w+\s+)?guard"
                r"|a\s+member\s+of\s+the\s+(?:\w+\s+)?guard)\b", re.IGNORECASE),
+    re.compile(_LEAD + _GAP + r"\b(?:provide|give|hand|issue|get|fetch|equip|outfit|kit)\s+you\b[^.!?;]{0,25}?"
+               r"\b(?:armou?r|uniform|gear|kit|equipment)\b", re.IGNORECASE),
+    re.compile(_LEAD + _GAP + r"\b(?:suit|gear|kit)\s+you\s+up\b", re.IGNORECASE),
+    re.compile(r"\b(?:enlist(?:ment|ed)?|recruit)\b[^.!?;]{0,40}?\bit\s+is\b", re.IGNORECASE),
     re.compile(r"\bhere\s*(?:'s|\s+is|\s+are)\s+(?:your|the)\s+(?:new\s+)?(?:armou?r|uniform|gear|kit|equipment)\b", re.IGNORECASE),
 )
 _NOT_NOW = re.compile(r"\b(?:not|never|no|if|once|unless|later|tomorrow|after|when|first|until|before|would|could|might"

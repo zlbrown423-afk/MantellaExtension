@@ -45,10 +45,17 @@ def test_what_counts():
     yes = ["I'll enlist you as a recruit for a probationary period of seven days.",
            "Here's your armor.", "Here is your uniform, recruit.", "Welcome to the Whiterun Guard.",
            "I hereby welcome you as a recruit of the Whiterun Guard.", "You're one of us now.",
-           "Very well, I'll take you on."]
+           "Very well, I'll take you on.",
+           # 2026-11-12 in game, after a reload to before enlisting
+           "Enlist in the Whiterun guard it is.", "I will provide you with your gear and your duties as a recruit.",
+           "Excellent, Zachary. I will get you suited up in your new armor."]
     no = ["If you've enlisted as a recruit, then yes, you will receive your armor and gear.",
           "Will you swear to serve the Jarl?", "I won't enlist the likes of you.",
           "I'll enlist you once you've proven yourself.", "We can get you your armor and begin your duties.",
-          "Prove yourself first, and I'll take you on.", "Training is essential for a guard."]
+          "Prove yourself first, and I'll take you on.", "Training is essential for a guard.",
+          "If you're here to start your recruit training, then let's get you geared up.",
+          "Let's head to the barracks where I can hand over your gear.",
+          "We can stop by after you're geared up.", "Your gear will be provided to you, Zachary.",
+          "If you're looking for your gear, best ask Commander Caius."]
     assert [t for t in yes if not EW.says_enlisted(t)] == []
     assert [t for t in no if EW.says_enlisted(t)] == []
