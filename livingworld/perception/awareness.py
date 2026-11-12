@@ -38,6 +38,7 @@ class AttireNow:
     is_player: bool = False
     erect: bool = False                               # the player: visibly aroused (intimacy/arousal.py)
     eyes_covered: bool = False                        # the player: eyes covered (LWCoverEyes)
+    body: str | None = None                           # the body-slot item, as the game named it
 
 
 def snapshot(records: list[PerceptionRecord], ids: dict[int, int], witness_ids: dict[int, int]) -> dict[int, AttireNow]:
@@ -50,7 +51,7 @@ def snapshot(records: list[PerceptionRecord], ids: dict[int, int], witness_ids: 
         from livingworld.intimacy import size as sizes
         size = sizes.from_scale(record.player_size) if record.actor.is_player else None
         result[npc_id] = AttireNow(npc_id, record.actor.name, record.cover != "none", seen_by, record.sex, size,
-                                   record.actor.is_player, record.erect, record.eyes_covered)
+                                   record.actor.is_player, record.erect, record.eyes_covered, record.body)
     return result
 
 

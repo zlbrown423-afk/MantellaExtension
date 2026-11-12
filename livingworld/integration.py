@@ -43,7 +43,7 @@ from livingworld.intimacy import intimacy_enabled
 from livingworld.store.minors import is_child
 from livingworld.intimacy import scenes as intimate_scenes
 from livingworld.intimacy import confront
-from livingworld.guard import decency, enlist_words, training_words
+from livingworld.guard import decency, enlist_words, training_words, uniform
 from livingworld.social import side_jobs, surrender, wingman
 from livingworld.bodylang.peek import KEY_PEEK_ON, peek_enabled
 from livingworld.guard.profiles import GuardFacts
@@ -678,6 +678,9 @@ class LivingWorld:
                                   f"their days and the people in them. They carry it or leave it at home, and "
                                   f"would be upset to find anyone had read it.")
             guard = self._guard_lines(npc_id, character.name)
+            uni = self._uniform_lines(npc_id, character.name, player_id, player.name if player else "the player")
+            if uni:
+                guard = uni + guard
             if guard:
                 blocks.append(f"The guard, and {character.name}:\n" + "\n".join(f"- {line}" for line in guard))
         if self.place and player is not None:
@@ -883,6 +886,45 @@ class LivingWorld:
         except Exception:
             self.errors += 1
             logger.exception("Living World: guard upkeep failed; carrying on")
+
+    def _uniform_lines(self, npc_id: int, name: str, player_id: int | None, player_name: str) -> list[str]:
+        """The player is in a guard's or soldier's uniform: what this NPC takes them for and how they feel about
+        that force (guard/uniform.py)."""
+        if not self.guard or not uniform.enabled() or player_id is None or npc_id == player_id:
+            return []
+        try:
+            mine = self._attire_now.get(player_id)
+            location = getattr(self._context, "location", None)
+            u = uniform.uniform_for(mine.body if mine and mine.covered else None, location)
+            if u is None:
+                return []
+            from livingworld.guard import profiles as guard_profiles, store as guard_store
+            with self.store.reading() as db:
+                if is_child(db, npc_id):
+                    return []
+                row = db.execute("SELECT race FROM npc WHERE npc_id = ?", (npc_id,)).fetchone()
+                svc = guard_store.current(db, player_id)
+                serves = bool(u.org and svc is not None and svc.org_key == u.org
+                              and svc.status in ("probation", "active"))
+                prof = guard_profiles.get(db, npc_id)
+                member = prof is not None and prof.org_key == u.org
+                if serves and member:
+                    return []          # a fellow guard: the guard lines say all of it
+                if not member and u.org is None and u.city_guard:
+                    f = self._guard_facts.get(next((c.ref_id for c in self._context.npcs_in_conversation
+                                                    .get_all_characters() if self._npc_ids.get(c.ref_id) == npc_id), None))
+                    member = bool(f and f.is_guard and uniform.hold_of(location) == u.hold)
+                rel = db.execute("SELECT familiarity FROM relationship WHERE from_id = ? AND to_id = ?",
+                                 (npc_id, player_id)).fetchone()
+                knows = bool(rel and rel[0] >= 0.1)
+                reg = uniform.regard(db, npc_id, player_id)
+            att = uniform.attitude(u, name, row[0] if row else None, location)
+            return uniform.lines(name, player_name, u, serves=serves, is_member=member, knows_player=knows,
+                                 att=att, reg=reg)
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not add uniform lines; leaving them out")
+            return []
 
     def _guard_lines(self, npc_id: int, name: str) -> list[str]:
         if not self.guard:
