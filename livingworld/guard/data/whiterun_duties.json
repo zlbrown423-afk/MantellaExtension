@@ -1,5 +1,5 @@
 {
-  "_about": "Duties the Whiterun Guard hands its members, read by guard/duty.py. Edit freely. A member's superior (the lowest-ranked leader above them in orgs.json) gives one duty at a time when the member comes to them: only duties whose hours include the current hour, whose rank range fits (min_rank..max_rank, null = no limit) and that differ from the member's last duty. A shift lasts shift_hours from when it is given. The member counts as at their post when a conversation happens at a location whose name contains one of 'where' during the shift (the game reports the location with every conversation). Reporting back before half the shift has passed counts as leaving early. A report with no sign of the member at their post is a false report. merit is what an honest, completed duty adds to the service record (a missed one costs missed_merit, a false report false_merit).",
+  "_about": "Duties the Whiterun Guard hands its members, read by guard/duty.py. Edit freely. A member's superior (the lowest-ranked leader above them in orgs.json) gives one duty at a time when the member comes to them: only duties whose hours include the current hour, whose rank range fits (min_rank..max_rank, null = no limit) and that differ from the member's last duty. A shift lasts shift_hours from when it is given. The member counts as at their post when a conversation happens at a location whose name contains one of 'where' during the shift (the game reports the location with every conversation). Reporting back before half the shift has passed counts as leaving early. A report with no sign of the member at their post is a false report. merit is what an honest, completed duty adds to the service record (a missed one costs missed_merit, a false report false_merit). Some duties only go to higher ranks (min_rank): sergeants inspect the posts and lead the night watch, lieutenants report to the Jarl's council.",
   "missed_merit": -2.0,
   "false_merit": -3.0,
   "early_merit": -1.0,
@@ -122,6 +122,54 @@
       "shift_hours": 6,
       "min_rank": "guardsman",
       "merit": 1.0
+    },
+    {
+      "key": "inspect_posts",
+      "title": "inspect the guard posts around the city",
+      "why": "A sergeant answers for the guards under them, and Caius wants to know the gate and wall posts are kept",
+      "instructions": "Walk the gate, the wall and the market posts, check that each guard is awake, sober and where they should be, and bring Caius anything amiss.",
+      "where": [
+        "Whiterun"
+      ],
+      "hours": [
+        8,
+        20
+      ],
+      "shift_hours": 4,
+      "min_rank": "sergeant",
+      "merit": 1.5
+    },
+    {
+      "key": "lead_night_watch",
+      "title": "lead the night watch",
+      "why": "The night watch needs someone in charge who will not doze off at the gate",
+      "instructions": "Take charge of the night watch: post the guards, walk the walls and keep them sharp until the morning shift relieves you.",
+      "where": [
+        "Whiterun"
+      ],
+      "hours": [
+        20,
+        6
+      ],
+      "shift_hours": 6,
+      "min_rank": "sergeant",
+      "merit": 2.0
+    },
+    {
+      "key": "council_report",
+      "title": "report on the city watch at the Jarl's council",
+      "why": "The Jarl and his steward want to hear from an officer how the city is kept, not just from the Commander",
+      "instructions": "Go up to Dragonsreach, sit in on the Jarl's council and answer for the state of the watch, the gates and any trouble in the city.",
+      "where": [
+        "Dragonsreach"
+      ],
+      "hours": [
+        9,
+        18
+      ],
+      "shift_hours": 3,
+      "min_rank": "lieutenant",
+      "merit": 2.0
     }
   ],
   "_about_incidents": "Incidents (G2d, guard/incident.py): trouble the guard is sent to deal with. Each game day every kind is rolled once (chance); at most one of each kind is open. The member's superior gives an open incident as a duty ahead of routine duties, at any hour, if the member's rank is at least min_rank. need 'seen' = done by being at a place in 'where' (a conversation there); need 'fight' = done only by fighting there. Reporting back after that closes it (outcome arrested / cleared, which gossip carries); merit as for duties. It goes cold after lasts_days if nobody takes it. {complainant} and {camp} are filled from the lists.",

@@ -14,6 +14,10 @@
 * "debug guard training"                                - count recruit training as done (skip it)
 * "debug guard watch"                                   - bring the shift's watch windows forward: in a few
                                                           game minutes two people come over, then you notice something
+* "debug guard board"                                   - run the promotion board now: what the next rank still needs
+                                                          (on screen, and every check in the server log)
+* "debug guard promote"                                 - make a promotion to the next rank due now, skipping the
+                                                          board: your superior announces it when you next talk
 
 "debug" (or "test") and "guard" must both be in the line, so normal speech never triggers it. The hold
 defaults to the hold of a guard leader or guard in the conversation, else the first configured hold.
@@ -27,7 +31,7 @@ from dataclasses import dataclass
 from livingworld.guard import orgs as O
 
 COMMANDS = ("enlist", "rank", "dismiss", "reinstate", "thane", "status", "duty", "seen", "report", "pay", "record",
-            "probation", "incident", "watch", "training", "suspect")
+            "probation", "incident", "watch", "training", "suspect", "board", "promote")
 
 
 @dataclass(frozen=True)

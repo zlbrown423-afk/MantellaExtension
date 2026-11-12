@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from livingworld.guard import arrest as AR, debug as D, duty as DU, encounter as ENC, incident as INC, reports as RP, training as TR, orgs as O, peace as PEACE, prompts as P, profiles, recruit as R, store as S
+from livingworld.guard import arrest as AR, debug as D, duty as DU, encounter as ENC, incident as INC, reports as RP, training as TR, orgs as O, peace as PEACE, promotion as PR, prompts as P, profiles, recruit as R, store as S
 from livingworld.guard.profiles import GuardFacts
 from livingworld.social import claims, processor
 from livingworld.store.minors import is_child
@@ -82,6 +82,8 @@ class Guard:
         self.release_orders: list[int] = []          # G2f: arrest ids whose prisoner the game lets out now
         self.bookings: list[AR.Booking] = []         # G2f: prisoners booked with the superior this conversation
         self._first_orders: int | None = None        # service id enlisted in this conversation, first duty not given yet
+        self.promoted: tuple[str, str, int] | None = None   # G3: (rank from, rank to, superior) given this conversation
+        self._declined: tuple[str, str] | None = None        # G3: (from, to) turned down this conversation
 
     def take_notices(self) -> list[str]:
         out, self.notices = self.notices, []
@@ -279,6 +281,7 @@ class Guard:
         if scene.player_id is None:
             return 0
         if scene.said:
+            self._promotion_answer(scene)
             self._quiz_or_report(scene)
         if not self._encounters:
             return 0
@@ -289,6 +292,21 @@ class Guard:
                     n += 1
                     del self._encounters[npc_id]
         return n
+
+    def _promotion_answer(self, scene: Scene) -> None:
+        """G3: the player turns down the promotion their superior just gave them."""
+        if self.promoted is None or not PR.declines(scene.said):
+            return
+        frm, to, boss = self.promoted
+        with self.store.transaction() as db:
+            svc = S.current(db, scene.player_id)
+            org = O.by_key(svc.org_key) if svc else None
+            if org is None or svc.rank_key != to:
+                return
+            PR.decline(db, org, svc, frm, boss, scene.now)
+        self.promoted = None
+        self._declined = (frm, to)
+        self.notices.append(f"Promotion turned down: you stay {org.a_title(frm)}.")
 
     def _quiz_or_report(self, scene: Scene) -> None:
         with self.store.transaction() as db:
@@ -318,7 +336,18 @@ class Guard:
             processor.process(db, {"appraisal": claims.appraise})
 
     def ended(self, scene: Scene) -> RP.Judged | None:
-        """At the end of a conversation: keep what the player said after a filed report as their written report."""
+        """At the end of a conversation: a promotion given in it becomes news (G3), and what the player said after
+        a filed report is kept as their written report."""
+        if self.promoted is not None and scene.player_id is not None:
+            frm, to, boss = self.promoted
+            self.promoted = None
+            with self.store.transaction() as db:
+                svc = S.current(db, scene.player_id)
+                org = O.by_key(svc.org_key) if svc else None
+                if org is not None and svc.rank_key == to:
+                    PR.announce(db, org, svc, frm, boss, scene.now, scene.location,
+                                [i for i in scene.present if i != scene.player_id])
+                    processor.process(db, {"appraisal": claims.appraise})
         lines, self._report_lines = self._report_lines, []
         if not lines or self.filed is None or self.filed.task is None or scene.player_id is None:
             return None
@@ -368,6 +397,12 @@ class Guard:
             if person is not None:
                 out.append(P.report_to_line(name, player, person.name))
             return out
+        if self.promoted is not None and self.promoted[1] == svc.rank_key:
+            out.append(P.promoted_line(name, player, org, self.promoted[0], svc.rank_key))
+        elif self._declined is not None:
+            out.append(P.declined_line(name, player, org, *self._declined))
+        elif PR.enabled() and svc.status in ("probation", "active"):
+            out.append(P.board_line(name, player, PR.board(db, org, svc, scene.now)))
         if self.filed is not None and self.filed.task is not None:
             out.append(P.filed_line(name, player, self.filed, self.summary))
         if self.bookings:
@@ -449,6 +484,8 @@ class Guard:
         self._encounters = {}
         self._report_lines = []
         self.bookings = []
+        self.promoted = None
+        self._declined = None
         with self.store.transaction() as db:
             svc = S.current(db, scene.player_id) if scene.player_id is not None else None
             org = O.by_key(svc.org_key) if svc else None
@@ -509,8 +546,27 @@ class Guard:
                 elif scene.now >= half and DU.seen_count(db, held) > 0:
                     self.notices.append(f"You may report back to {boss_name} now "
                                         f"({P.hours_text(end - scene.now)} of the shift left).")
+            if org is not None and svc is not None and PR.enabled():
+                self._promotion_board(db, org, S.get(db, svc.service_id), boss, scene, result)
             processor.process(db, {"appraisal": claims.appraise})
         return result
+
+    def _promotion_board(self, db, org: O.Org, svc: S.Service, boss: int | None, scene: Scene,
+                         result: dict[str, list[int]]) -> None:
+        """G3: run the board; with the superior here, a promotion that is due takes effect now."""
+        offered = PR.run(db, org, svc, scene.now)
+        if offered:
+            result["promotion_due"] = [svc.service_id]
+        if boss is not None and boss in scene.present:
+            took = PR.take(db, org, svc, boss, scene.now)
+            if took:
+                self.promoted = (took[0], took[1], boss)
+                result["promoted"] = [svc.service_id]
+                self.notices.append(f"Promoted: {self._name(db, boss) or 'your superior'} names you "
+                                    f"{org.title(took[1])} of {org.name}. (Say you decline to turn it down.)")
+                return
+        if self.filed is not None and self.filed.outcome == "done":
+            self.notices.append(PR.short(PR.board(db, org, S.get(db, svc.service_id), scene.now)))
 
     def leader_for(self, npc_id: int, scene: Scene) -> int:
         """``npc_id`` if they can take people on; else the only leader present who can (the action means them)."""
@@ -631,7 +687,11 @@ class Guard:
             if svc is not None:
                 org = O.by_key(svc.org_key)
                 boss = DU.superior_id(db, org, svc) if org else None
-                if boss is None or boss in scene.present or not all(c.ok for c in DU.checks(db, org, svc, scene.now)):
+                if boss is None or boss in scene.present:
+                    return []
+                if PR.enabled() and PR.pending(db, svc) is not None:
+                    return [boss]                         # G3: news of a promotion
+                if not all(c.ok for c in DU.checks(db, org, svc, scene.now)):
                     return []
                 prev = DU.last(db, svc.member_id)
                 return [boss] if DU.pick(org, svc, prev.template if prev else None, scene.now) else []
@@ -672,6 +732,8 @@ class Guard:
                 return f"watch windows of duty {held.task_id} brought forward (sent with the next line)"
             if cmd.verb == "suspect":
                 return self._debug_suspect(db, org, svc, scene)
+            if cmd.verb == "board" and svc is not None and O.by_key(svc.org_key) is not None:
+                self.notices.append(PR.short(PR.board(db, O.by_key(svc.org_key), svc, scene.now)))
             return run(db, cmd, org, scene.player_id, scene.now, scene.location)
 
 
@@ -700,6 +762,19 @@ def run(db, cmd: D.Command, org: O.Org, player_id: int, now: float, location: st
         o = O.by_key(svc.org_key)
         return (f"{o.name if o else svc.org_key}: {o.title(svc.rank_key) if o else svc.rank_key}, {svc.status}, "
                 f"joined day {svc.joined_gt:.2f} ({svc.path}), merit {svc.merit:g}")
+    if cmd.verb in ("board", "promote"):
+        o = O.by_key(svc.org_key) if svc else None
+        if svc is None or o is None:
+            return "not serving"
+        if cmd.verb == "board":
+            return " | ".join(PR.explain(PR.board(db, o, svc, now)))
+        target = o.next_rank(svc.rank_key)
+        if target is None:
+            return f"already {o.a_title(svc.rank_key)}, the highest rank"
+        if PR.pending(db, svc) is not None:
+            return f"a promotion to {o.title(PR.pending(db, svc))} is already due: talk to your superior"
+        PR.offer(db, o, svc, target, now, source="admin")
+        return f"promotion to {target.title} due: your superior announces it when you next talk"
     if cmd.verb == "thane":
         S.event(db, "thane", [player_id], {"org": org.key, "hold": org.hold}, now, location, source="admin")
         return f"player counts as thane of {org.hold}"

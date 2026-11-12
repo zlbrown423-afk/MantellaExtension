@@ -344,3 +344,45 @@ def booked_line(name: str, player: str, bookings) -> str:
 def prisoners_line(name: str, org: O.Org, held, jail_name: str) -> str:
     who = ", ".join(f"{a.name} ({a.charge or 'no charge'})" for a, _ in held)
     return f"In the cells of {jail_name} right now: {who}."
+
+
+# ---- G3 promotions ----
+
+def promoted_line(name: str, player: str, org: O.Org, frm: str, to: str) -> str:
+    return (f"{name} has just promoted {player} from {org.title(frm)} to {org.title(to)} of {org.name}: the promotion "
+            f"board found {player}'s service worthy of it. {name} tells {player} so now, in their own words, before "
+            f"anything else, and may say what the new rank asks of them. It is already recorded. If {player} turns it "
+            f"down, {name} accepts that, and {player} stays {org.a_title(frm)}.")
+
+
+def declined_line(name: str, player: str, org: O.Org, frm: str, to: str) -> str:
+    return (f"{player} has just turned down promotion to {org.title(to)} and stays {org.a_title(frm)}. {name} accepts "
+            f"it, in character; the board may offer it again in time.")
+
+
+_BOARD_SAY = {
+    "status": "finishing probation",
+    "training": "finishing recruit training",
+    "clean": "a stretch without reprimands",
+    "seat": "an open seat at that rank",
+}
+
+
+def board_line(name: str, player: str, b) -> str:
+    """What the superior can tell the member about promotion: the next rank and what it still needs."""
+    if b.target is None:
+        return f"{player} holds the highest rank in {b.org.name}; there is no promotion above it."
+    if b.ok:
+        return (f"{player} has passed the promotion board for {b.target.title}; {name} will see to it the next time "
+                f"they speak.")
+    missing = []
+    for c in b.missing[:4]:
+        if c.name == "view":
+            missing.append(f"{name}'s own good opinion, which {player} has not yet earned")
+        elif c.name == "jarl":
+            missing.append("the Jarl's favour")
+        else:
+            missing.append(_BOARD_SAY.get(c.name, c.why))
+    return (f"If {player} asks about promotion, {name} can say plainly what the next rank, {b.target.title}, still "
+            f"needs: " + "; ".join(missing) + ". Promotion comes from the guard's rules, not from asking; "
+            f"{name} cannot promote {player} on the spot.")
