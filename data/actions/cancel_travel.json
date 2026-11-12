@@ -1,7 +1,7 @@
 {
     "identifier": "mantella_npc_canceltravel",
     "name": "CancelTravel",
-    "description": "Cancels NPC travel plans set by the TravelTo action.",
+    "description": "Cancels NPC travel plans set by the TravelTo or LeadTo action (an NPC stops leading the player).",
     "note": "EXPERIMENTAL: Can cause NPC AI packages to break.",
     "key": "CancelTravel",
     "allowed_games": ["skyrim"],
