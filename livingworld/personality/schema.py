@@ -174,7 +174,7 @@ def json_schema() -> dict[str, Any]:
         "adult_confirmed": {"type": "boolean",
                             "description": "she is an adult although the game gives no race; never overrides a child"},
         "plugin": {"type": "string"}, "base_id": {"type": "string"}, "note": {"type": "string"},
-        "dialogue": _dialogue_schema()}}
+        "dialogue": _dialogue_schema(), "intimacy": _intimacy_schema()}}
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": "Living World personality profiles",
@@ -188,6 +188,10 @@ def json_schema() -> dict[str, Any]:
                 "enabled": {"type": "boolean"}, "rate": {"type": "number", "minimum": 0, "maximum": 3}}},
             "dialogue": {"type": "object", "additionalProperties": False,
                          "properties": {"enabled": {"type": "boolean"}}},
+            "intimacy": {"type": "object", "additionalProperties": False,
+                         "properties": {"enabled": {"type": "boolean"},
+                                        "framework_map": {"type": "object", "additionalProperties": {"type": "string"},
+                                                          "description": "animation action id -> activity group"}}},
             "baseline": {"type": "object", "additionalProperties": False,
                          "properties": {k: {"type": "number", "minimum": -50, "maximum": 50} for k in NUMBERS},
                          "description": "points added to every generated profile's numbers"},
@@ -209,3 +213,13 @@ def _dialogue_schema() -> dict[str, Any]:
                     "properties": {k: {"type": "number", "minimum": 0, "maximum": 100, "description": v[0]}
                                    for k, v in D.SLIDERS.items()}},
         "vocabulary": phrases, "remove": phrases}}
+
+
+def _intimacy_schema() -> dict[str, Any]:
+    from livingworld.personality import intimacy as I
+    return {"type": "object", "additionalProperties": False, "properties": {
+        "enabled": {"type": "boolean"},
+        "ratings": {"type": "object", "additionalProperties": False,
+                    "properties": {g: {"enum": list(I.RATINGS), "description": w} for g, w in I.GROUPS.items()}},
+        "categories": {"type": "object", "additionalProperties": False,
+                       "properties": {g: {"type": "boolean"} for g in I.GROUPS}}}}

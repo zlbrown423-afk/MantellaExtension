@@ -1,0 +1,63 @@
+{
+	"name": "$OStim2PStandingHugMF",
+	"modpack": "OStim",
+	"length": 2.0,
+	"speeds":[
+		{
+			"animation": "OStim2PStandingHugMF"
+		}
+	],
+	"navigations":[
+		{
+			"destination": "OStim2PStandingHoldingMF",
+			"description": "$ostim_nav_return",
+			"icon": "OStim/symbols/return",
+			"priority": -1000
+		},
+		{
+			"destination": "OStim2PStandingHoldingChinHugMF",
+			"description": "$ostim_nav_hold_chin_t{1}",
+			"icon": "OStim/detail/holdingneck_mf",
+			"priority": 0
+		},
+		{
+			"destination": "OStim2PStandingCuddleHoldingHeadMF",
+			"description": "$ostim_nav_hold_head_t{1}",
+			"icon": "OStim/detail/holdinghead_mf",
+			"priority": 0
+		},
+		{
+			"destination": "OStim2PStandingSquattingMF",
+			"description": "$ostim_nav_squat_before_t{0}",
+			"icon": "OStim/positional/squatting_f",
+			"priority": 1000
+		}
+	],
+	"actors":[
+		{
+			"intendedSex": "male",
+			"sosBend": -5,
+			"scale": 1.03,
+      		"lookUp": -30,
+			"tags": [
+				"standing"
+			],
+			"feetOnGround": true
+		},
+		{
+			"intendedSex": "female",
+      		"lookUp": -30,
+			"tags": [
+				"standing"
+			],
+			"feetOnGround": true
+		}
+	],
+	"actions":[
+		{
+			"type": "hug",
+			"actor": 0,
+			"target": 1
+		}
+	]
+}

@@ -1693,8 +1693,9 @@ class LivingWorld:
         present, player, player_id = self._personality_present(context)
         if player_id is None:
             return []
+        scenes = [(set(s.people), list(s.acts)) for s in self._scenes_now] if self.intimacy else []
         with self.store.transaction() as db:
-            return self.personality.notes(db, text, present, player_id, player.name, context.game_days)
+            return self.personality.notes(db, text, present, player_id, player.name, context.game_days, scenes)
 
     def _personality_heard(self, npc_id: int, text: str, context: Any) -> None:
         try:

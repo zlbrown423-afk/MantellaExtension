@@ -1,0 +1,2 @@
+Real files from OStim Standalone 7.5.1b (github.com/VersuchDrei/OStimNG, tag 7.5.1b, GPL-3.0), unchanged:
+5 scenes and the 7 actions they use. Used by tests/livingworld/test_personality.py to check the OStim adapter.

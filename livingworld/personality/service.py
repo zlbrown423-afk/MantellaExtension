@@ -9,7 +9,8 @@ import logging
 import os
 from typing import Any
 
-from livingworld.personality import admin, bridge, debug, dialogue, discovery, evolve, prompt
+from livingworld.personality import admin, bridge, debug, dialogue, discovery, evolve, intimacy, prompt
+from livingworld.personality.frameworks.ostim import OStim
 from livingworld.personality import profile as P
 from livingworld.personality.config import SettingsFile, default_path
 
@@ -69,15 +70,39 @@ class PersonalityService:
         return dialogue.resolve(p, traits_of(db, p.npc_id), entry.dialogue if entry else None,
                                 self.settings().dialogue_enabled)
 
-    def notes(self, db, text: str, present: dict[int, str], player_id: int, player_name: str, now: float) -> list[str]:
-        """Notes for the AI on the player's line, one block per woman present, only when the line is on topic."""
+    def prefs_of(self, db, p: P.Profile) -> "intimacy.Prefs":
+        from livingworld.personality.profile import entry_for
+        entry = entry_for(db, self.settings(), p.npc_id)
+        return intimacy.resolve(db, p, entry.intimacy if entry else None, self.settings().intimacy_enabled)
+
+    def adapter(self) -> OStim:
+        return OStim(extra_map=self.settings().framework_map)
+
+    def notes(self, db, text: str, present: dict[int, str], player_id: int, player_name: str, now: float,
+              scenes: list[tuple[set[int], list[str]]] | None = None) -> list[str]:
+        """Notes for the AI on the player's line, one block per woman present: when the line is on topic, and
+        while she is in an intimate scene (``scenes``: who is in each running scene, and its action ids)."""
         listening = len(present) > 1
         blocks = []
         self._shareable = {}
         for npc_id, p in self.profiles(db, list(present), now).items():
+            prefs = self.prefs_of(db, p)
+            in_scene = [acts for people, acts in (scenes or []) if npc_id in people]
+            scene_lines = []
+            if in_scene:
+                groups = {self.adapter().group_of(a) for acts in in_scene for a in acts} & set(intimacy.GROUPS)
+                scene_lines = intimacy.scene_lines(prefs, p.name, groups)
             lines = prompt.topic_lines(db, p, player_id, player_name, text, listening, _sex(db, player_id))
-            if not lines:
+            if not lines and not scene_lines:
                 continue
+            if not lines:
+                blocks.append(f"{p.name} in this scene (her own preferences; consent is still hers to give or "
+                              f"withdraw):\n" + "\n".join(f"- {line}" for line in scene_lines))
+                continue
+            if "intimacy" in prompt.topics(text) or "touch" in prompt.topics(text) or in_scene:
+                g = discovery.gate(db, p, player_id, listening)
+                pref = intimacy.preference_lines(prefs, "private" in g.tiers)
+                lines = lines[:-1] + pref + scene_lines + lines[-1:]
             style = dialogue.style_lines(self.dialogue_of(db, p), p.name, player_name,
                                          moment(db, npc_id, player_id, listening, now), topic=True, salt=text)
             lines = style + lines

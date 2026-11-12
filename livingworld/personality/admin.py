@@ -65,6 +65,8 @@ def inspect(db, settings: Settings, npc_id: int, now: float, player_id: int | No
     entry = P.entry_for(db, settings, npc_id)
     out["dialogue"] = D.to_json(D.resolve(p, traits_of(db, npc_id), entry.dialogue if entry else None,
                                           settings.dialogue_enabled))
+    from livingworld.personality import intimacy as I
+    out["intimacy"] = I.to_json(I.resolve(db, p, entry.intimacy if entry else None, settings.intimacy_enabled))
     if player_id is not None:
         g = discovery.gate(db, p, player_id)
         out["player"] = {"willing_to_share": g.willing, "tiers": sorted(g.tiers), "why": g.why,
@@ -230,3 +232,37 @@ def reset_dialogue(sfile: SettingsFile, key: str) -> None:
     if key in s.npcs:
         s.npcs[key].dialogue = {}
         sfile.save(s)
+
+
+def set_rating(sfile: SettingsFile, key: str, group: str, rating: str | None) -> None:
+    """Set one intimacy rating by hand (None removes the hand setting). 'boundary' adds a limit; any other
+    rating set by hand is the only thing that lifts one."""
+    from livingworld.personality import intimacy as I
+    s = sfile.get()
+    entry = s.npcs.get(key) or NpcSettings(key=key)
+    raw = {k: (dict(v) if isinstance(v, dict) else v) for k, v in entry.intimacy.items()}
+    ratings = raw.setdefault("ratings", {})
+    if rating is None:
+        ratings.pop(group, None)
+    else:
+        ratings[group] = rating
+    clean, problems = I.validate(raw)
+    if problems:
+        raise ValueError("; ".join(problems))
+    entry.intimacy = clean
+    s.npcs[key] = entry
+    sfile.save(s)
+
+
+def set_category(sfile: SettingsFile, key: str, group: str, on: bool) -> None:
+    from livingworld.personality import intimacy as I
+    s = sfile.get()
+    entry = s.npcs.get(key) or NpcSettings(key=key)
+    raw = {k: (dict(v) if isinstance(v, dict) else v) for k, v in entry.intimacy.items()}
+    raw.setdefault("categories", {})[group] = on
+    clean, problems = I.validate(raw)
+    if problems:
+        raise ValueError("; ".join(problems))
+    entry.intimacy = clean
+    s.npcs[key] = entry
+    sfile.save(s)

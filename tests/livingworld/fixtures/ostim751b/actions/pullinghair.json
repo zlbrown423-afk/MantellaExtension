@@ -1,0 +1,36 @@
+{
+	"aliases":[
+		"pullhair"
+	],
+	"actor":{
+		"info": "the one with the hand",
+		"stimulation":0.1,
+		"maxStimulation":50,
+		"moan":true,
+		"requirements":[
+			"hand"
+		],
+		"strippingSlots":[
+			33
+		]
+	},
+	"target":{
+		"info": "the one with the head",
+		"stimulation":0.1,
+		"maxStimulation":50,
+		"requirements":[
+		],
+		"strippingSlots":[
+			30,
+			31
+		]
+	},
+	"performer":{
+		"floats":{
+			"stamina":0.25
+		}
+	},
+	"tags":[
+		"sensual"
+	]
+}

@@ -57,6 +57,17 @@
             "sweetling"
           ]
         }
+      },
+      "intimacy": {
+        "ratings": {
+          "kissing": "strong",
+          "rough": "interested",
+          "massage": "neutral",
+          "toys": "dislikes"
+        },
+        "categories": {
+          "vampire": false
+        }
       }
     },
     "Ysolda": {
@@ -98,6 +109,14 @@
             "wench"
           ]
         }
+      },
+      "intimacy": {
+        "ratings": {
+          "hand_holding": "strong",
+          "affection": "strong",
+          "anal": "boundary",
+          "rough": "boundary"
+        }
       }
     },
     "Camilla Valerius": {
@@ -133,6 +152,16 @@
           "expressions": [
             "oh, honestly"
           ]
+        }
+      },
+      "intimacy": {
+        "ratings": {
+          "kissing": "interested",
+          "climax_on_body": "boundary"
+        },
+        "categories": {
+          "tail": false,
+          "vampire": false
         }
       }
     },
@@ -214,5 +243,9 @@
   },
   "dialogue": {
     "enabled": true
+  },
+  "intimacy": {
+    "enabled": true,
+    "framework_map": {}
   }
 }

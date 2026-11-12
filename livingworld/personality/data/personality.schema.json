@@ -40,6 +40,22 @@
         }
       }
     },
+    "intimacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "framework_map": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "animation action id -> activity group"
+        }
+      }
+    },
     "baseline": {
       "type": "object",
       "additionalProperties": false,
@@ -560,6 +576,235 @@
                     "items": {
                       "type": "string"
                     }
+                  }
+                }
+              }
+            }
+          },
+          "intimacy": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "ratings": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "affection": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "hugging and cuddling"
+                  },
+                  "hand_holding": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "holding hands"
+                  },
+                  "kissing": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "kissing"
+                  },
+                  "caressing": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "caresses and gentle touch"
+                  },
+                  "massage": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "massage and bathing together"
+                  },
+                  "groping": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "being groped"
+                  },
+                  "manual": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "intimacy with hands"
+                  },
+                  "oral": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "intimacy with mouths"
+                  },
+                  "intercourse": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "lovemaking"
+                  },
+                  "anal": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "anal intimacy"
+                  },
+                  "toys": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "toys"
+                  },
+                  "rough": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "rough play (spanking, hair pulling, choking)"
+                  },
+                  "climax_on_body": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "being finished on"
+                  },
+                  "solo": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "touching herself while watched"
+                  },
+                  "tail": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "tail play (beast races)"
+                  },
+                  "vampire": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "a vampire's bite"
+                  }
+                }
+              },
+              "categories": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "affection": {
+                    "type": "boolean"
+                  },
+                  "hand_holding": {
+                    "type": "boolean"
+                  },
+                  "kissing": {
+                    "type": "boolean"
+                  },
+                  "caressing": {
+                    "type": "boolean"
+                  },
+                  "massage": {
+                    "type": "boolean"
+                  },
+                  "groping": {
+                    "type": "boolean"
+                  },
+                  "manual": {
+                    "type": "boolean"
+                  },
+                  "oral": {
+                    "type": "boolean"
+                  },
+                  "intercourse": {
+                    "type": "boolean"
+                  },
+                  "anal": {
+                    "type": "boolean"
+                  },
+                  "toys": {
+                    "type": "boolean"
+                  },
+                  "rough": {
+                    "type": "boolean"
+                  },
+                  "climax_on_body": {
+                    "type": "boolean"
+                  },
+                  "solo": {
+                    "type": "boolean"
+                  },
+                  "tail": {
+                    "type": "boolean"
+                  },
+                  "vampire": {
+                    "type": "boolean"
                   }
                 }
               }
