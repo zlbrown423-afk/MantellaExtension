@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "enabled": true,
+  "default_mode": "hybrid",
+  "evolution": {"enabled": true, "rate": 1.0},
+  "baseline": {},
+  "npcs": {
+    "Aela the Huntress": {
+      "mode": "hybrid",
+      "note": "Bold, direct, makes the first move; values courage and strength; hates cowardice.",
+      "values": {"sexual_confidence": 85, "initiation": 75, "social_confidence": 70, "relationship_dynamic": "leads",
+                 "attracted_to": ["courage", "strength", "confidence"], "dislikes": ["cowardice", "arrogance"],
+                 "intimacy_boundary": "casual_ok"}
+    },
+    "Ysolda": {
+      "mode": "hybrid",
+      "note": "Warm and romantic, ambitious, takes things at an ordinary pace; private about desire.",
+      "values": {"romantic_inclination": 75, "relationship_style": "romantic", "intimacy_pace": "moderate",
+                 "attracted_to": ["ambition", "kindness", "humour"], "intimacy_boundary": "after_courtship"},
+      "private": ["libido"]
+    },
+    "Camilla Valerius": {
+      "mode": "hybrid",
+      "note": "Courted by two men already: selective, romantic, wants a proper courtship and no public fuss.",
+      "values": {"selectiveness": 78, "romantic_inclination": 80, "exclusivity": 90, "intimacy_pace": "slow",
+                 "intimacy_boundary": "committed_only", "boundaries": ["no_public_affection", "not_with_taken"]}
+    },
+    "Lydia": {
+      "mode": "manual",
+      "note": "Fully hand-written: loyal, reserved about feelings, follows a lead she trusts.",
+      "values": {"libido": 50, "sexual_confidence": 55, "initiation": 25, "selectiveness": 70, "privacy": 80,
+                 "romantic_inclination": 45, "intimacy_comfort": 45, "exclusivity": 95, "social_confidence": 50,
+                 "openness": 30, "relationship_style": "balanced", "intimacy_pace": "slow",
+                 "relationship_dynamic": "follows", "intimacy_boundary": "committed_only",
+                 "attracted_to_sex": ["male"], "attracted_to": ["loyalty", "courage", "honesty"],
+                 "dislikes": ["dishonesty", "cowardice"], "boundaries": ["no_unasked_touch", "no_drunk_advances"]}
+    },
+    "Carlotta Valentia": {
+      "mode": "automatic",
+      "note": "Generated entirely; nothing set by hand. Change over time applies to everything."
+    },
+    "Skyrim.esm|0x0001A6A0": {
+      "enabled": false,
+      "note": "Example of switching one person off by form id (replace with a real one)."
+    }
+  }
+}

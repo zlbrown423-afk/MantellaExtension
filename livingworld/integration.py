@@ -225,6 +225,12 @@ class LivingWorld:
         self.guard_names = self.guard and guard_names.enabled()   # generic guards show their own name; MANTELLA_LW_GUARD_NAMES=0 off
         self._guard_names_sent: dict[int, str] = {}  # npc_id -> the name sent to the game this conversation
         self._bios: dict[int, str] = {}             # npc_id -> Mantella bio, for the diary writer
+        self.personality = None                     # adult women's personality profiles; MANTELLA_LW_PERSONALITY=0 off
+        if enabled:
+            from livingworld.personality import bridge as personality_bridge
+            if personality_bridge.enabled():
+                from livingworld.personality.service import PersonalityService
+                self.personality = PersonalityService(save_folder)
         LivingWorld.latest = self
 
     @classmethod
@@ -478,6 +484,7 @@ class LivingWorld:
         self._present.clear()
         self._sync(context)
         self._side_jobs_started(context)
+        self._personality_started(context)
         logger.log(23, f"Living World: conversation {self.conv_id} started in {context.location}"
                        f" at game day {context.game_days:.2f} with {', '.join(npcs.get_all_names())}")
 
@@ -508,6 +515,8 @@ class LivingWorld:
             self._learn_leads(player_leads.from_reply(self._lead_ask, text, skip), context.game_days)
         if self.task_words and context is self._context:
             self._agree_in_words(sentence, npc_id, text)
+        if self.personality is not None:
+            self._personality_heard(npc_id, text, context)
         self._npc_last = text
 
     @_never_raises
@@ -531,6 +540,13 @@ class LivingWorld:
                 self._learn_leads(player_leads.from_player(text, names), context.game_days)
         if self.hygiene_debug:
             self._hygiene_debug(text, npc_id, context)
+        if self.personality is not None:
+            present = {self._npc_ids.get(c.ref_id) or self._register(c, context.game_days): c.name
+                       for c in context.npcs_in_conversation.get_all_characters() if not c.is_player_character}
+            with self.store.transaction() as db:
+                result = self.personality.debug(db, text, present, npc_id, context.game_days)
+            if result:
+                logger.log(23, f"Living World personality test command: {result}")
         if self.guard:
             scene = self._guard_scene()
             if scene is not None and self._guard_for(self.store).player_spoke(scene):
@@ -670,6 +686,10 @@ class LivingWorld:
                               + "\n".join(f"- {line}" for line in body))
             if self.mood_meter and player is not None:
                 blocks.append("\n".join(moods.prompt_lines(character.name, self._carried_mood(npc_id, now))))
+            heart = self._personality_lines(npc_id, player_id, player.name if player is not None else "the player", now)
+            if heart:
+                blocks.append(f"{character.name} in love and desire (her settled nature):\n"
+                              + "\n".join(f"- {line}" for line in heart))
             work = self._work_lines(npc_id, character.name, scene)
             if work:
                 blocks.append(f"Work on {character.name}'s mind:\n" + "\n".join(f"- {line}" for line in work))
@@ -1579,6 +1599,60 @@ class LivingWorld:
             logger.exception("Living World: could not work out body language profiles; the game keeps its last ones")
             return []
 
+    # ---- personality profiles (livingworld/personality) ----
+    def _personality_present(self, context: Any) -> tuple[dict[int, str], Any, int | None]:
+        now = context.game_days
+        player = context.npcs_in_conversation.get_player_character()
+        player_id = (self._npc_ids.get(player.ref_id) or self._register(player, now)) if player else None
+        present = {self._npc_ids.get(c.ref_id) or self._register(c, now): c.name
+                   for c in context.npcs_in_conversation.get_all_characters() if not c.is_player_character}
+        return present, player, player_id
+
+    def _personality_started(self, context: Any) -> None:
+        if self.personality is None:
+            return
+        try:
+            present, _player, player_id = self._personality_present(context)
+            with self.store.transaction() as db:
+                self.personality.started(db, list(present), player_id, context.game_days, self.conv_id)
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not bring personality profiles up to date; carrying on")
+
+    def _personality_lines(self, npc_id: int, player_id: int | None, player_name: str, now: float) -> list[str]:
+        if self.personality is None:
+            return []
+        try:
+            with self.store.transaction() as db:
+                return self.personality.standing(db, npc_id, player_id, player_name, now)
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not add personality lines; leaving them out")
+            return []
+
+    @_never_raises
+    def personality_notes(self, text: str, context: Any) -> list[str]:
+        """Notes for the AI on the player's line when it turns to romance, intimacy, touch or her preferences."""
+        if self.personality is None or self.store is None or context is not self._context or not text:
+            return []
+        present, player, player_id = self._personality_present(context)
+        if player_id is None:
+            return []
+        with self.store.transaction() as db:
+            return self.personality.notes(db, text, present, player_id, player.name, context.game_days)
+
+    def _personality_heard(self, npc_id: int, text: str, context: Any) -> None:
+        try:
+            player = context.npcs_in_conversation.get_player_character()
+            player_id = self._npc_ids.get(player.ref_id) if player else None
+            if player_id is None:
+                return
+            with self.store.transaction() as db:
+                self.personality.npc_said(db, npc_id, player_id, text, context.game_days, self.conv_id)
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not note what an NPC told the player about herself; carrying on")
+
     def _guards_here(self, db, present: dict[int, str]) -> set[int]:
         """The people in this conversation who are guards: the game's word (IsGuard) or a guard career profile."""
         out: set[int] = set()
@@ -1936,6 +2010,16 @@ class LivingWorld:
                 self.errors += 1
                 logger.exception("Living World: could not mark a side job as reported; carrying on")
         ConversationLog(self.store).close(self.conv_id, game_days)
+        if self.personality is not None:
+            try:
+                with self.store.transaction() as db:
+                    spoke = [r[0] for r in db.execute(
+                        "SELECT DISTINCT p.npc_id FROM participant p JOIN npc n ON n.npc_id = p.npc_id"
+                        " WHERE p.conv_id = ? AND n.is_player = 0", (self.conv_id,)).fetchall()]
+                    self.personality.ended(db, spoke, game_days, self.conv_id)
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not update personality profiles; carrying on")
         if self.tasks:
             try:
                 declined = self._work_for(self.store).conversation_closed(game_days)

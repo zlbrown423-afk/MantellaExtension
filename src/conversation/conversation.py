@@ -320,6 +320,9 @@ class Conversation:
             body_notes = living_world.body_events(self.__context) if living_world is not None else None # LIVINGWORLD PATCH: body language noticed since the last line
             if body_notes: # LIVINGWORLD PATCH
                 new_message.add_event(body_notes) # LIVINGWORLD PATCH
+            heart_notes = living_world.personality_notes(player_text, self.__context) if living_world is not None else None # LIVINGWORLD PATCH: personality profiles, only on romance / intimacy / touch topics
+            if heart_notes: # LIVINGWORLD PATCH
+                new_message.add_event(heart_notes) # LIVINGWORLD PATCH
             scene_notes = living_world.scene_notes(self.__context) if living_world is not None else None # LIVINGWORLD PATCH: answer from inside a running intimate scene
             if scene_notes: # LIVINGWORLD PATCH
                 new_message.add_event(scene_notes) # LIVINGWORLD PATCH

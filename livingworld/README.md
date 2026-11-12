@@ -561,3 +561,13 @@ Three fixes from the 2026-11-10 play session. All server side, no compile.
 | Heckling | A bully heckles the player only when the conversation **starts** with just the player and that guard (never when the guard joins a running conversation), the player serves in that guard, is on duty (a routine or training duty in hand, or wearing their own guard's uniform), is Guardsman or below, and has no incident duty or prisoner escort under way. At most once per bully per 4 game days, once per 1.5 days across all bullies, and only half of eligible conversations. Words only: no blows, threats or accusations, never holds the player up, drops it at once for real trouble or an order. Stored as a `guard.heckle` event (rolls back with the save) |
 | Gossip | A gossip guard trades town rumours and passes on guard news about the player from the last 10 days (enlisted, trained, promoted, commended, reprimanded, arrests, a wrongful arrest, a bully's heckling), two items at a time, each once (`guard.gossip_told`), and warns a member about the bullies by name |
 | Test | "debug guard bully" / "debug guard gossip": the next guard you talk to alone heckles you (if on duty) / gossips |
+
+## Personality profiles (adult women)
+
+Individual, persistent profiles for adult women: desire, confidence, initiation, selectiveness, privacy, romance,
+ease with closeness, faithfulness, pace, what draws and repels her, and her boundaries. Modes are manual,
+automatic and hybrid, and hand-set values always win. Profiles change slowly with what happens to her, on the save
+timeline. The player discovers them through trust: private, suspected, known, or a disclosed boundary. Romance and
+consent read the profile, and desire is never a yes. Settings file: `data/livingworld/personality.json`. Admin
+tool: `python -m livingworld.personality`. Migration 017. Off with `MANTELLA_LW_PERSONALITY=0`. Full details:
+`livingworld/personality/README.md`.

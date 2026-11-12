@@ -179,6 +179,8 @@ def generate(db, npc_id: int) -> Generated:
     if isinstance(seed.get("attracted_to"), list) and seed["attracted_to"]:
         v["attracted_to_sex"] = [s for s in seed["attracted_to"] if s in ("male", "female")]
         src["attracted_to_sex"] = "romance seed 'attracted_to'"
+    elif seed:   # in the romance seed without a list: romance's own default (drawn to men), kept as it was
+        v["attracted_to_sex"], src["attracted_to_sex"] = ["male"], "romance seed default"
     else:
         roll = rng.random()
         v["attracted_to_sex"] = ["female"] if roll < 0.05 else (["male", "female"] if roll < 0.12 else ["male"])
