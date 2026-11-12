@@ -35,6 +35,8 @@ from livingworld.fog import places as fog_places, service as fog_names
 from livingworld.perception import awareness
 from livingworld.perception.intoxication import drink_state
 from livingworld.perception.pipeline import PerceptionPipeline
+from livingworld import touch
+from livingworld.touch import consent as touch_consent, words as touch_words
 from livingworld.social.traits import seed_traits_from_bio
 from livingworld.social.world import SocialWorld
 from livingworld.work import tasks_enabled
@@ -198,6 +200,8 @@ class LivingWorld:
         self._scenes_now: list[intimate_scenes.SceneNow] = []   # scenes running near the player, from the game's snapshot
         self._scene_records: list[Any] = []         # that snapshot's records, stored if still running at close
         self._scene_seers = intimate_scenes.SceneSeers()   # who each running scene's snapshots showed seeing it
+        self.touch = enabled and touch.enabled()    # touch consent (livingworld/touch); MANTELLA_LW_TOUCH_CONSENT=0 off
+        self._touch: touch_consent.Desk | None = None   # this conversation's agreements to be touched
         self.confront = self.intimacy and confront.enabled()   # partners who catch each other speak up; MANTELLA_LW_CONFRONT=0 off
         self._fine_sent: set[int] = set()           # lines whose PayFine was handled
         self._held_actions: dict[str, list[dict[str, Any]]] = {}   # speaker ref id -> actions from an action-only reply
@@ -341,6 +345,12 @@ class LivingWorld:
             pipeline.scene_seers = self._scene_seers   # end and climax records also get the snapshots' seers
         outcomes = pipeline.ingest(raw + attire_raw)
         stored = len([o for o in outcomes if not o.duplicate])
+        if self._touch is not None:
+            try:
+                self._touch_breaches(raw)
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not check grabs against touch agreements; carrying on")
         if stored:
             self._social_for(self.store).appraise_new()   # what was seen becomes something people can pass on
         if attire_raw:
@@ -455,6 +465,7 @@ class LivingWorld:
         self._lead_learned = set()
         self._trips = trips.TripPlanner(here=str(getattr(context, "location", "") or "")) if self.trips else None
         self._desk = side_jobs.Desk() if self.side_jobs else None
+        self._touch = touch_consent.Desk() if self.touch else None
         self._surrender_pending = set()   # survivors in this conversation who have not agreed to follow yet
         self._surrender_done = set()      # ...and those who have (Follow fired)
         self._surrender_all = set()       # every survivor here: "come with me" / "go home" and her yes
@@ -680,6 +691,10 @@ class LivingWorld:
                     blocks.append(f"{character.name} keeps a private diary and writes in it most evenings, about "
                                   f"their days and the people in them. They carry it or leave it at home, and "
                                   f"would be upset to find anyone had read it.")
+            if self._touch is not None and player is not None:
+                agreed = self._touch.prompt_lines(npc_id, character.name, player.name)
+                if agreed:
+                    blocks.append(f"Touch, and {character.name}:\n" + "\n".join(f"- {line}" for line in agreed))
             guard = self._guard_lines(npc_id, character.name)
             uni = self._uniform_lines(npc_id, character.name, player_id, player.name if player else "the player")
             if uni:
@@ -1059,6 +1074,40 @@ class LivingWorld:
         logger.log(23, f"Living World decency: {speaker.name} PayFine -> {gold} gold")
         return {decency.KEY_FINE_GOLD: gold, decency.KEY_FINE_GUARD: speaker.name} if gold else {}
 
+    def _touch_keys(self, sentence: Any) -> dict[str, Any]:
+        """AllowTouch / StopTouch on an NPC line: what the game should let pass (livingworld/touch)."""
+        if self._touch is None or self._context is None or self.store is None:
+            return {}
+        actions = [a for a in self._line_actions(sentence) if a.get("identifier") in (touch.ALLOW, touch.WITHDRAW)]
+        if not actions:
+            return {}
+        self._release_held(sentence, (touch.ALLOW, touch.WITHDRAW))
+        speaker = sentence.speaker
+        if speaker is None or speaker.is_player_character:
+            return {}
+        now = self._context.game_days
+        player = self._context.npcs_in_conversation.get_player_character()
+        npc_id = self._npc_ids.get(speaker.ref_id) or self._register(speaker, now)
+        player_id = (self._npc_ids.get(player.ref_id) or self._register(player, now)) if player else None
+        with self.store.transaction() as db:
+            return self._touch.handle(db, id(sentence), actions, npc_id, speaker.name, player_id,
+                                      self._player_said, now)
+
+    def _touch_breaches(self, raw: list[str]) -> None:
+        """A hand where an NPC had not agreed (consent=breach on a grab): the game ended the agreement; so do we."""
+        if self._touch is None or not self._touch.grants:
+            return
+        identities = IdentityRegistry(self.store)
+        for rec in raw:
+            if "consent=breach" not in rec.lower():
+                continue
+            try:
+                record = parse_record(rec)
+            except (BadRecord, ValueError):
+                continue
+            if record.type == "grab" and record.target is not None:
+                self._touch.breach(identities.ensure_npc(record.target.identity(), record.game_time))
+
     def _carried_mood(self, npc_id: int, now: float) -> "moods.Mood | None":
         try:
             with self.store.transaction() as db:
@@ -1125,6 +1174,11 @@ class LivingWorld:
         except Exception:
             self.errors += 1
             logger.exception("Living World: a guard action failed; carrying on without it")
+        try:
+            keys.update(self._touch_keys(sentence))
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: a touch agreement failed; carrying on without it")
         text = self._moods_to_send.pop(speaker.ref_id, None)
         if text:
             keys[KEY_MOOD] = text
@@ -1235,6 +1289,7 @@ class LivingWorld:
         keys[surrender.KEY_SURRENDER_ON] = bool(self.surrender)
         keys[side_jobs.KEY_JOBS_ON] = bool(self.side_jobs)
         keys[KEY_PEEK_ON] = bool(self.peek and self.body_language)
+        keys[touch.KEY_ON] = bool(self.touch)
         if self.confront and self.store is not None:
             try:
                 with self.store.reading() as db:
@@ -1720,6 +1775,11 @@ class LivingWorld:
             partners = self._guard_for(self.store).spar_partners
             if partners:
                 also.append(training_words.SparWatcher(partners))
+        if self._touch is not None:
+            from src.actions.function_manager import FunctionManager
+            also.append(touch_words.TouchWatcher(player_said or self._player_said,
+                                                 {getattr(a, "identifier", None) for a in actions}
+                                                 | set(FunctionManager._actions.keys())))
         if self.surrender and (self._surrender_pending or self._surrender_all):
             from src.actions.function_manager import FunctionManager
             also.append(surrender.FollowWatcher(self._surrender_pending, player_said or self._player_said,
@@ -1729,6 +1789,13 @@ class LivingWorld:
         if not self.keep_promises and not also:
             return None
         return promises.make_parser(actions, keep_promises=self.keep_promises, also=also)
+
+    @_never_raises
+    def touch_notes(self, context: Any) -> list[str]:
+        """What an NPC agreed to (or took back) since the player's last line, for the dialogue model (livingworld/touch)."""
+        if self._touch is None or context is not self._context:
+            return []
+        return self._touch.take_notes()
 
     @_never_raises
     def trip_notes(self, text: str, context: Any) -> list[str]:

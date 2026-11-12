@@ -1,0 +1,23 @@
+{
+    "identifier": "mantella_lw_touch_withdraw",
+    "name": "StopTouch",
+    "description": "The NPC takes back an agreement to be hugged or touched: they have had enough, it went further than they wanted, or they simply changed their mind. They may do this at any moment and owe no reason.",
+    "note": "Living World touch consent (MANTELLA_LIVING_WORLD=1, off with MANTELLA_LW_TOUCH_CONSENT=0). Handled by the server (livingworld/touch/); the game ends the agreement and the player's hands count as unwelcome again.",
+    "key": "StopTouch",
+    "parameters": {
+        "source": {
+            "type": "string",
+            "description": "The NPC who takes it back.",
+            "scope": "conversation"
+        }
+    },
+    "required": ["source"],
+    "prompt": "If you had let the player touch you and now want them to stop, begin your response with '{key}:'",
+    "allowed_games": ["skyrim"],
+    "requires_response": false,
+    "is-interrupting": false,
+    "allow_repeat": true,
+    "one-on-one": true,
+    "multi-npc": true,
+    "radiant": false
+}

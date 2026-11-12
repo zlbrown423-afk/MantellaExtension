@@ -57,6 +57,7 @@ def conduct(db, task: T.Task, worker_id: int, gt: float) -> Conduct:
     started = T.last_change_gt(db, task.task_id, "accepted") or task.created_gt
     c.rough = db.execute(
         "SELECT COUNT(*) FROM v_visible_event WHERE type = 'physical_interaction' AND game_time BETWEEN ? AND ?"
+        " AND COALESCE(json_extract(payload_json, '$.consent'), 'breach') = 'breach'"   # an agreed hug is not rough
         " AND json_extract(actors_json, '$[0]') = ? AND json_extract(actors_json, '$[1]') = ?",
         (started, gt, worker_id, task.giver_id)).fetchone()[0]
     q = 0.0

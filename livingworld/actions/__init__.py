@@ -32,8 +32,10 @@ GUARD_REPORT = "mantella_lw_guard_report"   # guard duties: server only
 GUARD_PAY = "mantella_lw_guard_pay"         # guard wages: the game hands over the gold the server names
 DECENCY_FINE = "mantella_lw_decency_fine"   # a guard's fine for public nakedness: the game takes the gold the server names
 TRADE = "mantella_lw_npc_trade"             # an agreed deal: the game swaps the goods and gold (trade.py)
+TOUCH_ALLOW = "mantella_lw_touch_allow"     # touch consent: handled on the server (livingworld/touch); the game lets those touches pass
+TOUCH_WITHDRAW = "mantella_lw_touch_withdraw"
 ALL = (SIT, STAND_UP, GO_THERE, ORDER_DRINKS, UNDRESS, DRESS, TASK_AGREE, TASK_CHECK, TASK_RELEASE, GUARD_ENLIST,
-       GUARD_REPORT, GUARD_PAY, DECENCY_FINE, TRADE)
+       GUARD_REPORT, GUARD_PAY, DECENCY_FINE, TRADE, TOUCH_ALLOW, TOUCH_WITHDRAW)
 
 
 def enabled() -> bool:
@@ -49,4 +51,7 @@ def action_files() -> list[Path]:
     from livingworld.actions.trade import trade_enabled   # MANTELLA_LW_TRADE=0 leaves Trade out
     if not trade_enabled():
         files = [f for f in files if f.name != "trade.json"]
+    from livingworld.touch import enabled as touch_enabled   # MANTELLA_LW_TOUCH_CONSENT=0 leaves AllowTouch / StopTouch out
+    if not touch_enabled():
+        files = [f for f in files if not f.name.startswith("touch_")]
     return files

@@ -94,8 +94,92 @@ def _how_long(record: PerceptionRecord) -> str:
     return f" for about {round(dur)} second{'s' if round(dur) != 1 else ''}"
 
 
+# ---- touch consent (livingworld/touch): a touch the person had agreed to, or one past what they agreed ----
+
+PARTNER_STATUSES = {"courting", "partner", "spouse"}
+_AFFECTION = {"hug", "hands", "back"}                    # friendly; the rest is intimate
+
+
+_PART = {"neck": "neck", "face": "face", "butt": "backside", "chest": "chest"}
+
+
+def _agreed_phrase(record: PerceptionRecord, me: bool) -> str:
+    """As told by the person touched ('hugged me', 'put a hand on my backside') or by a witness, after
+    'I saw Zach' ('hug Gerdur', 'rub Gerdur's back')."""
+    kind = record.consent
+    if me:
+        if kind in _PART:
+            return f"{'put a hand on' if kind == 'butt' else 'touched'} my {_PART[kind]}"
+        return {"hug": "hugged me", "hands": "held my hand", "back": "rubbed my back"}.get(kind, "touched me")
+    target = record.target.name if record.target else "someone"
+    if kind in _PART:
+        return f"{'put a hand on' if kind == 'butt' else 'touch'} {target}'s {_PART[kind]}"
+    return {"hug": f"hug {target}", "hands": f"hold hands with {target}",
+            "back": f"rub {target}'s back"}.get(kind, f"touch {target}")
+
+
+def agreed_for_target(record: PerceptionRecord, to_actor: Bond) -> MemoryDraft:
+    """A touch the person had said yes to: affection, not an assault."""
+    actor = record.actor.name
+    friendly = record.consent in _AFFECTION
+    if friendly:
+        interpretation = f"I had said yes. It felt warm{', from someone close to me' if to_actor.close else ''}."
+        valence, deltas = (0.35 if to_actor.close else 0.25), {"trust": 0.03, "affinity": 0.04}
+    else:
+        interpretation = f"I had said yes to it. It was close and personal, and I wanted it."
+        valence, deltas = 0.3, {"trust": 0.03, "affinity": 0.05, "intimacy": 0.03}
+    return MemoryDraft(
+        content=f"{actor} {_agreed_phrase(record, me=True)}{_how_long(record)}{_place(record)}, as I had agreed.",
+        interpretation=interpretation, importance=0.45 if friendly else 0.55, valence=valence,
+        intensity=_clamp(abs(valence) + 0.1), confidence=1.0, source_kind="experienced", deltas_to_actor=deltas)
+
+
+def breach_for_target(record: PerceptionRecord, to_actor: Bond) -> MemoryDraft:
+    """A hand on a sensitive place they had not agreed to, while trusting the player with something less."""
+    from livingworld.touch import describe
+    actor = record.actor.name
+    verb, where = _grab_phrase(record)
+    allowed = describe(record.allowed) or "less"
+    return MemoryDraft(
+        content=f"{actor} {verb} me{where.replace(' the ', ' my ')}{_how_long(record)}{_place(record)}, when I had "
+                f"only agreed to let them {allowed}.",
+        interpretation=f"I trusted {actor} and {actor} went further than I said. I will not forget it.",
+        importance=0.8, valence=-0.7, intensity=0.8, confidence=1.0, source_kind="experienced",
+        deltas_to_actor={"trust": -0.25, "fear": 0.06, "affinity": -0.1})
+
+
+def agreed_for_witness(record: PerceptionRecord, seen: Perception, to_actor: Bond, to_target: Bond) -> MemoryDraft:
+    """A bystander who saw an agreed touch: it looked friendly and welcome. Their partner may not like it."""
+    actor, target = record.actor.name, record.target.name if record.target else "someone"
+    distance = seen.distance_m or 0.0
+    seen_from = "" if distance <= CLEAR_VIEW_M else f", from about {round(distance)} metres away"
+    hedge = "I saw" if seen.confidence >= 0.8 else "I think I saw"
+    friendly = record.consent in _AFFECTION
+    jealous = to_target.status in PARTNER_STATUSES and not to_actor.close
+    if jealous:
+        interpretation = (f"{target} seemed glad of it, and that is what stings. {target} is mine; "
+                          f"{actor} has no business there.")
+        valence, deltas, importance = -0.4, {"trust": -0.08, "affinity": -0.06}, 0.6
+    elif friendly:
+        interpretation = f"It looked friendly, and {target} clearly welcomed it."
+        valence, deltas, importance = 0.1, {}, 0.25
+    else:
+        interpretation = f"{target} did not seem to mind at all. Those two must be close."
+        valence, deltas, importance = 0.0, {}, 0.4
+    return MemoryDraft(
+        content=f"{hedge} {actor} {_agreed_phrase(record, me=False)}{_how_long(record)}{_place(record)}{seen_from};"
+                f" {target} was willing.",
+        interpretation=interpretation, importance=_clamp(importance * (0.7 + 0.3 * seen.confidence)),
+        valence=valence, intensity=_clamp(abs(valence) + 0.1), confidence=seen.confidence,
+        source_kind="witnessed", deltas_to_actor=deltas)
+
+
 def grab_for_target(record: PerceptionRecord, to_actor: Bond) -> MemoryDraft:
     """What the person who was grabbed experienced."""
+    if record.consent == "breach":
+        return breach_for_target(record, to_actor)
+    if record.consent:
+        return agreed_for_target(record, to_actor)
     actor = record.actor.name
     verb, where = _grab_phrase(record)
     where_mine = where.replace(" the ", " my ")
@@ -130,6 +214,8 @@ def grab_for_target(record: PerceptionRecord, to_actor: Bond) -> MemoryDraft:
 
 def grab_for_witness(record: PerceptionRecord, seen: Perception, to_actor: Bond, to_target: Bond) -> MemoryDraft:
     """What a bystander saw. They never learn why it happened."""
+    if record.consent and record.consent != "breach":
+        return agreed_for_witness(record, seen, to_actor, to_target)
     actor, target = record.actor.name, record.target.name if record.target else "someone"
     verb, where = _grab_phrase(record, seen_form=True)
     distance = seen.distance_m or 0.0
