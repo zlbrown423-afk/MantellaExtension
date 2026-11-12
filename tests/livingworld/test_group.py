@@ -182,6 +182,60 @@ def test_a_line_in_the_wrong_voice_is_not_synthesized(tmp_path):
     assert all(line.text.strip() != "Welcome back." for line in s.lines)
 
 
+def test_a_guard_rebuilt_with_another_game_voice_type_is_voiced(tmp_path):
+    # Leveled guards can come back from a cell reset with another voice type on the same
+    # reference. The line is voiced in the new voice and the binding follows the game.
+    def guard(voice_type):
+        return actors.actor("Whiterun Guard", 0x000EA0A2, 0x001000F7, 0, "Nord", voice_type)
+
+    with HeadlessSession(str(tmp_path), ScriptedLLM(replies=["Halt."])) as s:
+        s.start([actors.player("Torvar"), guard("MaleNordCommander")], location="Whiterun", game_days=2.0)
+        s.continue_until_player_turn()
+        s.end(game_days=2.1)
+    db = open_db(tmp_path)
+    guard_id = npc_ids(db)["Whiterun Guard"]
+    first = db.execute("SELECT voice_model, game_voice_type FROM voice_binding WHERE npc_id = ?", (guard_id,)).fetchone()
+    assert first["game_voice_type"] == "MaleNordCommander"
+
+    with HeadlessSession(str(tmp_path), ScriptedLLM(replies=["The Battle-Borns live north of here."])) as s:
+        s.start([actors.player("Torvar"), guard("MaleGuard")], location="Whiterun", game_days=2.2)
+        s.continue_until_player_turn()
+        s.end(game_days=2.3)
+        assert LivingWorld.latest.errors == 0
+    assert any("Battle-Borns" in line.text for line in s.tts.lines)
+    now = db.execute("SELECT voice_model, game_voice_type FROM voice_binding WHERE npc_id = ?", (guard_id,)).fetchone()
+    assert now["game_voice_type"] == "MaleGuard"
+
+
+def test_a_cached_guard_is_rebound_by_the_voice_check(tmp_path):
+    # The voice check also follows the game when the NPC was registered earlier in this run.
+    with HeadlessSession(str(tmp_path), ScriptedLLM(replies=["Halt."])) as s:
+        s.start([actors.player("Torvar"), actors.actor("Whiterun Guard", 0x000EA0A2, 0x001000F7, 0, "Nord",
+                                                       "MaleGuard")], location="Whiterun", game_days=2.0)
+        s.continue_until_player_turn()
+        lw = LivingWorld.latest
+        guard_id = next(i for i in lw._npc_ids.values() if lw.store.scalar(
+            "SELECT display_name FROM npc WHERE npc_id = ?", (i,)) == "Whiterun Guard")
+        with lw.store.transaction() as db:   # as if first bound while the reference had another voice type
+            db.execute("DELETE FROM voice_binding WHERE npc_id = ?", (guard_id,))
+            db.execute("INSERT INTO voice_binding (npc_id, tts_service, voice_model, game_voice_type, bound_gt)"
+                       " VALUES (?, 'piper', 'Male Nord Commander', 'MaleNordCommander', 1)", (guard_id,))
+
+        class Guard:
+            ref_id = next(r for r, i in lw._npc_ids.items() if i == guard_id)
+            name = "Whiterun Guard"
+            is_player_character = False
+            tts_service = "piper"
+            tts_voice_model = "Male Guard"
+            in_game_voice_model = "MaleGuard"
+
+        assert lw.voice_allowed(Guard()) is True
+        assert lw.store.scalar("SELECT voice_model FROM voice_binding WHERE npc_id = ?", (guard_id,)) == "Male Guard"
+        Guard.tts_voice_model = "Male Nord"          # same game type, other model: still refused
+        assert lw.voice_allowed(Guard()) is False
+        s.end(game_days=2.1)
+
+
 # ---- sharing: Gerdur tells Hod (test plan phases D and E) -------------------------------------
 
 def test_gerdur_tells_hod_and_hod_repeats_it_with_attribution(tmp_path):

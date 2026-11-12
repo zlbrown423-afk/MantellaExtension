@@ -221,6 +221,36 @@ def test_a_bound_voice_cannot_be_swapped(tmp_path):
     assert registry.ensure_npc(ActorIdentity.from_actor_json(actors.player("Torvar")), 2.0) == player
 
 
+def test_a_leveled_guard_whose_game_voice_type_changes_is_rebound(tmp_path):
+    # Whiterun guards are leveled actors: after a cell reset the same reference can come back
+    # with another voice type. The binding follows the game instead of silencing the guard.
+    store = WorldStore(str(tmp_path / "w.sqlite"))
+    registry = IdentityRegistry(store)
+    guard = registry.ensure_npc(ActorIdentity.from_actor_json(
+        actors.actor("Whiterun Guard", 0x000EA0A2, 0x001000F7, 0, "Nord", "MaleNordCommander")), 1.0)
+    assert registry.bind_voice(guard, "piper", "Male Nord Commander", "MaleNordCommander", 1.0) == "Male Nord Commander"
+    assert registry.bind_voice(guard, "piper", "Male Guard", "MaleGuard", 2.0) == "Male Guard"
+    assert registry.voice_of(guard) == "Male Guard"
+    assert store.scalar("SELECT game_voice_type FROM voice_binding WHERE npc_id = ?", (guard,)) == "MaleGuard"
+    # once rebound the lock holds again for the new voice type
+    with pytest.raises(VoiceBindingConflict):
+        registry.bind_voice(guard, "piper", "Male Nord", "MaleGuard", 3.0)
+
+
+def test_a_named_npc_keeps_their_voice_when_only_mantellas_choice_changes(tmp_path):
+    store = WorldStore(str(tmp_path / "w.sqlite"))
+    registry = IdentityRegistry(store)
+    gerdur = registry.ensure_npc(ActorIdentity.from_actor_json(actors.gerdur()), 1.0)
+    registry.bind_voice(gerdur, "piper", "FemaleNord", "FemaleNord", 1.0)
+    with pytest.raises(VoiceBindingConflict):      # same game voice type, different model: refused
+        registry.bind_voice(gerdur, "piper", "FemaleEvenToned", "FemaleNord", 2.0)
+    with pytest.raises(VoiceBindingConflict):      # same type, only the case differs: still the same type
+        registry.bind_voice(gerdur, "piper", "FemaleEvenToned", "femalenord", 2.0)
+    with pytest.raises(VoiceBindingConflict):      # unknown game voice type never loosens the lock
+        registry.bind_voice(gerdur, "piper", "FemaleEvenToned", None, 2.0)
+    assert registry.voice_of(gerdur) == "FemaleNord"
+
+
 def test_an_existing_database_gets_new_migrations(tmp_path):
     path = str(tmp_path / "w.sqlite")
     conn = sqlite3.connect(path)
