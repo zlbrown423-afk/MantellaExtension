@@ -21,6 +21,10 @@ the line names no place at all ("Follow me!"), the place named most recently in 
 When the player asked the NPC to follow ("come on, follow me") and the NPC agrees with no place in mind
 ("I'm right behind you"), the question is "Have Alfhild follow you?" and a yes carries ``Follow``.
 
+Stopping: "stop leading", "cancel the trip", "let's turn back" (or a plain "stop" / "wait here" while
+an NPC from this conversation is leading) puts ``CancelTravel`` on the NPC's next line, which in the game
+now ends a ``LeadTo`` as well as a ``TravelTo``. The game also ends a lead on its own on arrival.
+
 Nothing is ever started without the player's yes. A place the player turned down is not asked about
 again in the same conversation, and a question the player ignores lapses after two lines.
 
@@ -43,6 +47,7 @@ _OFF = {"0", "false", "no", "off"}
 LEAD_TO = "mantella_npc_leadto"
 TRAVEL_TO = "mantella_npc_travelto"
 FOLLOW = "mantella_npc_follow"
+CANCEL_TRAVEL = "mantella_npc_canceltravel"
 _TRIP_ACTIONS = {LEAD_TO, TRAVEL_TO}
 _STARTED = _TRIP_ACTIONS | {FOLLOW}   # the reply already does something about moving: never ask on top
 
@@ -237,6 +242,33 @@ _GO_ALONG = re.compile(r"\blead\s+the\s+way\b|\bi\s*'?\s*m\s+(?:following|right\
                        r"|\bshow\s+me\s+the\s+way\b", re.IGNORECASE)
 _NO = re.compile(r"^\W*(?:no|nope|nah|cancel|never\s*mind|nevermind|not\s+(?:now|yet|right\s+now)|stop|wait|hold\s+on"
                  r"|don\s*'?\s*t)\b", re.IGNORECASE)
+# Ending a trip that is under way. Explicit enough to count in any conversation:
+_STOP_TRIP = re.compile(
+    r"\b(?:stop|quit)\s+(?:leading(?:\s+me)?|walking|taking\s+me|the\s+trip|this\s+trip)\b"
+    r"|\b(?:cancel|forget|call\s+off|abandon)\s+(?:the\s+|this\s+|our\s+)?(?:trip|journey|travel|walk)\b"
+    r"|\bnever\s*mind\s+(?:the\s+|this\s+)?(?:trip|journey|going)\b"
+    r"|\b(?:let\s*'?\s*s|we\s+should)\s+(?:not\s+go|turn\s+(?:back|around)|stop\s+here)\b"
+    r"|\bchange\s+of\s+plans?\b|\bwe\s*'?\s*re\s+not\s+going\b",
+    re.IGNORECASE)
+# ...and short ones that only count while an NPC from this conversation is leading: "Stop!", "Wait here,
+# Alfhild." Every word must be one of these, apart from up to two (a name).
+_STOP_SHORT = re.compile(r"^\W*(?:stop|halt|wait|hold\s+on|hold\s+up|stay\s+here|that\s*'?\s*s\s+far\s+enough)\b",
+                         re.IGNORECASE)
+_STOP_WORDS = {"stop", "halt", "wait", "hold", "on", "up", "stay", "here", "there", "now", "please", "right",
+               "thats", "that", "s", "far", "enough", "a", "moment", "second", "minute", "lets", "let", "us"}
+
+
+def player_stops_trip(text: str, leading: bool = False) -> bool:
+    """The player calls off a trip under way. Short "stop" / "wait" only counts while someone is leading."""
+    text = (text or "").replace("’", "'")
+    if _STOP_TRIP.search(text):
+        return True
+    if not leading or not _STOP_SHORT.search(text):
+        return False
+    words = _norm(text.replace("'", "")).split()
+    return len(words) <= 6 and sum(w not in _STOP_WORDS for w in words) <= 2
+
+
 _NUMBERS = [
     (1, re.compile(r"\b(?:one|first|1|won|number\s+one)\b", re.IGNORECASE)),
     (2, re.compile(r"\b(?:two|second|2|number\s+two)\b", re.IGNORECASE)),
@@ -296,6 +328,8 @@ class TripPlanner:
     asked: set[tuple[str, str]] = field(default_factory=set)      # (npc, form_id) asked about already
     declined: set[str] = field(default_factory=set)               # form_ids the player said no to
     started: set[str] = field(default_factory=set)                # NPCs already on their way
+    leading: set[str] = field(default_factory=set)                # of those, leading the player somewhere
+    cancel: bool = False                                          # the player said stop: CancelTravel next line
     _wanted: list[tuple[int, list[Place]]] = field(default_factory=list)   # (player line no, places asked for)
     _mentioned: list[tuple[int, list[Place]]] = field(default_factory=list)   # (line no, places anyone named)
     _follow_asked: int | None = None                                      # player line that said "follow me"
@@ -308,6 +342,15 @@ class TripPlanner:
     def player_said(self, text: str) -> str | None:
         """Read the player's line. Returns a note for the NPC when it answered the question, else None."""
         self._line += 1
+        if self.question is None and player_stops_trip(text, leading=bool(self.leading)):
+            who = ", ".join(sorted(self.leading)) or "anyone leading the way"
+            self.cancel = True
+            self.go = None
+            self.started -= self.leading
+            self.leading = set()
+            logger.log(23, f"Living World trips: the player called off the trip ({who})")
+            return (f"{self.player_name} called off the trip: {who} stops leading and stays here. "
+                    f"Acknowledge it briefly.")
         if player_wants_to_go(text):
             found = find_places(text, exclude=[self.here]) or self._generic(text, None)
             if found:
@@ -477,10 +520,22 @@ class TripPlanner:
             for name in source if isinstance(source, list) else [source]:
                 if name:
                     self.started.add(name)
+                    if action.get("identifier") in _TRIP_ACTIONS:
+                        self.leading.add(name)
                     if self.question is not None and self.question.npc == name:
                         self.question = None
                     if self.go is not None and self.go[0] == name:
                         self.go = None   # the AI started the trip itself on the player's yes
+
+    def take_cancel(self, offered: set[str]) -> dict | None:
+        """CancelTravel for the NPC's line after the player said stop, or None."""
+        if not self.cancel:
+            return None
+        self.cancel = False
+        if CANCEL_TRAVEL not in offered:
+            logger.log(23, "Living World trips: CancelTravel is switched off; the trip can't be called off from here")
+            return None
+        return {"identifier": CANCEL_TRAVEL, "arguments": {}}
 
     def take_notices(self) -> list[str]:
         out, self.notices = self.notices, []
@@ -499,7 +554,7 @@ class TripWatcher:
         (not switched off in Disabled Actions). LeadTo / TravelTo have no basic-mode prompt, so they are
         only ever in ``loaded``; the game carries them out either way when the line names them."""
         self.planner = planner
-        self.offered = ({getattr(a, "identifier", None) for a in actions} | set(loaded)) & (_TRIP_ACTIONS | {FOLLOW})
+        self.offered = ({getattr(a, "identifier", None) for a in actions} | set(loaded)) & (_TRIP_ACTIONS | {FOLLOW, CANCEL_TRAVEL})
 
     def note_actions(self, actions: Iterable[Any]) -> None:
         self.planner.note_started(actions)
@@ -507,6 +562,11 @@ class TripWatcher:
     def keep(self, speaker_name: str, text: str, sentence_actions: list) -> list[str]:
         self.planner.note_started(sentence_actions)
         added: list[str] = []
+        stop = self.planner.take_cancel(self.offered)
+        if stop is not None:
+            sentence_actions.append(stop)
+            added.append(stop["identifier"])
+            logger.log(23, f"Living World trips: {stop}")
         action = self.planner.take_go(self.offered)
         if action is not None:
             sentence_actions.append(action)

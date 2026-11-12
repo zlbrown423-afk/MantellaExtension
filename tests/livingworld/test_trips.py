@@ -196,3 +196,67 @@ def test_switched_off(living_world_on, monkeypatch, tmp_path):
     monkeypatch.setenv(trips.TRIPS_ENV, "0")
     _, second, _, _ = _walk_to_the_farm(tmp_path, "Yes.")
     assert not any(a for line in second for a in line.actions)
+
+
+# ---------------------------------------------------------------- calling a trip off
+
+from livingworld.dialogue.trips import CANCEL_TRAVEL, player_stops_trip   # noqa: E402
+
+
+@pytest.mark.parametrize("said", [
+    "Stop leading me, Alfhild.",
+    "Let's cancel the trip.",
+    "Never mind the trip, let's stay.",
+    "Let's turn back.",
+    "Change of plans.",
+])
+def test_explicit_stop_calls_the_trip_off(said):
+    assert player_stops_trip(said)
+
+
+@pytest.mark.parametrize("said", [
+    "Stop!", "Wait here.", "Hold on.", "Stop, wait here, Alfhild.",
+])
+def test_short_stop_only_while_someone_leads(said):
+    assert player_stops_trip(said, leading=True)
+    assert not player_stops_trip(said)
+
+
+@pytest.mark.parametrize("said", [
+    "I can't stop thinking about the war.",
+    "Stop teasing me about the war.",
+    "Wait, what did you say about the farm on the hill over there?",
+    "The trip was long.",
+])
+def test_not_a_stop(said):
+    assert not player_stops_trip(said, leading=True)
+
+
+def _leading_planner():
+    p = _planner()
+    p.player_said("Let's go to battleborn farm.")
+    TripWatcher(p, [], [LEAD_TO, CANCEL_TRAVEL]).keep("Alfhild Battle-Born", "Let's head to the farm!", [])
+    p.player_said("Yes.")
+    TripWatcher(p, [], [LEAD_TO, CANCEL_TRAVEL]).keep("Alfhild Battle-Born", "Follow me.", [])
+    return p
+
+
+def test_stop_puts_cancel_travel_on_the_next_line():
+    p = _leading_planner()
+    assert p.leading == {"Alfhild Battle-Born"}
+    note = p.player_said("Stop, wait here.")
+    assert "called off the trip" in note and "Alfhild Battle-Born" in note
+    line: list = []
+    TripWatcher(p, [], [LEAD_TO, CANCEL_TRAVEL]).keep("Alfhild Battle-Born", "Alright, we'll stop here.", line)
+    assert line == [{"identifier": CANCEL_TRAVEL, "arguments": {}}]
+    again: list = []
+    TripWatcher(p, [], [LEAD_TO, CANCEL_TRAVEL]).keep("Alfhild Battle-Born", "What now?", again)
+    assert again == []
+
+
+def test_stop_without_cancel_travel_loaded_does_nothing():
+    p = _leading_planner()
+    p.player_said("Cancel the trip.")
+    line: list = []
+    TripWatcher(p, [], [LEAD_TO]).keep("Alfhild Battle-Born", "As you wish.", line)
+    assert line == []

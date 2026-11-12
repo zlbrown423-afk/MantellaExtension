@@ -241,8 +241,8 @@ Code: `dialogue/hearing.py`.
 
 ## Trips: "let's go to the farm" actually sets off
 
-On with `MANTELLA_LIVING_WORLD=1`. Switch off with `set MANTELLA_LW_TRIPS=0`. No extra AI call, no Papyrus change
-(it uses Mantella's own `LeadTo` / `TravelTo`). Code: `dialogue/trips.py`, place list `dialogue/travel_places.json`
+On with `MANTELLA_LIVING_WORLD=1`. Switch off with `set MANTELLA_LW_TRIPS=0`. No extra AI call. It uses Mantella's own `LeadTo` /
+`TravelTo`; the arrival and door handling is in Mantella-Spell (see In the game below). Code: `dialogue/trips.py`, place list `dialogue/travel_places.json`
 (copied from Mantella-Spell `MantellaLocationUtils.psc`).
 
 | Part | What it does |
@@ -252,6 +252,8 @@ On with `MANTELLA_LIVING_WORLD=1`. Switch off with `set MANTELLA_LW_TRIPS=0`. No
 | The farm | "the farm", "home", "the mill" and similar mean the place of that kind named earlier in the conversation ("I run the Battle-Born Farm") or in the NPC's bio. A line with no place at all ("Follow me!") uses the place named in the last few lines. |
 | Follow | When the player said "follow me" / "come with me" and the NPC answers "I'm right behind you" with no place in mind, the question is "Have Lydia follow you? Say yes or no." and a yes carries Mantella's `Follow`. |
 | Go | "Yes", "lead the way", "I'm following you", "one", "two" or the place's name puts `LeadTo` (the NPC walks, the player follows) on the NPC's next line, with a note so the NPC speaks as if setting off. If LeadTo is in Disabled Actions, `TravelTo` with `leave_now`. "No" drops it for the rest of the conversation; an ignored question lapses after two lines. |
+| Stop | "Stop leading me", "cancel the trip", "let's turn back", "change of plans" (or a plain "stop" / "wait here" while an NPC from this conversation is leading) puts Mantella's `CancelTravel` on the NPC's next line. With Mantella-Spell's LeadTo watcher, that now ends a LeadTo too. Needs CancelTravel not to be in Disabled Actions. |
+| In the game | Mantella-Spell `MantellaAdvancedAction_LeadTo` watches each lead every second: it ends the trip on arrival ("Alfhild has brought you to Battle-Born Farm."), brings the leader through a load door when the player went through and the leader stayed behind, and drops the trip when the player stops following. Before this the NPC paced in and out of doors at the destination forever. |
 
 ## Trade: a deal agreed in conversation actually happens
 
