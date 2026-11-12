@@ -1,0 +1,177 @@
+{
+	"aliases":[
+		"sex"
+	],
+	"actor":{
+		"info": "the one with the penis",
+		"stimulation":1.0,
+		"fullStrip":true,
+		"moan":true,
+		"talk":true,
+		"requirements":[
+			"penis"
+		],
+		"strippingSlots":[
+			32,
+			49,
+			52,
+			53,
+			54
+		],
+		"faction":{
+			"info": "OStimVaginalSexActorFaction",
+			"mod": "OStim.esp",
+			"formid": "0xE90"
+		},
+		"statFaction":{
+			"info": "OStatVaginalSexActorFaction",
+			"mod": "OStim.esp",
+			"formid": "0xF14"
+		},
+		"playerStatFaction":{
+			"info": "OStatVaginalSexWithPlayerActorFaction",
+			"mod": "OStim.esp",
+			"formid": "0x809"
+		},
+		"climaxStatFaction":{
+			"info": "OStatVaginalSexActorClimaxFaction",
+			"mod": "OStim.esp",
+			"formid": "0x8CA"
+		},
+		"partnerClimaxStatFaction":{
+			"info": "OStatVaginalSexActorPartnerClimaxFaction",
+			"mod": "OStim.esp",
+			"formid": "0x8CB"
+		},
+		"playerClimaxStatFaction":{
+			"info": "OStatVaginalSexWithPlayerActorClimaxFaction",
+			"mod": "OStim.esp",
+			"formid": "0x8CC"
+		},
+		"playerPartnerClimaxStatFaction":{
+			"info": "OStatVaginalSexWithPlayerActorPartnerClimaxFaction",
+			"mod": "OStim.esp",
+			"formid": "0x8CD"
+		},
+		"playerStatList":{
+			"info": "OStatVaginalSexWithPlayerActorList",
+			"mod": "OStim.esp",
+			"formid": "0x8D2"
+		},
+		"playerClimaxStatList":{
+			"info": "OStatVaginalSexWithPlayerActorClimaxList",
+			"mod": "OStim.esp",
+			"formid": "0x8D3"
+		},
+		"playerPartnerClimaxStatList":{
+			"info": "OStatVaginalSexWithPlayerActorPartnerClimaxList",
+			"mod": "OStim.esp",
+			"formid": "0x8D4"
+		},
+		"toySlot": "genital"
+	},
+	"target":{
+		"info": "the one with the vulva",
+		"stimulation":1.0,
+		"fullStrip":true,
+		"moan":true,
+		"talk":true,
+		"requirements":[
+			"vagina"
+		],
+		"strippingSlots":[
+			32,
+			49,
+			52,
+			53,
+			54
+		],
+		"faction":{
+			"info": "OStimVaginalSexTargetFaction",
+			"mod": "OStim.esp",
+			"formid": "0xE91"
+		},
+		"statFaction":{
+			"info": "OStatVaginalSexTargetFaction",
+			"mod": "OStim.esp",
+			"formid": "0xF15"
+		},
+		"playerStatFaction":{
+			"info": "OStatVaginalSexWithPlayerTargetFaction",
+			"mod": "OStim.esp",
+			"formid": "0x80A"
+		},
+		"climaxStatFaction":{
+			"info": "OStatVaginalSexTargetClimaxFaction",
+			"mod": "OStim.esp",
+			"formid": "0x8CE"
+		},
+		"partnerClimaxStatFaction":{
+			"info": "OStatVaginalSexTargetPartnerClimaxFaction",
+			"mod": "OStim.esp",
+			"formid": "0x8CF"
+		},
+		"playerClimaxStatFaction":{
+			"info": "OStatVaginalSexWithPlayerTargetClimaxFaction",
+			"mod": "OStim.esp",
+			"formid": "0x8D0"
+		},
+		"playerPartnerClimaxStatFaction":{
+			"info": "OStatVaginalSexWithPlayerTargetPartnerClimaxFaction",
+			"mod": "OStim.esp",
+			"formid": "0x8D1"
+		},
+		"playerStatList":{
+			"info": "OStatVaginalSexWithPlayerTargetList",
+			"mod": "OStim.esp",
+			"formid": "0x8D5"
+		},
+		"playerClimaxStatList":{
+			"info": "OStatVaginalSexWithPlayerTargetClimaxList",
+			"mod": "OStim.esp",
+			"formid": "0x8D6"
+		},
+		"playerPartnerClimaxStatList":{
+			"info": "OStatVaginalSexWithPlayerTargetPartnerClimaxList",
+			"mod": "OStim.esp",
+			"formid": "0x8D7"
+		},
+		"stringLists":{
+			"cum":[
+				"vagina"
+			]
+		},
+		"toySlot": "genital"
+	},
+	"performer":{
+		"faction":{
+			"info": "OStimVaginalSexPerformerFaction",
+			"mod": "OStim.esp",
+			"formid": "0xE92"
+		},
+		"floats":{
+			"stamina":1.0
+		}
+	},
+	"sounds":[
+		{
+			"type":"peak",
+			"sound":{
+				"mod":"OStim.esp",
+				"formid":"0xE14"
+			}
+		}	
+	],
+	"peak":{
+		"type":"bonedistance",
+		"actorBone":"NPC Genitals01 [Gen01]",
+		"targetBone":"VaginaDeep1"
+	},
+	"tags":[
+		"intercourse",
+		"-penilestimulation",
+		"sexual",
+		"vaginalpenetration",
+		"vaginalstimulation"
+	]
+}

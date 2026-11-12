@@ -12,6 +12,17 @@
     python -m livingworld.personality --world W.sqlite disable Gerdur  |  enable Gerdur
     python -m livingworld.personality --world W.sqlite reset Gerdur [--clear-manual]
     python -m livingworld.personality --world W.sqlite regenerate Gerdur
+    python -m livingworld.personality --world W.sqlite dialogue Gerdur                 (her dialogue personality)
+    python -m livingworld.personality --world W.sqlite toggle Gerdur suggestive off
+    python -m livingworld.personality --world W.sqlite slider Gerdur flirtation 70
+    python -m livingworld.personality --world W.sqlite phrase Gerdur add terms_of_affection "my bear"
+    python -m livingworld.personality --world W.sqlite phrase Gerdur remove teasing "you wish"
+    python -m livingworld.personality --world W.sqlite reset-dialogue Gerdur
+    python -m livingworld.personality --world W.sqlite intimacy Gerdur                 (her intimacy ratings)
+    python -m livingworld.personality --world W.sqlite rate Gerdur rough boundary      (strong/interested/neutral/dislikes/boundary/clear)
+    python -m livingworld.personality --world W.sqlite category Gerdur toys off
+    python -m livingworld.personality --world W.sqlite scenes Gerdur [--ostim "<Data>/SKSE/Plugins/OStim"]   (installed OStim scenes that suit her)
+    python -m livingworld.personality --world W.sqlite check Gerdur OStim2PMissionaryMF                       (one scene against her preferences)
     python -m livingworld.personality schema > personality.schema.json
 
 The settings file defaults to personality.json next to the world database (--settings to choose another).
@@ -45,7 +56,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--world", help="the world database (.sqlite)")
     ap.add_argument("--settings", help="the settings file (default: personality.json next to the database)")
     ap.add_argument("command", choices=("list", "inspect", "history", "known", "export", "import", "set", "mode",
-                                        "enable", "disable", "reset", "regenerate", "schema"))
+                                        "enable", "disable", "reset", "regenerate", "schema", "dialogue", "toggle",
+                                        "slider", "phrase", "reset-dialogue", "intimacy", "rate", "category",
+                                        "scenes", "check"))
+    ap.add_argument("--ostim", help="OStim's data folder (default: MANTELLA_LW_OSTIM_FOLDER or the game's)")
     ap.add_argument("args", nargs="*")
     ap.add_argument("--take", default="manual", choices=("manual", "values"))
     ap.add_argument("--clear-manual", action="store_true")
@@ -115,6 +129,58 @@ def main(argv: list[str] | None = None) -> int:
             admin.set_enabled(sfile, admin.key_for(db, npc), a.command == "enable", db, npc)
         elif a.command == "reset":
             admin.reset(db, sfile, one(a.args[0]), now, clear_manual=a.clear_manual)
+        elif a.command == "dialogue":
+            print(json.dumps(admin.inspect(db, settings, one(a.args[0]), now).get("dialogue", {}), indent=2,
+                             ensure_ascii=False))
+        elif a.command == "toggle":
+            npc = one(a.args[0])
+            admin.set_dialogue(sfile, admin.key_for(db, npc), "toggles", a.args[1], a.args[2].lower() in ("on", "true", "1", "yes"))
+            admin.audit(db, npc, "dialogue_toggle", {"toggle": a.args[1], "value": a.args[2]})
+        elif a.command == "slider":
+            npc = one(a.args[0])
+            admin.set_dialogue(sfile, admin.key_for(db, npc), "sliders", a.args[1], float(a.args[2]))
+            admin.audit(db, npc, "dialogue_slider", {"slider": a.args[1], "value": a.args[2]})
+        elif a.command == "phrase":
+            npc = one(a.args[0])
+            admin.phrase(sfile, admin.key_for(db, npc), a.args[1], a.args[2], " ".join(a.args[3:]))
+            admin.audit(db, npc, "dialogue_phrase", {"action": a.args[1], "category": a.args[2]})
+        elif a.command == "reset-dialogue":
+            npc = one(a.args[0])
+            admin.reset_dialogue(sfile, admin.key_for(db, npc))
+            admin.audit(db, npc, "dialogue_reset", {})
+        elif a.command == "intimacy":
+            print(json.dumps(admin.inspect(db, settings, one(a.args[0]), now).get("intimacy", {}), indent=2))
+        elif a.command == "rate":
+            npc = one(a.args[0])
+            admin.set_rating(sfile, admin.key_for(db, npc), a.args[1], None if a.args[2] == "clear" else a.args[2])
+            admin.audit(db, npc, "intimacy_rating", {"group": a.args[1], "rating": a.args[2]})
+        elif a.command == "category":
+            npc = one(a.args[0])
+            admin.set_category(sfile, admin.key_for(db, npc), a.args[1], a.args[2].lower() in ("on", "true", "1", "yes"))
+            admin.audit(db, npc, "intimacy_category", {"group": a.args[1], "on": a.args[2]})
+        elif a.command in ("scenes", "check"):
+            from livingworld.personality import intimacy as I
+            from livingworld.personality.frameworks import base
+            from livingworld.personality.frameworks.ostim import OStim
+            from livingworld.personality.profile import entry_for, resolve
+            npc = one(a.args[0])
+            p = resolve(db, npc, settings, now)
+            entry = entry_for(db, settings, npc)
+            prefs = I.resolve(db, p, entry.intimacy if entry else None, settings.intimacy_enabled)
+            fw = OStim(a.ostim, settings.framework_map)
+            if not fw.available():
+                raise SystemExit("OStim's data folder was not found; pass --ostim or set MANTELLA_LW_OSTIM_FOLDER")
+            if a.command == "check":
+                scene = fw.scenes().get(a.args[1])
+                if scene is None:
+                    raise SystemExit(f"no installed OStim scene called {a.args[1]!r}")
+                print(json.dumps(base.judge(fw, prefs, scene).__dict__, indent=2))
+            else:
+                for v in base.compatible(fw, prefs, limit=25):
+                    print(f"{v.score:5.1f}  {v.scene_id:<55} {', '.join(f'{g} ({r})' for g, r in v.groups.items())}")
+            unknown = fw.unmapped()
+            if unknown:
+                print(f"actions not mapped to a group (judged not compatible): {', '.join(unknown)}", file=sys.stderr)
         elif a.command == "regenerate":
             print(json.dumps(admin.regenerate(db, one(a.args[0]), now), indent=2))
     store.close()

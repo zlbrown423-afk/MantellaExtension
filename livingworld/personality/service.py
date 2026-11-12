@@ -9,7 +9,8 @@ import logging
 import os
 from typing import Any
 
-from livingworld.personality import admin, bridge, debug, discovery, evolve, prompt
+from livingworld.personality import admin, bridge, debug, dialogue, discovery, evolve, intimacy, prompt
+from livingworld.personality.frameworks.ostim import OStim
 from livingworld.personality import profile as P
 from livingworld.personality.config import SettingsFile, default_path
 
@@ -54,17 +55,57 @@ class PersonalityService:
         p = self.profiles(db, [npc_id], now).get(npc_id)
         if p is None:
             return []
-        return prompt.standing_lines(db, p, player_id, player_name, _sex(db, player_id))
+        lines = prompt.standing_lines(db, p, player_id, player_name, _sex(db, player_id))
+        if player_id is not None:
+            style = dialogue.style_lines(self.dialogue_of(db, p), p.name, player_name,
+                                         moment(db, p.npc_id, player_id, False, now), topic=False)
+            if style:
+                lines = style + lines if lines else style
+        return lines
 
-    def notes(self, db, text: str, present: dict[int, str], player_id: int, player_name: str, now: float) -> list[str]:
-        """Notes for the AI on the player's line, one block per woman present, only when the line is on topic."""
+    def dialogue_of(self, db, p: P.Profile) -> "dialogue.Dialogue":
+        from livingworld.personality.profile import entry_for
+        from livingworld.social.traits import traits_of
+        entry = entry_for(db, self.settings(), p.npc_id)
+        return dialogue.resolve(p, traits_of(db, p.npc_id), entry.dialogue if entry else None,
+                                self.settings().dialogue_enabled)
+
+    def prefs_of(self, db, p: P.Profile) -> "intimacy.Prefs":
+        from livingworld.personality.profile import entry_for
+        entry = entry_for(db, self.settings(), p.npc_id)
+        return intimacy.resolve(db, p, entry.intimacy if entry else None, self.settings().intimacy_enabled)
+
+    def adapter(self) -> OStim:
+        return OStim(extra_map=self.settings().framework_map)
+
+    def notes(self, db, text: str, present: dict[int, str], player_id: int, player_name: str, now: float,
+              scenes: list[tuple[set[int], list[str]]] | None = None) -> list[str]:
+        """Notes for the AI on the player's line, one block per woman present: when the line is on topic, and
+        while she is in an intimate scene (``scenes``: who is in each running scene, and its action ids)."""
         listening = len(present) > 1
         blocks = []
         self._shareable = {}
         for npc_id, p in self.profiles(db, list(present), now).items():
+            prefs = self.prefs_of(db, p)
+            in_scene = [acts for people, acts in (scenes or []) if npc_id in people]
+            scene_lines = []
+            if in_scene:
+                groups = {self.adapter().group_of(a) for acts in in_scene for a in acts} & set(intimacy.GROUPS)
+                scene_lines = intimacy.scene_lines(prefs, p.name, groups)
             lines = prompt.topic_lines(db, p, player_id, player_name, text, listening, _sex(db, player_id))
-            if not lines:
+            if not lines and not scene_lines:
                 continue
+            if not lines:
+                blocks.append(f"{p.name} in this scene (her own preferences; consent is still hers to give or "
+                              f"withdraw):\n" + "\n".join(f"- {line}" for line in scene_lines))
+                continue
+            if "intimacy" in prompt.topics(text) or "touch" in prompt.topics(text) or in_scene:
+                g = discovery.gate(db, p, player_id, listening)
+                pref = intimacy.preference_lines(prefs, "private" in g.tiers)
+                lines = lines[:-1] + pref + scene_lines + lines[-1:]
+            style = dialogue.style_lines(self.dialogue_of(db, p), p.name, player_name,
+                                         moment(db, npc_id, player_id, listening, now), topic=True, salt=text)
+            lines = style + lines
             g = discovery.gate(db, p, player_id, listening)
             self._shareable[npc_id] = discovery.shareable(p, g)
             blocks.append(f"{p.name}'s heart and desires (hers alone; {player_name} cannot see this):\n"
@@ -123,3 +164,14 @@ def _sex(db, npc_id: int | None) -> str | None:
         return None
     row = db.execute("SELECT sex FROM npc WHERE npc_id = ?", (npc_id,)).fetchone()
     return row[0] if row else None
+
+
+def moment(db, npc_id: int, player_id: int, others_listening: bool, now: float) -> "dialogue.Moment":
+    """What weighs on how far she goes right now: her trust and attraction toward the player, company, mood."""
+    from livingworld.social.consent import _mood
+    row = db.execute("SELECT r.trust, r.attraction, b.status FROM v_relationship r JOIN relationship b"
+                     " ON b.from_id = r.from_id AND b.to_id = r.to_id WHERE r.from_id = ? AND r.to_id = ?",
+                     (npc_id, player_id)).fetchone()
+    trust, attraction, status = row if row else (0.0, 0.0, None)
+    score, _label = _mood(db, npc_id, now)
+    return dialogue.Moment(trust, attraction, others_listening, score, status in ("courting", "partner", "spouse"))

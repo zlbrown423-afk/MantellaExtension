@@ -60,6 +60,13 @@ def inspect(db, settings: Settings, npc_id: int, now: float, player_id: int | No
     out.update({"values": p.values, "sources": p.sources, "manual": p.manual, "generated": p.generated,
                 "drift": p.drift, "added_over_time": p.added, "private": sorted(p.private),
                 "history": history(db, npc_id)})
+    from livingworld.personality import dialogue as D
+    from livingworld.social.traits import traits_of
+    entry = P.entry_for(db, settings, npc_id)
+    out["dialogue"] = D.to_json(D.resolve(p, traits_of(db, npc_id), entry.dialogue if entry else None,
+                                          settings.dialogue_enabled))
+    from livingworld.personality import intimacy as I
+    out["intimacy"] = I.to_json(I.resolve(db, p, entry.intimacy if entry else None, settings.intimacy_enabled))
     if player_id is not None:
         g = discovery.gate(db, p, player_id)
         out["player"] = {"willing_to_share": g.willing, "tiers": sorted(g.tiers), "why": g.why,
@@ -168,3 +175,94 @@ def regenerate(db, npc_id: int, now: float) -> dict[str, Any]:
     P.add_change(db, npc_id, "*", "reset", "starting point generated again by the administrator", now)
     audit(db, npc_id, "regenerate", {"before": json.loads(before[0]) if before else None})
     return gen.values
+
+
+# ---- dialogue personality editor (settings file only; takes effect at the next line, no regeneration) ----
+
+def _dialogue_entry(sfile: SettingsFile, key: str):
+    s = sfile.get()
+    entry = s.npcs.get(key) or NpcSettings(key=key)
+    s.npcs[key] = entry
+    return s, entry
+
+
+def set_dialogue(sfile: SettingsFile, key: str, part: str, name: str, value: Any) -> None:
+    """part 'toggles' (value bool), 'sliders' (0..100) or 'enabled' (bool, name ignored)."""
+    from livingworld.personality import dialogue as D
+    s, entry = _dialogue_entry(sfile, key)
+    raw = dict(entry.dialogue)
+    if part == "enabled":
+        raw["enabled"] = bool(value)
+    else:
+        raw.setdefault(part, {})
+        raw[part] = dict(raw[part], **{name: value})
+    clean, problems = D.validate(raw)
+    if problems:
+        raise ValueError("; ".join(problems))
+    entry.dialogue = clean
+    sfile.save(s)
+
+
+def phrase(sfile: SettingsFile, key: str, action: str, category: str, text: str) -> None:
+    """action 'add' or 'remove' one phrase in a category (no duplicates; removing a generated one hides it)."""
+    from livingworld.personality import dialogue as D
+    if category not in D.CATEGORIES:
+        raise ValueError(f"category must be one of {', '.join(D.CATEGORIES)}")
+    s, entry = _dialogue_entry(sfile, key)
+    raw = {k: (dict(v) if isinstance(v, dict) else v) for k, v in entry.dialogue.items()}
+    norm = D._norm(text)
+    added = [x for x in raw.get("vocabulary", {}).get(category, []) if D._norm(x) != norm]
+    removed = [x for x in raw.get("remove", {}).get(category, []) if D._norm(x) != norm]
+    if action == "add":
+        added.append(text)
+    elif action == "remove":
+        removed.append(text)
+    else:
+        raise ValueError("action must be add or remove")
+    raw.setdefault("vocabulary", {})[category] = added
+    raw.setdefault("remove", {})[category] = removed
+    raw["vocabulary"] = {c: v for c, v in raw["vocabulary"].items() if v}
+    raw["remove"] = {c: v for c, v in raw["remove"].items() if v}
+    entry.dialogue, _ = D.validate(raw)
+    sfile.save(s)
+
+
+def reset_dialogue(sfile: SettingsFile, key: str) -> None:
+    s = sfile.get()
+    if key in s.npcs:
+        s.npcs[key].dialogue = {}
+        sfile.save(s)
+
+
+def set_rating(sfile: SettingsFile, key: str, group: str, rating: str | None) -> None:
+    """Set one intimacy rating by hand (None removes the hand setting). 'boundary' adds a limit; any other
+    rating set by hand is the only thing that lifts one."""
+    from livingworld.personality import intimacy as I
+    s = sfile.get()
+    entry = s.npcs.get(key) or NpcSettings(key=key)
+    raw = {k: (dict(v) if isinstance(v, dict) else v) for k, v in entry.intimacy.items()}
+    ratings = raw.setdefault("ratings", {})
+    if rating is None:
+        ratings.pop(group, None)
+    else:
+        ratings[group] = rating
+    clean, problems = I.validate(raw)
+    if problems:
+        raise ValueError("; ".join(problems))
+    entry.intimacy = clean
+    s.npcs[key] = entry
+    sfile.save(s)
+
+
+def set_category(sfile: SettingsFile, key: str, group: str, on: bool) -> None:
+    from livingworld.personality import intimacy as I
+    s = sfile.get()
+    entry = s.npcs.get(key) or NpcSettings(key=key)
+    raw = {k: (dict(v) if isinstance(v, dict) else v) for k, v in entry.intimacy.items()}
+    raw.setdefault("categories", {})[group] = on
+    clean, problems = I.validate(raw)
+    if problems:
+        raise ValueError("; ".join(problems))
+    entry.intimacy = clean
+    s.npcs[key] = entry
+    sfile.save(s)

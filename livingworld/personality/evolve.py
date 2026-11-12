@@ -185,5 +185,44 @@ def evaluate(db, npc_id: int, settings: Settings, now: float, cause: str | None 
         why = "after being handled without wanting it, she wants to be asked first"
         P.add_change(db, npc_id, "boundaries", "list_add", why, now, value="no_unasked_touch", cause=where)
         res.changes.append(("boundaries", "list_add", "no_unasked_touch", why))
+    res.changes += _scenes(db, p, settings, since, now)
     P.add_change(db, npc_id, "*", "checkpoint", "looked at what happened", now, cause=cause)
     return res
+
+
+def _scenes(db, p, settings: Settings, since: float, now: float) -> list:
+    """Intimate scenes she took part in since the checkpoint: her own memory's feeling moves the activity
+    groups that were in it (intimacy.py). Forced scenes never warm anything up."""
+    if not settings.intimacy_enabled:
+        return []
+    from livingworld.personality import intimacy
+    from livingworld.personality.frameworks.ostim import OStim
+    from livingworld.personality.profile import entry_for
+    entry = entry_for(db, settings, p.npc_id)
+    manual = entry.intimacy if entry else {}
+    prefs = intimacy.resolve(db, p, manual, True)
+    if not prefs.enabled:
+        return []
+    adapter = OStim(extra_map=settings.framework_map)
+    out = []
+    for row in db.execute(
+            "SELECT e.event_id, e.type, e.payload_json, AVG(m.valence) FROM v_visible_event e"
+            " JOIN event_witness w ON w.event_id = e.event_id AND w.npc_id = ? AND w.how = 'participated'"
+            " JOIN memory_source ms ON ms.event_id = e.event_id"
+            " JOIN v_visible_memory m ON m.mem_id = ms.mem_id AND m.owner_id = ?"
+            " WHERE e.type IN ('romance.scene', 'intimacy.forced') AND e.game_time > ? AND e.game_time <= ?"
+            " GROUP BY e.event_id ORDER BY e.game_time",
+            (p.npc_id, p.npc_id, since, now + 1e-9)).fetchall():
+        try:
+            acts = json.loads(row[2] or "{}").get("acts") or []
+        except ValueError:
+            acts = []
+        groups = {adapter.group_of(a) for a in acts} & set(intimacy.GROUPS)
+        feeling = float(row[3] or 0.0)
+        if row[1] == "intimacy.forced":
+            feeling = min(feeling, -0.5)
+        locked = set((manual or {}).get("ratings", {}))
+        for group, step in intimacy.after_scene(db, p, prefs, groups, feeling, now, f"event:{row[0]}", locked):
+            out.append((f"intimacy.{group}", "drift" if step else "list_add", step or group,
+                        "how a scene felt to her"))
+    return out

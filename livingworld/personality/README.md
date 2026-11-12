@@ -175,6 +175,118 @@ In game, say or type in a conversation:
 
 Turn these commands off with `MANTELLA_LW_PERSONALITY_DEBUG=0`.
 
+## Dialogue personality (`dialogue.py`)
+
+This controls how she talks when attraction comes up. It has three parts:
+
+- **16 toggles:** flirtatious, teasing, suggestive, romantic_expressions, direct_attraction, coy, confident,
+  assertive, dominant_tone, submissive_tone, double_entendres, intimate_compliments, initiate_flirtation,
+  initiate_intimate_talk, discuss_preferences, private_vocabulary.
+- **9 sliders (0-100):** flirtation, suggestiveness, playfulness, confidence, romantic_expression, assertiveness,
+  vocabulary_variety, initiative, privacy.
+- **A phrase library** with these categories: expressions, terms_of_affection, flirtatious, teasing, romantic,
+  suggestive, disliked, forbidden, custom.
+
+Precedence, strongest first:
+
+1. Toggles switched off, and forbidden words.
+2. Values set by hand under `"dialogue"` in the settings file.
+3. Her profile.
+4. Change over time. Each slider follows one profile attribute (flirtation and initiative follow initiation,
+   confidence follows sexual_confidence, and so on).
+5. Generated defaults, worked out from her generated profile and traits and seeded per woman.
+
+Generated defaults never change between conversations.
+
+How far she goes right now depends on her sliders and on the moment: her trust and attraction toward the player,
+whether others are listening (her privacy slider), her mood, and whether she is courting or partnered with the
+player. The prompt gives:
+
+- what she does, and what she never does (toggles that are off);
+- a few of her own phrases (more when vocabulary_variety is high), marked as guidance, not lines to repeat;
+- what she dislikes and never says.
+
+The phrases are re-picked from her library per player line, so she varies. In normal talk, the only dialogue
+line is a short "her way with flirting", and only when she is attracted to the player.
+
+```json
+"Aela the Huntress": {"dialogue": {
+  "toggles": {"teasing": true, "coy": false},
+  "sliders": {"confidence": 85, "privacy": 40},
+  "vocabulary": {"terms_of_affection": ["shield-sibling"], "forbidden": ["wench"]},
+  "remove": {"terms_of_affection": ["sweetling"]}
+}}
+```
+
+Switch the whole module off with `"dialogue": {"enabled": false}` at the top of the file, or for one woman with
+`"dialogue": {"enabled": false}` in her entry. Editor commands (all of them write the settings file, and changes
+take effect from the next line with no regeneration):
+
+```
+python -m livingworld.personality --world W.sqlite dialogue Aela
+python -m livingworld.personality --world W.sqlite toggle Aela suggestive off
+python -m livingworld.personality --world W.sqlite slider Aela flirtation 70
+python -m livingworld.personality --world W.sqlite phrase Aela add terms_of_affection "shield-sibling"
+python -m livingworld.personality --world W.sqlite phrase Aela remove teasing "you wish"
+python -m livingworld.personality --world W.sqlite reset-dialogue Aela
+```
+
+## Intimacy preferences (`intimacy.py`)
+
+Each woman rates 16 activity groups: affection, hand_holding, kissing, caressing, massage, groping, manual, oral,
+intercourse, anal, toys, rough, climax_on_body, solo, tail, vampire. A rating is one of **strong**, **interested**,
+**neutral**, **dislikes** or **boundary**.
+
+- **Generated** from her profile (comfort, desire, confidence, romance), with an independent seeded draw per
+  group, so liking one group never implies liking another. Some groups (anal, rough, climax_on_body, toys,
+  vampire) can start as a boundary; more selective women have more of them.
+- **Her profile's limits apply:** `no_rough_handling` makes rough a boundary, and `intimacy_boundary: never`
+  makes every sexual group a boundary.
+- **Hand-set ratings win** (`"intimacy": {"ratings": {...}}`), and a hand-set rating other than `boundary` is the
+  only thing that can lift a boundary. A category switched off by hand (`"categories": {"toys": false}`) is never
+  offered or described.
+- **Change over time:** after an OStim scene she took part in, her own memory of it moves the groups that were in
+  it by at most 3 points per scene and 15 in all. A forced scene only ever counts as bad. A group she already
+  disliked that goes badly again becomes a boundary, which is never removed automatically. Hand-set ratings and
+  manual mode never change.
+- **Prompts:** in an intimate talk, what she enjoys or dislikes is only given when she would share private things
+  with the player (the discovery gate). What she will not do is always given: a limit is stated, not hidden.
+  During a scene, the note says what she enjoys and objects plainly to anything over her limit. Liking something
+  is never consent.
+
+```json
+"Ysolda": {"intimacy": {"ratings": {"hand_holding": "strong", "anal": "boundary"}, "categories": {"tail": false}}}
+```
+
+Switch it off with `"intimacy": {"enabled": false}` at the top of the file or in one woman's entry.
+
+## Animation frameworks (`frameworks/`)
+
+`frameworks/base.py` is the interface: `available()`, `group_of(action)`, `scenes()`, plus `judge` (one scene
+against her preferences) and `compatible` (installed scenes that suit her, best first). Personality generation
+never imports a framework.
+
+`frameworks/ostim.py` is the OStim Standalone adapter, written against **7.5.1b** as installed:
+
+- it reads the real files under `Data/SKSE/Plugins/OStim` (`actions/*.json`, whose file names are the action ids,
+  and `scenes/**/*.json`), or the folder in `MANTELLA_LW_OSTIM_FOLDER`;
+- all 86 action ids are mapped to a group, and scenes may use an action's aliases ("kiss", "cunnilingus"), which
+  are read from each action file. `data/ostim_aliases.json` holds 7.5.1b's alias table for when the folder
+  can't be read;
+- an action it doesn't know (one added by an animation pack) is `unknown`, and a scene with one is never treated
+  as suitable. Map it in the settings file: `"intimacy": {"framework_map": {"someaction": "kissing"}}`;
+- nothing is invented: scene and action ids come only from the installed files.
+
+Editor commands:
+
+```
+python -m livingworld.personality --world W.sqlite intimacy Aela
+python -m livingworld.personality --world W.sqlite rate Aela rough boundary       (or strong/interested/neutral/dislikes/clear)
+python -m livingworld.personality --world W.sqlite category Aela toys off
+python -m livingworld.personality --world W.sqlite scenes Aela --ostim "D:\...\Data\SKSE\Plugins\OStim"
+python -m livingworld.personality --world W.sqlite check Aela OStim2PMissionaryMF
+```
+
 ## Integration points
 
 - `integration.py`:
@@ -202,5 +314,9 @@ Turn these commands off with `MANTELLA_LW_PERSONALITY_DEBUG=0`.
   "wants a word". Inside a conversation, she does take the first move when her profile and attraction say so.
 - Men have no profiles in this subsystem. Romance keeps using its own traits for them.
 - Hand-set values apply to every world. There are no per-world overrides yet.
-- The dialogue personality (vocabulary, toggles, sliders) and the intimacy action preferences with the OStim
-  adapter are the next two milestones.
+- Scene compatibility is advice for the AI and the admin tool. Nothing stops or picks an OStim scene in game yet:
+  over a limit, she objects in words. Choosing or stopping scenes needs game-side work.
+- Other frameworks (SexLab, Flower Girls) have no adapter. They are not treated as interchangeable with OStim.
+- Scene feelings come from her stored memory of the scene. A scene without one does not move her preferences.
+- The dialogue editor is the command line plus the JSON file. There is no in-game menu.
+- Intimacy action preferences with the OStim adapter are the next milestone.

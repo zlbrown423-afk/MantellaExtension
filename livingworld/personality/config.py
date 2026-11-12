@@ -33,6 +33,8 @@ class NpcSettings:
     private: list[str] = field(default_factory=list)
     adult_confirmed: bool = False
     note: str = ""
+    dialogue: dict[str, Any] = field(default_factory=dict)   # dialogue.py: toggles, sliders, vocabulary, remove
+    intimacy: dict[str, Any] = field(default_factory=dict)   # intimacy.py: ratings, categories
 
 
 @dataclass
@@ -41,6 +43,9 @@ class Settings:
     default_mode: str = "hybrid"
     evolution_enabled: bool = True
     evolution_rate: float = 1.0
+    dialogue_enabled: bool = True             # the dialogue personality module (dialogue.py)
+    intimacy_enabled: bool = True             # intimacy preferences (intimacy.py)
+    framework_map: dict[str, str] = field(default_factory=dict)   # extra animation action id -> activity group
     baseline: dict[str, float] = field(default_factory=dict)
     npcs: dict[str, NpcSettings] = field(default_factory=dict)
     problems: list[str] = field(default_factory=list)
@@ -97,6 +102,19 @@ def parse(data: Any, path: str | None = None) -> Settings:
             s.evolution_enabled = evo["enabled"]
         if isinstance(evo.get("rate"), (int, float)) and 0 <= evo["rate"] <= 3:
             s.evolution_rate = float(evo["rate"])
+    dia = data.get("dialogue") or {}
+    if isinstance(dia, dict) and isinstance(dia.get("enabled"), bool):
+        s.dialogue_enabled = dia["enabled"]
+    inti = data.get("intimacy") or {}
+    if isinstance(inti, dict):
+        from livingworld.personality.intimacy import GROUPS
+        if isinstance(inti.get("enabled"), bool):
+            s.intimacy_enabled = inti["enabled"]
+        for action, group in (inti.get("framework_map") or {}).items():
+            if group in GROUPS or group == "none":
+                s.framework_map[str(action).lower()] = group
+            else:
+                s.problems.append(f"intimacy.framework_map.{action}: unknown group {group!r}")
     for key, value in (data.get("baseline") or {}).items():
         if key in schema.NUMBERS and isinstance(value, (int, float)) and -50 <= value <= 50:
             s.baseline[key] = float(value)
@@ -124,6 +142,14 @@ def parse(data: Any, path: str | None = None) -> Settings:
             else:
                 s.problems.append(f"npcs.{key}.private: unknown attribute {item!r}")
         entry.adult_confirmed = raw.get("adult_confirmed") is True
+        if "intimacy" in raw:
+            from livingworld.personality import intimacy
+            entry.intimacy, found = intimacy.validate(raw["intimacy"])
+            s.problems += [f"npcs.{key}.{p}" for p in found]
+        if "dialogue" in raw:
+            from livingworld.personality import dialogue
+            entry.dialogue, found = dialogue.validate(raw["dialogue"])
+            s.problems += [f"npcs.{key}.{p}" for p in found]
         entry.note = str(raw.get("note") or "")
         if raw.get("plugin") and raw.get("base_id") and "|" not in key:
             # 'Gerdur': {"plugin": ..., "base_id": ...} is the same as the key 'Skyrim.esm|0x...'
@@ -135,6 +161,8 @@ def parse(data: Any, path: str | None = None) -> Settings:
 def to_json(s: Settings) -> dict[str, Any]:
     out: dict[str, Any] = {"version": schema.PROFILE_VERSION, "enabled": s.enabled, "default_mode": s.default_mode,
                            "evolution": {"enabled": s.evolution_enabled, "rate": s.evolution_rate},
+                           "dialogue": {"enabled": s.dialogue_enabled},
+                           "intimacy": {"enabled": s.intimacy_enabled, "framework_map": dict(s.framework_map)},
                            "baseline": dict(s.baseline), "npcs": {}}
     for key, e in s.npcs.items():
         entry: dict[str, Any] = {}
@@ -150,6 +178,10 @@ def to_json(s: Settings) -> dict[str, Any]:
             entry["adult_confirmed"] = True
         if e.note:
             entry["note"] = e.note
+        if e.dialogue:
+            entry["dialogue"] = e.dialogue
+        if e.intimacy:
+            entry["intimacy"] = e.intimacy
         out["npcs"][key] = entry
     return out
 

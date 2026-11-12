@@ -31,6 +31,31 @@
         }
       }
     },
+    "dialogue": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "intimacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "framework_map": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "animation action id -> activity group"
+        }
+      }
+    },
     "baseline": {
       "type": "object",
       "additionalProperties": false,
@@ -296,6 +321,494 @@
           },
           "note": {
             "type": "string"
+          },
+          "dialogue": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "toggles": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "flirtatious": {
+                    "type": "boolean",
+                    "description": "flirtatious talk"
+                  },
+                  "teasing": {
+                    "type": "boolean",
+                    "description": "playful teasing"
+                  },
+                  "suggestive": {
+                    "type": "boolean",
+                    "description": "suggestive remarks"
+                  },
+                  "romantic_expressions": {
+                    "type": "boolean",
+                    "description": "romantic expressions"
+                  },
+                  "direct_attraction": {
+                    "type": "boolean",
+                    "description": "saying outright that she is attracted"
+                  },
+                  "coy": {
+                    "type": "boolean",
+                    "description": "coy, reserved answers"
+                  },
+                  "confident": {
+                    "type": "boolean",
+                    "description": "confident talk"
+                  },
+                  "assertive": {
+                    "type": "boolean",
+                    "description": "assertive talk"
+                  },
+                  "dominant_tone": {
+                    "type": "boolean",
+                    "description": "a dominant tone"
+                  },
+                  "submissive_tone": {
+                    "type": "boolean",
+                    "description": "a yielding tone"
+                  },
+                  "double_entendres": {
+                    "type": "boolean",
+                    "description": "double entendres"
+                  },
+                  "intimate_compliments": {
+                    "type": "boolean",
+                    "description": "intimate compliments"
+                  },
+                  "initiate_flirtation": {
+                    "type": "boolean",
+                    "description": "starting flirtation herself"
+                  },
+                  "initiate_intimate_talk": {
+                    "type": "boolean",
+                    "description": "starting intimate conversations herself"
+                  },
+                  "discuss_preferences": {
+                    "type": "boolean",
+                    "description": "talking about what she likes"
+                  },
+                  "private_vocabulary": {
+                    "type": "boolean",
+                    "description": "her own pet phrases"
+                  }
+                }
+              },
+              "sliders": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "flirtation": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "how often and how much she flirts"
+                  },
+                  "suggestiveness": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "how suggestive she gets"
+                  },
+                  "playfulness": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "how much she teases and banters"
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "how directly she shows attraction"
+                  },
+                  "romantic_expression": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "how often she uses affectionate language"
+                  },
+                  "assertiveness": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "how strongly she steers the talk"
+                  },
+                  "vocabulary_variety": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "how varied her expressions are"
+                  },
+                  "initiative": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "how likely she is to raise these subjects herself"
+                  },
+                  "privacy": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "how much she keeps intimate talk out of public hearing"
+                  }
+                }
+              },
+              "vocabulary": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "expressions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "terms_of_affection": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "flirtatious": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "teasing": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "romantic": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "suggestive": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "disliked": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "forbidden": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "custom": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "remove": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "expressions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "terms_of_affection": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "flirtatious": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "teasing": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "romantic": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "suggestive": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "disliked": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "forbidden": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "custom": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "intimacy": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "ratings": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "affection": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "hugging and cuddling"
+                  },
+                  "hand_holding": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "holding hands"
+                  },
+                  "kissing": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "kissing"
+                  },
+                  "caressing": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "caresses and gentle touch"
+                  },
+                  "massage": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "massage and bathing together"
+                  },
+                  "groping": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "being groped"
+                  },
+                  "manual": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "intimacy with hands"
+                  },
+                  "oral": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "intimacy with mouths"
+                  },
+                  "intercourse": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "lovemaking"
+                  },
+                  "anal": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "anal intimacy"
+                  },
+                  "toys": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "toys"
+                  },
+                  "rough": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "rough play (spanking, hair pulling, choking)"
+                  },
+                  "climax_on_body": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "being finished on"
+                  },
+                  "solo": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "touching herself while watched"
+                  },
+                  "tail": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "tail play (beast races)"
+                  },
+                  "vampire": {
+                    "enum": [
+                      "strong",
+                      "interested",
+                      "neutral",
+                      "dislikes",
+                      "boundary"
+                    ],
+                    "description": "a vampire's bite"
+                  }
+                }
+              },
+              "categories": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "affection": {
+                    "type": "boolean"
+                  },
+                  "hand_holding": {
+                    "type": "boolean"
+                  },
+                  "kissing": {
+                    "type": "boolean"
+                  },
+                  "caressing": {
+                    "type": "boolean"
+                  },
+                  "massage": {
+                    "type": "boolean"
+                  },
+                  "groping": {
+                    "type": "boolean"
+                  },
+                  "manual": {
+                    "type": "boolean"
+                  },
+                  "oral": {
+                    "type": "boolean"
+                  },
+                  "intercourse": {
+                    "type": "boolean"
+                  },
+                  "anal": {
+                    "type": "boolean"
+                  },
+                  "toys": {
+                    "type": "boolean"
+                  },
+                  "rough": {
+                    "type": "boolean"
+                  },
+                  "climax_on_body": {
+                    "type": "boolean"
+                  },
+                  "solo": {
+                    "type": "boolean"
+                  },
+                  "tail": {
+                    "type": "boolean"
+                  },
+                  "vampire": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
           }
         }
       },
