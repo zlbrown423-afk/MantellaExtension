@@ -71,6 +71,8 @@ def test_each_kind_covers_its_own_areas_only():
     assert T.covers(["hug"], "upper back") == "hug"
     assert T.covers(["hug"], "left shoulder") == "hug"
     assert T.covers(["hug"], "chest") is None and T.covers(["hug"], "backside") is None
+    assert T.covers(["hug"], "neck") == "hug" and T.covers(["hug"], "right hip") == "hug"   # hands drift in a hug
+    assert T.covers(["hug"], "hips") is None and T.covers(["hug"], "face") is None
     assert T.covers(["hands"], "right hand") == "hands"
     assert T.covers(["butt"], "backside") == "butt" and T.covers(["butt"], "hips") is None   # the front is not the backside
     assert T.covers(["hug", "chest"], "chest") == "chest"

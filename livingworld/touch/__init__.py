@@ -52,7 +52,8 @@ INTIMATE = frozenset({"butt", "chest", "anywhere"})   # never while drunk
 # Areas (without "left"/"right") each kind covers. Areas are the ones the game sends on a grab
 # (perception/records.py AREAS).
 AREAS: dict[str, frozenset[str]] = {
-    "hug": frozenset({"upper back", "lower back", "side", "shoulder", "upper arm", "stomach", "head"}),
+    "hug": frozenset({"upper back", "lower back", "side", "hip", "shoulder", "upper arm", "stomach", "head",
+                      "neck"}),   # arms round someone: hands drift to the neck or the side of the hip
     "hands": frozenset({"hand", "forearm"}),
     "back": frozenset({"upper back", "lower back", "shoulder"}),
     "neck": frozenset({"neck", "head"}),
