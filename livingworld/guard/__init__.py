@@ -12,6 +12,11 @@ crime faction, so arrests, bounties and guard AI behave exactly as before.
 Each hold's guard is configured in ``data/orgs.json``. Generic guards the player meets get a stable
 personal name (``profiles.py``). Rank, status and history ride the save timeline like tasks do.
 
+G3 promotions (``promotion.py``): a rules-only promotion board checks time in rank, training, duties, merit
+(with diminishing returns per duty kind), written reports, deeds, a clean record, the superior's view and
+open seats. A pass makes the superior want a word; they announce the promotion in the next conversation and
+the member may turn it down. Off with ``MANTELLA_LW_GUARD_PROMOTIONS=0``.
+
 On with Living World unless ``MANTELLA_LW_GUARD=0``. Children never recruit, serve or witness here.
 """
 from __future__ import annotations
