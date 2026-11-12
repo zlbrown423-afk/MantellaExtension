@@ -494,6 +494,19 @@ memories, so a run of grabs pushed every memory of what was said out of the prom
 `MANTELLA_LW_MEMORY_BOOST=0` turns the reply-length, retry, line-matching, recall and recap changes off. The
 reply mending stays on: it only keeps what the old code threw away.
 
+## Guard names: generic guards show their own name
+
+Generic guards already get a stable personal name when the player first talks to them (`guard/profiles.py`,
+table `guard_profile`, keyed by the guard's reference ID and not on the timeline). The game now shows it:
+"Whiterun Guard" over the crosshair, in subtitles and in notices becomes, say, "Gunnar". With the fog on, only
+once the player has learned it (the guard says it, someone here says it, or the player calls the guard by it;
+stored in `name_known`, so an older save forgets it). With the fog off, as soon as the guard has a name.
+
+Identity does not change: the game still sends "Whiterun Guard" to Mantella (`LivingWorldFog.RealName`), so
+the npc row, voice binding, summaries and memories stay where they were. Code in `guard/names.py`; keys
+`mantella_lw_guard_names_on`, `mantella_lw_guard_name_ids`, `mantella_lw_guard_names`. Needs the matching
+Mantella-Spell build. Off with `set MANTELLA_LW_GUARD_NAMES=0` (the game puts "Whiterun Guard" back).
+
 ## Fog: names and places unknown until told
 
 On with `MANTELLA_LIVING_WORLD=1` and the matching Mantella-Spell build (`LivingWorldFog.psc`). Switch off with
