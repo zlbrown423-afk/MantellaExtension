@@ -85,7 +85,7 @@ class Guard:
         self.promoted: tuple[str, str, int] | None = None   # G3: (rank from, rank to, superior) given this conversation
         self._declined: tuple[str, str] | None = None        # G3: (from, to) turned down this conversation
         self.spar_partners: set[str] = set()   # G2g: fellow guards told the player needs a fist bout (by name)
-        self._worded_report = False            # the player's latest line was judged as a report (filed or not ready)
+        self._worded_report = False            # a report was filed from the player's words on their latest line
 
     def take_notices(self) -> list[str]:
         out, self.notices = self.notices, []
@@ -243,7 +243,6 @@ class Guard:
                     missing = (f"not long enough yet: the shift runs until {P.clock(DU.shift_end(db, task, d))} and "
                                f"{scene.player_name} may report back from {P.clock(DU.assigned_gt(db, task) + d.shift_hours / 48.0)}")
                 logger.log(23, f"Living World guard: report on duty {task.task_id} by word, not ready: {missing}")
-                self._worded_report = True     # judged already: a ReportDuty now would file a false report
                 return [P.report_note(name, scene.player_name, title, "not_ready", False, missing)]
         result, _ = self._duty_action(REPORT, boss, scene)
         self._worded_report = True     # a ReportDuty in the reply to this line would report the NEXT duty

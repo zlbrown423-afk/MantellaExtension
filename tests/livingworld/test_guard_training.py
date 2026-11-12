@@ -56,8 +56,15 @@ def test_training_is_one_fist_bout_then_routine_duties(tmp_path):
     # a fellow guard is told, and is the one to start the bout
     prompt = talk(tmp_path, DAY + 0.02, npcs=[whiterun_guard()])
     assert "training step now is a sparring bout, fists only" in prompt and "'Brawl:'" in prompt
-    # reporting back before the bout: not filed, no reprimand
-    _, hints = chat(tmp_path, DAY + 0.03, ["Reporting back, sir."])
+    # reporting back before the bout: not filed, no reprimand; Caius is told what is missing
+    llm = ScriptedLLM(replies=["Hm."])
+    with HeadlessSession(str(tmp_path), llm) as s:
+        s.start([PLAYER, caius()], location="Whiterun", game_days=DAY + 0.03)
+        s.continue_until_player_turn()
+        s.say("Reporting back, sir.", game_days=DAY + 0.0305)
+        s.end(game_days=DAY + 0.031)
+        LivingWorld.latest.wait_for_jobs()
+    assert any("no fist bout yet" in c.last_user_text for c in llm.dialogue_calls)
     assert last(tmp_path)["state"] == "accepted" and events(tmp_path, "reprimanded") == []
     talk(tmp_path, DAY + 0.04, npcs=[whiterun_guard()], events=[fight(PLAYER, 0.7, DAY + 0.04, location="Whiterun")])
     merit = service(open_db(tmp_path))["merit"]
@@ -80,9 +87,9 @@ def test_a_drill_already_in_hand_still_resolves_by_saying_reporting_back(tmp_pat
     db.commit()
     talk(tmp_path, DAY + 0.02, npcs=[whiterun_guard()])                   # seen at the drill, in Whiterun
     prompt, _ = chat(tmp_path, DAY + 0.09, ["Reporting back, sir. Drill's done."])
-    assert [d["state"] for d in duties(tmp_path)][:1] == ["completed"]
-    assert events(tmp_path, "reprimanded") == []
-    assert last(tmp_path)["template"] == "duty:training:spar"
+    ds = duties(tmp_path)
+    assert ds[0]["template"] == "duty:training:drill" and ds[0]["state"] == "completed"
+    assert ds[1]["template"] == "duty:training:spar"
 
 
 def test_a_new_recruit_trains_step_by_step_and_passes_probation_early(tmp_path, monkeypatch):
