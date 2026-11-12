@@ -493,7 +493,7 @@
     ]
   },
   "training": {
-    "_about": "G2g recruit training (guard/training.py). A member of a rank in for_ranks gets these steps from their superior one at a time, in order, before routine duties and incidents, with no rest needed between steps. need: seen (be at the place, report after half the step's hours), fight (a sparring bout: the game's fight record at the place), escort (seen at the place with a fellow guard in the conversation), quiz (the superior asks the questions below there and then; an answer with any of a question's words counts right; pass_right right answers pass, fail_wrong wrong ones fail the attempt without a reprimand). Each step adds its merit; all done adds complete_merit and, with no reprimand, passes probation early (early_probation).",
+    "_about": "G2g recruit training (guard/training.py). A member of a rank in for_ranks gets these steps from their superior one at a time, in order, before routine duties and incidents, with no rest needed between steps. need: seen (be at the place, report after half the step's hours), fight (a sparring bout: the game's fight record at the place), escort (seen at the place with a fellow guard in the conversation), quiz (the superior asks the questions below there and then; an answer with any of a question's words counts right; pass_right right answers pass, fail_wrong wrong ones fail the attempt without a reprimand). Each step adds its merit; all done adds complete_merit and, with no reprimand, passes probation early (early_probation). Since 2026-11-12 the course is the fist bout only, then routine duties; retired_steps keeps the old steps so a step already given still resolves when reported, but they are not handed out any more and do not count toward the course.",
     "for_ranks": [
       "recruit"
     ],
@@ -503,50 +503,14 @@
     "early_probation": true,
     "steps": [
       {
-        "key": "drill",
-        "title": "drill with spear and shield in the barracks yard",
-        "why": "A recruit who cannot hold a shield wall is a danger to the guards beside them",
-        "instructions": "Go to the barracks and drill until the drill master is satisfied: stance, shield, spear, and keeping your place in line.",
-        "where": [
-          "Whiterun"
-        ],
-        "need": "seen",
-        "shift_hours": 2,
-        "merit": 0.5
-      },
-      {
         "key": "spar",
         "title": "go a sparring bout with fists against a fellow guard",
         "why": "Most trouble a guard meets is a drunk or a brawler, and it is settled with fists, not steel",
-        "instructions": "Ask a fellow guard for a bout, fists only, and fight it out. Win or lose, you learn.",
+        "instructions": "Ask any fellow guard in Whiterun for a bout, fists only, and fight it out. Win or lose, you learn. Then come back to the Commander and report.",
         "where": [
           "Whiterun"
         ],
         "need": "fight",
-        "shift_hours": 3,
-        "merit": 0.5
-      },
-      {
-        "key": "quiz",
-        "title": "answer questions on Whiterun's law and the guard's orders",
-        "why": "A guard who does not know the law cannot enforce it",
-        "instructions": "Answer the Commander's questions on the law and on standing orders.",
-        "where": [
-          "Whiterun"
-        ],
-        "need": "quiz",
-        "shift_hours": 1,
-        "merit": 0.5
-      },
-      {
-        "key": "patrol",
-        "title": "walk a patrol through the city beside a senior guard",
-        "why": "The streets are learned on foot, beside someone who knows them",
-        "instructions": "Find a senior guard and walk their round with them, through the Plains District and up to the Wind District.",
-        "where": [
-          "Whiterun"
-        ],
-        "need": "escort",
         "shift_hours": 3,
         "merit": 0.5
       }
@@ -638,6 +602,44 @@
           "station",
           "tower"
         ]
+      }
+    ],
+    "retired_steps": [
+      {
+        "key": "drill",
+        "title": "drill with spear and shield in the barracks yard",
+        "why": "A recruit who cannot hold a shield wall is a danger to the guards beside them",
+        "instructions": "Go to the barracks and drill until the drill master is satisfied: stance, shield, spear, and keeping your place in line.",
+        "where": [
+          "Whiterun"
+        ],
+        "need": "seen",
+        "shift_hours": 2,
+        "merit": 0.5
+      },
+      {
+        "key": "quiz",
+        "title": "answer questions on Whiterun's law and the guard's orders",
+        "why": "A guard who does not know the law cannot enforce it",
+        "instructions": "Answer the Commander's questions on the law and on standing orders.",
+        "where": [
+          "Whiterun"
+        ],
+        "need": "quiz",
+        "shift_hours": 1,
+        "merit": 0.5
+      },
+      {
+        "key": "patrol",
+        "title": "walk a patrol through the city beside a senior guard",
+        "why": "The streets are learned on foot, beside someone who knows them",
+        "instructions": "Find a senior guard and walk their round with them, through the Plains District and up to the Wind District.",
+        "where": [
+          "Whiterun"
+        ],
+        "need": "escort",
+        "shift_hours": 3,
+        "merit": 0.5
       }
     ]
   },

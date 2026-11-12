@@ -38,7 +38,55 @@ def last(tmp_path):
     return duties(tmp_path)[-1]
 
 
-def test_a_new_recruit_trains_step_by_step_and_passes_probation_early(tmp_path):
+def full_course(monkeypatch):
+    """The old four-step course (drill, bout, quiz, patrol), to test the step kinds the shipped course retired."""
+    import dataclasses
+    c = TR.course("whiterun_guard")
+    old = {s.key: s for s in c.retired + c.steps}
+    full = dataclasses.replace(c, steps=tuple(old[k] for k in ("drill", "spar", "quiz", "patrol")), retired=())
+    monkeypatch.setattr(TR, "course", lambda key: full)
+
+
+def test_training_is_one_fist_bout_then_routine_duties(tmp_path):
+    enlisted(tmp_path, trained=False)
+    prompt = talk(tmp_path, DAY + 0.01)
+    assert "Commander Caius is training Torvar, a new recruit (step 1 of 1): go a sparring bout" in prompt
+    assert any(h.startswith("Training 1/1:") and "Ask any Whiterun guard for a fist bout, then tell Commander Caius"
+               " you're reporting back." in h for h in talk.hints)
+    # a fellow guard is told, and is the one to start the bout
+    prompt = talk(tmp_path, DAY + 0.02, npcs=[whiterun_guard()])
+    assert "training step now is a sparring bout, fists only" in prompt and "'Brawl:'" in prompt
+    # reporting back before the bout: not filed, no reprimand
+    _, hints = chat(tmp_path, DAY + 0.03, ["Reporting back, sir."])
+    assert last(tmp_path)["state"] == "accepted" and events(tmp_path, "reprimanded") == []
+    talk(tmp_path, DAY + 0.04, npcs=[whiterun_guard()], events=[fight(PLAYER, 0.7, DAY + 0.04, location="Whiterun")])
+    merit = service(open_db(tmp_path))["merit"]
+    _, hints = chat(tmp_path, DAY + 0.05, ["Reporting back, Commander. The bout is done."])
+    assert duties(tmp_path)[0]["state"] == "completed"
+    assert "Training complete!" in hints
+    assert len(events(tmp_path, "trained")) == 1
+    svc = service(open_db(tmp_path))
+    assert svc["status"] == "active" and svc["merit"] > merit + 2
+    talk(tmp_path, DAY + 0.6)
+    assert not last(tmp_path)["template"].startswith("duty:training:")
+
+
+def test_a_drill_already_in_hand_still_resolves_by_saying_reporting_back(tmp_path):
+    """The drill was retired from the course; a recruit holding one can still report it, then gets the bout."""
+    enlisted(tmp_path, trained=False)
+    db = open_db(tmp_path)
+    talk(tmp_path, DAY + 0.01)
+    db.execute("UPDATE task SET template = 'duty:training:drill' WHERE template = 'duty:training:spar'")
+    db.commit()
+    talk(tmp_path, DAY + 0.02, npcs=[whiterun_guard()])                   # seen at the drill, in Whiterun
+    prompt, _ = chat(tmp_path, DAY + 0.09, ["Reporting back, sir. Drill's done."])
+    assert [d["state"] for d in duties(tmp_path)][:1] == ["completed"]
+    assert events(tmp_path, "reprimanded") == []
+    assert last(tmp_path)["template"] == "duty:training:spar"
+
+
+def test_a_new_recruit_trains_step_by_step_and_passes_probation_early(tmp_path, monkeypatch):
+    full_course(monkeypatch)
     enlisted(tmp_path, trained=False)
     prompt = talk(tmp_path, DAY + 0.01)
     assert "Commander Caius is training Torvar, a new recruit (step 1 of 4): drill" in prompt
@@ -80,7 +128,8 @@ def test_a_new_recruit_trains_step_by_step_and_passes_probation_early(tmp_path):
     assert not last(tmp_path)["template"].startswith("duty:training:")
 
 
-def test_failing_the_quiz_is_no_reprimand_and_can_be_retaken(tmp_path):
+def test_failing_the_quiz_is_no_reprimand_and_can_be_retaken(tmp_path, monkeypatch):
+    full_course(monkeypatch)
     enlisted(tmp_path, trained=False)
     talk(tmp_path, DAY + 0.01, say="debug guard seen")                    # the drill...
     for verb in ("report", "duty", "seen", "report", "duty"):              # ...and the bout, by test commands
@@ -145,10 +194,10 @@ def test_first_orders_come_in_the_conversation_the_recruit_enlists_in(tmp_path):
                                                       .get("mantella_lw_hints") or [])]
     assert "has a duty" not in llm.dialogue_calls[0].system_prompt          # not yet a member when it was written
     noted = [c.all_text for c in llm.dialogue_calls if "real first orders" in c.last_user_text]
-    assert len(noted) == 1 and "(step 1 of 4): drill" in noted[0]
+    assert len(noted) == 1 and "(step 1 of 1): go a sparring bout" in noted[0]
     assert sum("real first orders" in c.last_user_text for c in llm.dialogue_calls) == 1   # once only
-    assert [d["template"] for d in duties(tmp_path)] == ["duty:training:drill"]
-    assert any(h.startswith("Training 1/4:") for h in hints)
+    assert [d["template"] for d in duties(tmp_path)] == ["duty:training:spar"]
+    assert any(h.startswith("Training 1/1:") for h in hints)
 
 
 def test_no_first_orders_when_the_superior_is_not_there(tmp_path):

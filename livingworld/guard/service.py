@@ -84,6 +84,8 @@ class Guard:
         self._first_orders: int | None = None        # service id enlisted in this conversation, first duty not given yet
         self.promoted: tuple[str, str, int] | None = None   # G3: (rank from, rank to, superior) given this conversation
         self._declined: tuple[str, str] | None = None        # G3: (from, to) turned down this conversation
+        self.spar_partners: set[str] = set()   # G2g: fellow guards told the player needs a fist bout (by name)
+        self._worded_report = False            # the player's latest line was judged as a report (filed or not ready)
 
     def take_notices(self) -> list[str]:
         out, self.notices = self.notices, []
@@ -185,7 +187,8 @@ class Guard:
 
     def turn_notes(self, scene: Scene, text: str) -> list[str]:
         """Notes for the AI on the player's line: first orders right after enlisting, and arrests (G2f)."""
-        return self.first_orders(scene) + self.arrest_turn(scene, text)
+        self._worded_report = False
+        return self.first_orders(scene) + self.report_turn(scene, text) + self.arrest_turn(scene, text)
 
     def first_orders(self, scene: Scene) -> list[str]:
         """The player enlisted earlier in this conversation. The prompt was written before that, so the superior
@@ -211,6 +214,53 @@ class Guard:
                 f"{name} now. These are {scene.player_name}'s real first orders: {name} gives exactly this, "
                 f"and any other duty mentioned earlier in this conversation is replaced by it:\n"
                 + "\n".join(f"- {line}" for line in lines)]
+
+    def report_turn(self, scene: Scene, text: str) -> list[str]:
+        """G2g: the player tells their superior (here) they are reporting back. The model often never begins its
+        reply with ReportDuty, which left a drilled recruit stuck; so the rules judge the report now. A duty not done
+        yet is not filed (no reprimand): the superior says what is missing. Returns notes for the AI, with the next
+        orders when the report was accepted."""
+        from livingworld.guard import training_words as TW
+        if scene.player_id is None or not TW.enabled() or not TW.says_reporting(text):
+            return []
+        with self.store.transaction() as db:
+            svc = S.current(db, scene.player_id)
+            org = O.by_key(svc.org_key) if svc else None
+            boss = DU.superior_id(db, org, svc) if org else None
+            if org is None or boss is None or boss not in scene.present:
+                return []
+            task = DU.in_hand(db, svc.member_id)
+            d = DU.duty_for(db, task) if task else None
+            if task is None or d is None or d.need == "quiz":
+                return []
+            name = self._name(db, boss) or "the superior"
+            title = task.title
+            if not DU.ready(db, task, d, scene.now):
+                if DU.done_count(db, task, d) == 0:
+                    missing = ("no fist bout yet: ask a fellow guard for one and fight it out" if d.need == "fight"
+                               else f"nobody has seen {scene.player_name} at it yet")
+                else:
+                    missing = (f"not long enough yet: the shift runs until {P.clock(DU.shift_end(db, task, d))} and "
+                               f"{scene.player_name} may report back from {P.clock(DU.assigned_gt(db, task) + d.shift_hours / 48.0)}")
+                logger.log(23, f"Living World guard: report on duty {task.task_id} by word, not ready: {missing}")
+                self._worded_report = True     # judged already: a ReportDuty now would file a false report
+                return [P.report_note(name, scene.player_name, title, "not_ready", False, missing)]
+        result, _ = self._duty_action(REPORT, boss, scene)
+        self._worded_report = True     # a ReportDuty in the reply to this line would report the NEXT duty
+        logger.log(23, f"Living World guard: report by word to {name}: {result}")
+        r = self.filed
+        if r is None or r.task is None or r.outcome != "done":
+            return []
+        notes = [P.report_note(name, scene.player_name, title, "done", r.trained, None)]
+        with self.store.transaction() as db:
+            svc = S.current(db, scene.player_id)
+            org = O.by_key(svc.org_key) if svc else None
+            lines = self._duty_lines(db, boss, name, org, svc, scene) if org else []
+        if lines:
+            notes.append(f"Here is what the guard's record says for {name} now. Any next orders in it are "
+                         f"{scene.player_name}'s real next orders: {name} gives exactly those and makes up no other:\n"
+                         + "\n".join(f"- {line}" for line in lines))
+        return notes
 
     def arrest_turn(self, scene: Scene, text: str) -> list[str]:
         """G2f: the player, serving, says someone present is under arrest. The rules decide what that person does;
@@ -393,6 +443,10 @@ class Guard:
         if npc_id != boss:
             if task is not None:
                 out.append(P.on_duty_line(name, player, task))
+                held = DU.duty_for(db, task)
+                if held is not None and held.training and held.need == "fight":
+                    out.append(P.spar_line(name, player))
+                    self.spar_partners.add(name)
             person = org.superior(svc.rank_key)
             if person is not None:
                 out.append(P.report_to_line(name, player, person.name))
@@ -428,13 +482,17 @@ class Guard:
                 boss_name = self._name(db, npc_id) or "your superior"
                 if d.training:
                     n, total = TR.progress(db, org, svc)
-                    self.notices.append(f"Training {n + 1}/{total}: {d.title}.")
+                    how = {"fight": "Ask any Whiterun guard for a fist bout", "quiz": "Answer the questions now",
+                           "escort": "Walk the round beside a senior guard"}.get(d.need, "Be there about "
+                                                                                + P.hours_text(d.shift_hours / 48))
+                    self.notices.append(f"Training {n + 1}/{total}: {d.title}. {how}"
+                                        + ("." if d.need == "quiz" else f", then tell {boss_name} you're reporting back."))
                 elif d.incident_id is not None:
                     self.notices.append(f"Trouble: {d.title}. " + ("Fight them there" if d.need == "fight" else
-                                        "Go there") + f", then report back to {boss_name}.")
+                                        "Go there") + f", then tell {boss_name} you're reporting back.")
                 else:
                     self.notices.append(f"Duty: {d.title}. Shift: {P.hours_text(d.shift_hours / 24)}. "
-                                        f"Be seen at your post, then report back to {boss_name}.")
+                                        f"Be seen at your post, then tell {boss_name} you're reporting back.")
         elif task is None:
             failed = [c for c in checks if not c.ok]
             rested_at = None
@@ -486,6 +544,7 @@ class Guard:
         self.bookings = []
         self.promoted = None
         self._declined = None
+        self.spar_partners = set()
         with self.store.transaction() as db:
             svc = S.current(db, scene.player_id) if scene.player_id is not None else None
             org = O.by_key(svc.org_key) if svc else None
@@ -620,6 +679,8 @@ class Guard:
                 return "this NPC is not the player's superior", None
             witnesses = [i for i in scene.present if i != scene.player_id]
             if identifier == REPORT:
+                if self._worded_report:
+                    return "already judged on the player's words this turn", None
                 held = DU.in_hand(db, svc.member_id)
                 d = DU.duty_for(db, held) if held is not None else None
                 r = DU.report(db, org, svc, npc_id, scene.now, scene.said, location=scene.location,

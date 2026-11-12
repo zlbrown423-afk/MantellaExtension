@@ -208,6 +208,27 @@ def training_line(name: str, player: str, d, step_no: int, steps: int, *, new: b
             f"'{REPORT_KEY}:'. The guard's record shows whether it was really done.")
 
 
+def spar_line(name: str, player: str) -> str:
+    """G2g: a fellow guard, while the player's training step is a fist bout with one of them."""
+    return (f"{player} is a recruit whose training step now is a sparring bout, fists only, with a fellow guard. If "
+            f"{player} asks {name} for a bout, {name} agrees (friendly training, no hard feelings, no steel) and says "
+            f"so plainly, for example 'Put up your fists' or 'Let's spar', and begins the reply with 'Brawl:'.")
+
+
+def report_note(name: str, player: str, title: str, outcome: str, trained: bool, missing: str | None) -> str:
+    """G2g: the player said they are reporting back; the guard's rules already judged it."""
+    if outcome == "not_ready":
+        return (f"{player} says they are reporting back on their duty to {title}, but the guard's record shows it is "
+                f"not done yet: {missing}. {name} says so plainly and tells {player} what is still to do; no "
+                f"reprimand. Do not begin the reply with '{REPORT_KEY}:'.")
+    done = (f"{player} is reporting back on their duty to {title}. The guard's record has already settled it: it was "
+            f"done, and the report is accepted. {name} acknowledges it in their own words and does not begin the reply "
+            f"with '{REPORT_KEY}:'.")
+    if trained:
+        done += f" That finishes {player}'s recruit training: {name} says so; from now on {player} gets routine duties."
+    return done
+
+
 def quiz_line(name: str, player: str, org: O.Org, questions, right: list[str], wrong: int, step_no: int, steps: int,
               pass_right: int) -> str:
     """G2g: the superior tests the recruit on the hold's law and the guard's orders, now."""
