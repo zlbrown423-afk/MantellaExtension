@@ -291,12 +291,13 @@ def _seen(store: WorldStore, recall: Recall, now_gt: float) -> None:
 
 def opinion_line(store: WorldStore, npc_id: int, player_id: int) -> str | None:
     """How this NPC feels about the player, from their own relationship values, in plain words."""
-    row = store.query("SELECT r.trust, r.affinity, r.respect, r.admiration, r.fear, r.suspicion, p.display_name"
+    row = store.query("SELECT r.trust, r.affinity, r.respect, r.admiration, r.fear, r.suspicion, r.attraction,"
+                      " p.display_name"
                       " FROM v_relationship r JOIN npc p ON p.npc_id = r.to_id WHERE r.from_id = ? AND r.to_id = ?",
                       (npc_id, player_id))
     if not row:
         return None
-    trust, affinity, respect, admiration, fear, suspicion, name = row[0]
+    trust, affinity, respect, admiration, fear, suspicion, attraction, name = row[0]
     feelings = []
     if trust >= 0.3:
         feelings.append("I trust them")
@@ -322,7 +323,15 @@ def opinion_line(store: WorldStore, npc_id: int, player_id: int) -> str | None:
         feelings.append("I'm suspicious of them")
     elif suspicion >= 0.04:
         feelings.append("I'm keeping an eye on them")
+    if attraction >= 0.6:
+        feelings.append("I'm strongly attracted to them")
+    elif attraction >= 0.3:
+        feelings.append("I find them attractive")
     if not feelings:
         return None
+    if attraction >= 0.3:
+        return (f"How I feel about {name} right now: {', '.join(feelings)}. This comes from what I have seen and "
+                f"heard; let it show in my manner rather than saying it outright. Wanting someone is not a yes: "
+                f"I decide each time what I am willing to do.")
     return (f"How I feel about {name} right now: {', '.join(feelings)}. This comes from what I have seen and heard; "
             f"let it show in my manner rather than saying it outright.")

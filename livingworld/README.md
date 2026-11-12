@@ -494,6 +494,28 @@ memories, so a run of grabs pushed every memory of what was said out of the prom
 `MANTELLA_LW_MEMORY_BOOST=0` turns the reply-length, retry, line-matching, recall and recap changes off. The
 reply mending stays on: it only keeps what the old code threw away.
 
+### Planted memories: telling an NPC by hand
+
+`memory/plant.py` writes what one NPC knows and feels into one playthrough's database, for things the game
+did that Living World never saw (Fralia Gray-Mane, 2026-11-12: Thorald was freed from Northwatch Keep and
+moved somewhere safe, and she is now very fond of the player and drawn to him). A Mantella character override
+would change the NPC in every playthrough; this changes only the one world.
+
+    python -m livingworld.memory.plant --world <data/livingworld/World.sqlite> --conversations <data/Skyrim/conversations> plant.json [--dry-run]
+
+The file lists memories (first person), feelings toward the player as target values (affinity, trust,
+respect, admiration, fear, suspicion, attraction, familiarity), opinions as target standings
+(`social/reputation.py` domains; one brought near 0 drops the opinion it formed), facts that replace older ones
+with the same name, and a paragraph for her Mantella summary file. Everything is written at one game moment
+(by default just after her newest memory) on the oldest timeline of the current save's chain that holds it, so
+later saves see it and an older save does not, like anything else she lived through. Running the file again
+changes nothing. Example: `memory/plants/ZacharyLex1_fralia.json`. Close Mantella first.
+
+Attraction is a feeling, not an action. Recall now names it in the "How I feel about ..." line ("I find them
+attractive" from 0.3, "I'm strongly attracted to them" from 0.6) with "Wanting someone is not a yes: I decide
+each time"; consent (`social/consent.py`) and touch consent still decide every time. For a woman with a
+personality profile (ME#72), `personality/prompt.py` reads the same attraction value.
+
 ## Guard names: generic guards show their own name
 
 Generic guards already get a stable personal name when the player first talks to them (`guard/profiles.py`,
