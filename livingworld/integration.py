@@ -696,11 +696,12 @@ class LivingWorld:
 
     @_never_raises
     def guard_notes(self, text: str, context: Any) -> list[str]:
-        """G2f: notes for the AI on the player's line, such as what someone the player arrests does."""
+        """Notes for the AI on the player's line: first orders just after enlisting, and what someone the player
+        arrests does (G2f)."""
         if not self.guard or self.conv_id is None or context is not self._context or not text:
             return []
         scene = self._guard_scene()
-        return self._guard_for(self.store).arrest_turn(scene, text) if scene else []
+        return self._guard_for(self.store).turn_notes(scene, text) if scene else []
 
     @_never_raises
     def hearing_note(self, text: str, context: Any) -> str | None:

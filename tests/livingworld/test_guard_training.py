@@ -128,3 +128,42 @@ def test_a_report_with_made_up_claims_costs_merit(tmp_path):
     rep = events(tmp_path, "written_report")
     assert len(rep) == 1 and '"verdict": "made up"' in rep[0]["payload_json"]
     assert "dragon" in rep[0]["payload_json"] and "bandits" in rep[0]["payload_json"]
+
+
+def test_first_orders_come_in_the_conversation_the_recruit_enlists_in(tmp_path):
+    """The prompt is written before the player enlists, so without this Caius invents a duty of his own."""
+    llm = ScriptedLLM(rules=[ENLIST, REPORT, PAY], replies=["Hm."])
+    with HeadlessSession(str(tmp_path), llm) as s:
+        s.start([PLAYER, caius()], location="Whiterun", game_days=DAY)
+        s.continue_until_player_turn()
+        s.say("I want to join the guard.", game_days=DAY + 0.0005)
+        s.say("Yes, sir. What are my orders?", game_days=DAY + 0.001)
+        s.say("Understood.", game_days=DAY + 0.0015)
+        s.end(game_days=DAY + 0.002)
+        LivingWorld.latest.wait_for_jobs()
+        hints = [h for _, r in s.exchanges for h in ((r.get(comm_consts.KEY_REPLYTYPE_NPCTALK) or {})
+                                                      .get("mantella_lw_hints") or [])]
+    assert "has a duty" not in llm.dialogue_calls[0].system_prompt          # not yet a member when it was written
+    noted = [c.all_text for c in llm.dialogue_calls if "real first orders" in c.last_user_text]
+    assert len(noted) == 1 and "(step 1 of 4): drill" in noted[0]
+    assert sum("real first orders" in c.last_user_text for c in llm.dialogue_calls) == 1   # once only
+    assert [d["template"] for d in duties(tmp_path)] == ["duty:training:drill"]
+    assert any(h.startswith("Training 1/4:") for h in hints)
+
+
+def test_no_first_orders_when_the_superior_is_not_there(tmp_path):
+    """Irileth takes the player on; Caius, who gives duties, is not in the conversation."""
+    irileth = whiterun_guard()
+    irileth.update(actors.actor("Irileth", 0x00013BB8, 0x00013BB9, 1, "DarkElf", "FemaleDarkElf"))
+    irileth["mantella_lw_is_guard"] = False
+    llm = ScriptedLLM(rules=[ENLIST], replies=["Hm."])
+    with HeadlessSession(str(tmp_path), llm) as s:
+        s.start([PLAYER, irileth], location="Whiterun", game_days=DAY)
+        s.continue_until_player_turn()
+        s.say("I want to join the guard.", game_days=DAY + 0.0005)
+        s.say("What now?", game_days=DAY + 0.001)
+        s.end(game_days=DAY + 0.002)
+        LivingWorld.latest.wait_for_jobs()
+    assert service(open_db(tmp_path))["status"] == "probation"
+    assert not any("real first orders" in c.last_user_text for c in llm.dialogue_calls)
+    assert duties(tmp_path) == []
