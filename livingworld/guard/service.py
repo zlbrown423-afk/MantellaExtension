@@ -261,8 +261,9 @@ class Guard:
                 return []
             task = DU.in_hand(db, svc.member_id)
             d = DU.duty_for(db, task) if task else None
-            if task is None or d is None or d.need == "quiz":
-                return []
+            if task is None or d is None or d.need == "quiz" or task.task_id in self._assigned:
+                return []      # nothing to report on, or a duty given in this very conversation (they came for
+                               # something else, e.g. booking a prisoner)
             name = self._name(db, boss) or "the superior"
             title = task.title
             if not DU.ready(db, task, d, scene.now):
