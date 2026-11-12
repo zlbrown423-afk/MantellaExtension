@@ -189,7 +189,8 @@ class PerceptionRecord:
     level: int | None = None        # arousal: TNG's bend, -10 (soft) .. 9
     dead: list[GameActor] = field(default_factory=list)   # react via=surrender: other dead companions (d=)
     killer: str | None = None       # react via=surrender: 'player' | 'other'
-    consent: str | None = None      # grab: the kind of touch the target had agreed to ('hug'), or 'breach' (livingworld/touch)
+    consent: str | None = None      # grab: the kind of touch the target had agreed to ('hug'), 'handshake' (they held
+                                    # out their hand to the player's offered one), or 'breach' (livingworld/touch)
     allowed: list[str] = field(default_factory=list)   # grab with consent=breach: what they had agreed to
     witnesses: list[Witness] = field(default_factory=list)
     raw: str = ""
@@ -325,7 +326,7 @@ def _consent(text: str | None) -> str | None:
     """A touch kind the target agreed to, 'breach', or None (nothing agreed, or a value we do not know)."""
     from livingworld.touch import KINDS
     word = (text or "").strip().lower()
-    return word if word in KINDS or word == "breach" else None
+    return word if word in KINDS or word in ("breach", "handshake") else None
 
 
 def _kinds(text: str | None) -> list[str]:

@@ -97,7 +97,7 @@ def _how_long(record: PerceptionRecord) -> str:
 # ---- touch consent (livingworld/touch): a touch the person had agreed to, or one past what they agreed ----
 
 PARTNER_STATUSES = {"courting", "partner", "spouse"}
-_AFFECTION = {"hug", "hands", "back"}                    # friendly; the rest is intimate
+_AFFECTION = {"hug", "hands", "back", "handshake"}                    # friendly; the rest is intimate
 
 
 _PART = {"neck": "neck", "face": "face", "butt": "backside", "chest": "chest"}
@@ -110,12 +110,13 @@ def _agreed_phrase(record: PerceptionRecord, me: bool) -> str:
     if me:
         if kind in _PART:
             return f"{'put a hand on' if kind == 'butt' else 'touched'} my {_PART[kind]}"
-        return {"hug": "hugged me", "hands": "held my hand", "back": "rubbed my back"}.get(kind, "touched me")
+        return {"hug": "hugged me", "hands": "held my hand", "back": "rubbed my back",
+                "handshake": "shook my hand"}.get(kind, "touched me")
     target = record.target.name if record.target else "someone"
     if kind in _PART:
         return f"{'put a hand on' if kind == 'butt' else 'touch'} {target}'s {_PART[kind]}"
     return {"hug": f"hug {target}", "hands": f"hold hands with {target}",
-            "back": f"rub {target}'s back"}.get(kind, f"touch {target}")
+            "back": f"rub {target}'s back", "handshake": f"shake hands with {target}"}.get(kind, f"touch {target}")
 
 
 def agreed_for_target(record: PerceptionRecord, to_actor: Bond) -> MemoryDraft:

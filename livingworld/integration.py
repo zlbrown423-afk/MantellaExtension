@@ -23,8 +23,9 @@ from livingworld.memory import summary_timeline
 from livingworld.memory import settings as memory_settings
 from livingworld.memory.recall import recall_for
 from livingworld import mood as moods
-from livingworld.bodylang import body_language_enabled, gesture_notices, gestures_enabled
-from livingworld.bodylang.presence import is_gesture_record, is_presence
+from livingworld.bodylang import (adult_gestures_enabled, body_language_enabled, gesture_notices, gestures_enabled,
+                                  handshake_enabled, salute_enabled)
+from livingworld.bodylang.presence import gesture_group, is_presence
 from livingworld.bodylang.service import BodyLanguage
 from livingworld.dialogue import hearing, leads as player_leads
 from livingworld.dialogue import joins, place, promises, trips
@@ -89,6 +90,9 @@ KEY_WANTS_A_WORD = "mantella_lw_wants_a_word"    # sent with the start reply: pe
 KEY_BODY_ON = "mantella_lw_body_on"              # sent with the start reply: body language on or off (game side)
 KEY_GESTURES_ON = "mantella_lw_gestures_on"      # sent with the start reply: VR gestures on or off (game side)
 KEY_GESTURE_NOTICES = "mantella_lw_gesture_notices"   # start reply: show each recognised gesture (for tuning)
+KEY_HANDSHAKE_ON = "mantella_lw_handshake_on"          # start reply: handshake gesture (MANTELLA_LW_HANDSHAKE)
+KEY_SALUTE_ON = "mantella_lw_salute_on"                # start reply: salute gesture (MANTELLA_LW_SALUTE)
+KEY_ADULT_GESTURES_ON = "mantella_lw_adult_gestures_on"   # start reply: adult gestures (MANTELLA_LW_ADULT_GESTURES=1)
 KEY_BODY = "mantella_lw_body"                    # sent with an NPC line: changed expression profiles ('Name|comfort|gaze|guard|step')
 KEY_HINTS = "mantella_lw_hints"                  # sent with the first NPC line: what the player overhears (S2)
 KEY_GUARD_ISSUE = "mantella_lw_guard_issue"      # sent with an NPC line: items handed to the player ('Name|plugin|0xID;...', for logs)
@@ -325,8 +329,9 @@ class LivingWorld:
                 and intimate_scenes.KEY_SCENE in context_json:
             self._scenes_now = self._scene_snapshot(records_from_context(context_json, intimate_scenes.KEY_SCENE))
         body_raw = [r for r in raw if is_presence(r)]   # body language records never reach the event pipeline
-        if not gestures_enabled():   # MANTELLA_LW_GESTURES=0: a game still sending them is ignored
-            body_raw = [r for r in body_raw if not is_gesture_record(r)]
+        switched = {"gestures": gestures_enabled(), "handshake": handshake_enabled(), "salute": salute_enabled(),
+                    "adult": adult_gestures_enabled()}   # a game still sending a switched-off kind is ignored
+        body_raw = [r for r in body_raw if switched.get(gesture_group(r) or "", True)]
         raw = [r for r in raw if not is_presence(r)]
         rebind_raw = [r for r in raw if rebind.is_rebind_record(r)]
         if rebind_raw:   # before anyone is registered: the copy must already resolve to the NPC it replaces
@@ -1303,6 +1308,9 @@ class LivingWorld:
         keys[KEY_BODY_ON] = bool(self.body_language)
         keys[KEY_GESTURES_ON] = bool(self.body_language and gestures_enabled())
         keys[KEY_GESTURE_NOTICES] = gesture_notices()
+        keys[KEY_HANDSHAKE_ON] = bool(self.body_language and handshake_enabled())
+        keys[KEY_SALUTE_ON] = bool(self.body_language and salute_enabled())
+        keys[KEY_ADULT_GESTURES_ON] = bool(self.body_language and adult_gestures_enabled())
         keys[intimate_scenes.KEY_INTIMACY_ON] = bool(self.intimacy)
         keys[confront.KEY_CONFRONT_ON] = bool(self.confront)
         keys[decency.KEY_DECENCY_ON] = bool(self.decency)

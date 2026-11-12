@@ -22,6 +22,21 @@ was pointed at, as a name): ``wave``, ``nod``, ``shake`` (head), ``point``, ``be
 ``thumbs_up``, ``thumbs_down``, ``open_arms`` (both hands held out wide at chest height, offering a hug;
 ``agreed=1`` when the NPC had already agreed to one, see ``livingworld/touch``).
 
+Later gestures, each group behind its own switch (``bodylang/__init__.py``):
+
+- ``handshake``: the player held a hand out toward the NPC, open, at about waist height, to shake.
+  ``back=1`` when the NPC held theirs out in return (the game decides at once: not someone who dislikes
+  the player, is wary of them, is fighting, sitting or busy); for a few seconds after, the player's hand
+  on theirs is an agreed handshake (``consent=handshake`` on the grab record), not a grab.
+- ``salute``: a hand flat at the brow (``style=brow``) or a fist over the heart (``style=chest``).
+  ``back=1`` when the NPC (a guard) returned it.
+- Adult only, off unless switched on, adults only (children are never sent anything): ``stroke``, the
+  player's hand making a repeated stroking motion at their own groin (``n`` = how many sets of five strokes
+  in a row), and ``point_down``, the player pointing down at their own groin, which the NPC's eyes follow
+  for a moment. ``naked=1`` when the player had nothing on there. These only tell the NPC what happened;
+  what they make of it is theirs alone (their personality, boundaries and how they feel about the player),
+  and nothing is ever started or agreed because of them.
+
 Apart from ``peek``, only the player's behaviour is ever a percept (see the loop guards in ``__init__``).
 """
 from __future__ import annotations
@@ -33,7 +48,10 @@ from livingworld.perception.records import RECORD_VERSION, BadRecord, GameActor,
 
 KIND = "presence"
 GESTURES = ("wave", "nod", "shake", "point", "beckon", "hands_up", "thumbs_up", "thumbs_down", "open_arms")
-WHATS = ("approach", "crowd", "backed_off", "weapon", "stare", "peek") + GESTURES
+HANDSHAKE = ("handshake",)
+SALUTE = ("salute",)
+ADULT = ("stroke", "point_down")
+WHATS = ("approach", "crowd", "backed_off", "weapon", "stare", "peek") + GESTURES + HANDSHAKE + SALUTE + ADULT
 OBSERVATION_MINUTES = 15.0   # older observations are not worth telling the dialogue model
 ANSWERS = ("nod", "shake")   # a silent yes or no only means something right after a question
 ANSWER_MINUTES = 2.0
@@ -45,9 +63,29 @@ def is_presence(raw: str) -> bool:
     return "|type=presence" in (raw or "").lower()
 
 
-def is_gesture_record(raw: str) -> bool:
+def _what_of(raw: str) -> str:
     low = (raw or "").lower()
-    return any(f"|what={g}" in low for g in GESTURES)
+    at = low.find("|what=")
+    return low[at + 6:].split("|", 1)[0].strip() if at >= 0 else ""
+
+
+def is_gesture_record(raw: str) -> bool:
+    """One of the BL2 gestures (``MANTELLA_LW_GESTURES``)."""
+    return _what_of(raw) in GESTURES
+
+
+def gesture_group(raw: str) -> str | None:
+    """Which switch a record falls under: 'gestures', 'handshake', 'salute', 'adult', or None (not a gesture)."""
+    what = _what_of(raw)
+    if what in GESTURES:
+        return "gestures"
+    if what in HANDSHAKE:
+        return "handshake"
+    if what in SALUTE:
+        return "salute"
+    if what in ADULT:
+        return "adult"
+    return None
 
 
 @dataclass(frozen=True)
@@ -63,10 +101,17 @@ class Presence:
     count: int = 1
     about: str | None = None   # who the player pointed at (a name)
     agreed: bool = False       # open_arms: the NPC had already agreed to a hug
+    back: bool = False         # handshake / salute: the NPC answered in kind
+    style: str | None = None   # salute: 'brow' or 'chest'
+    naked: bool = False        # stroke / point_down: nothing on the player's groin
 
     @property
     def is_gesture(self) -> bool:
-        return self.what in GESTURES
+        return self.what in GESTURES + HANDSHAKE + SALUTE + ADULT
+
+    @property
+    def is_adult(self) -> bool:
+        return self.what in ADULT
 
 
 def _float(value: str | None) -> float | None:
@@ -100,7 +145,13 @@ def parse(raw: str) -> Presence:
     return Presence(key=fields["key"], game_time=float(fields["gt"]), location=fields.get("loc") or None,
                     actor=actor, target=target, what=what, distance_m=_float(fields.get("dist")),
                     duration_s=_float(fields.get("dur")), count=count, about=_about(fields.get("about")),
-                    agreed=fields.get("agreed") == "1")
+                    agreed=fields.get("agreed") == "1", back=fields.get("back") == "1",
+                    style=_style(fields.get("style")), naked=fields.get("naked") == "1")
+
+
+def _style(value: str | None) -> str | None:
+    word = (value or "").strip().lower()
+    return word if word in ("brow", "chest") else None
 
 
 def _about(value: str | None) -> str | None:
@@ -169,7 +220,39 @@ def appraise(p: Presence, traits: dict[str, float], bond: Bond) -> dict[str, flo
         return {"irritation": round(0.05 * (0.5 + t("temper")), 3)}
     if p.what == "beckon" and bond.hostile:
         return {"unease": round(0.05 * (0.5 + t("anxiety")), 3)}
+    if p.what == "handshake":
+        return {"unease": -0.04, "irritation": -0.02} if p.back else {}
+    if p.what == "salute":
+        return {"unease": -0.02} if p.back else {}
+    if p.what in ADULT:
+        return _adult_appraisal(p, t, bond)
     return {}   # nod, shake, point: their meaning is for the conversation, not a feeling
+
+
+def _adult_appraisal(p: Presence, t, bond: Bond) -> dict[str, float]:
+    """A lewd gesture made at someone. Modest, reserved people are the most put out; someone close to the
+    player much less; a hostile one is annoyed. Never a reason to want anything (see ``observation``)."""
+    strength = 1.0 if p.what == "stroke" else 0.55
+    if p.what == "stroke":
+        strength *= 1.0 + 0.4 * min(max(p.count - 1, 0), 3)   # kept on and on
+    if p.naked:
+        strength *= 1.3
+    shy = 0.4 + 0.6 * t("modesty") + 0.3 * (t("reserve") - 0.5)
+    if bond.hostile:
+        return {"irritation": round(0.12 * strength * (0.5 + t("temper")), 3),
+                "unease": round(0.08 * strength * (0.5 + t("anxiety")), 3)}
+    soften = 0.4 if bond.close else 1.0
+    out = {"embarrassment": round(0.14 * strength * shy * soften, 3)}
+    if not bond.close:
+        out["unease"] = round(0.08 * strength * (0.5 + t("anxiety")) * shy, 3)
+        if t("modesty") >= 0.7:
+            out["irritation"] = round(0.06 * strength * (0.5 + t("temper")), 3)
+    return out
+
+
+ADULT_TAIL = ("How {npc} takes it is entirely {npc}'s own, true to who {npc} is, {npc}'s boundaries and how {npc} "
+              "feels about {player}: amused, flustered, offended, disgusted, unimpressed or interested are all "
+              "possible. It obliges {npc} to nothing, and it is not an invitation {npc} has accepted.")
 
 
 def observation(p: Presence, player_name: str) -> str:
@@ -218,6 +301,24 @@ def observation(p: Presence, player_name: str) -> str:
             return f"{player_name} opened their arms for the hug they had agreed to, and they opened theirs back."
         return (f"{player_name} opened their arms wide toward them, offering a hug. Whether to accept is entirely "
                 f"their own choice.")
+    npc = p.target.name
+    if p.what == "handshake":
+        if p.back:
+            return f"{player_name} held out a hand to shake, and {npc} offered theirs in return."
+        return f"{player_name} held out a hand to shake; {npc} did not take it."
+    if p.what == "salute":
+        how = {"brow": "a hand to the brow", "chest": "a fist over the heart"}.get(p.style or "", "")
+        text = f"{player_name} saluted {npc}{f' ({how})' if how else ''}."
+        return text + (f" {npc} returned the salute." if p.back else "")
+    if p.what in ADULT:
+        where = "his bare manhood" if p.naked else "his groin"
+        if p.what == "stroke":
+            times = " again and again" if p.count > 1 else ""
+            text = (f"Right in front of {npc}, {player_name} made a repeated stroking motion with his hand at {where}"
+                    f"{times}, plainly miming pleasuring himself.")
+        else:
+            text = f"{player_name} pointed down at {where}, and {npc}'s eyes followed his finger there for a moment."
+        return text + " " + ADULT_TAIL.format(npc=npc, player=player_name)
     return ""
 
 
