@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from livingworld.guard import arrest as AR, debug as D, duty as DU, encounter as ENC, incident as INC, reports as RP, training as TR, orgs as O, peace as PEACE, promotion as PR, prompts as P, profiles, recruit as R, store as S
+from livingworld.guard import arrest as AR, banter as BT, debug as D, duty as DU, encounter as ENC, incident as INC, reports as RP, training as TR, orgs as O, peace as PEACE, promotion as PR, prompts as P, profiles, recruit as R, store as S
 from livingworld.guard.profiles import GuardFacts
 from livingworld.social import claims, processor
 from livingworld.store.minors import is_child
@@ -33,6 +33,7 @@ class Scene:
     facts: dict[int, GuardFacts] = field(default_factory=dict)   # npc_id -> what the game reported
     thane_of: tuple[str, ...] = ()                                # holds the game reports the player is thane of
     said: str | None = None                                       # the player's last line in this conversation
+    uniform_org: str | None = None                                # the guard whose uniform the player is wearing
 
 
 @dataclass
@@ -86,6 +87,8 @@ class Guard:
         self._declined: tuple[str, str] | None = None        # G3: (from, to) turned down this conversation
         self.spar_partners: set[str] = set()   # G2g: fellow guards told the player needs a fist bout (by name)
         self._worded_report = False            # a report was filed from the player's words on their latest line
+        self._heckler: tuple[int, str] | None = None   # banter: the bully heckling the player this conversation (npc, via)
+        self._banter: dict[int, list[str]] = {}        # banter lines given this conversation, by npc_id
 
     def take_notices(self) -> list[str]:
         out, self.notices = self.notices, []
@@ -127,7 +130,34 @@ class Guard:
         with self.store.transaction() as db:
             if is_child(db, npc_id):
                 return []
-            return self._lines(db, npc_id, name, scene)
+            return self._lines(db, npc_id, name, scene) + self._banter_lines(db, npc_id, name, scene)
+
+    def _banter_lines(self, db, npc_id: int, name: str, scene: Scene) -> list[str]:
+        """A bully's heckling or aside, or a gossip's news (``banter.py``); worked out once per conversation."""
+        if not BT.enabled():
+            return []
+        if npc_id in self._banter:
+            return self._banter[npc_id]
+        p = profiles.get(db, npc_id)
+        org = O.by_key(p.org_key) if p is not None else None
+        if org is None or p.is_leader:
+            return []
+        svc = S.current(db, scene.player_id)
+        kind = BT.temperament(db, npc_id)
+        test = BT.forced(db, scene.player_id)
+        if test is not None and test[1] == "gossip" and len([i for i in scene.present if i != scene.player_id]) == 1:
+            kind = BT.GOSSIP
+            BT.use_force(db, scene.player_id, test[0], scene.now)
+        out: list[str] = []
+        if self._heckler is not None and self._heckler[0] == npc_id and svc is not None:
+            out = BT.heckle_lines(db, name, scene.player_name, org, svc, npc_id, scene.now, self._heckler[1])
+        elif kind == BT.BULLY and svc is not None and svc.org_key == org.key:
+            out = [BT.bully_aside(name, scene.player_name)]
+        elif kind == BT.GOSSIP:
+            out = BT.gossip_lines(db, name, scene.player_name, org, svc, npc_id, scene.player_id, scene.now,
+                                  scene.location)
+        self._banter[npc_id] = out
+        return out
 
     def _lines(self, db, npc_id: int, name: str, scene: Scene) -> list[str]:
         p = profiles.get(db, npc_id)
@@ -544,6 +574,8 @@ class Guard:
         self.promoted = None
         self._declined = None
         self.spar_partners = set()
+        self._heckler = None
+        self._banter = {}
         with self.store.transaction() as db:
             svc = S.current(db, scene.player_id) if scene.player_id is not None else None
             org = O.by_key(svc.org_key) if svc else None
@@ -606,6 +638,18 @@ class Guard:
                                         f"({P.hours_text(end - scene.now)} of the shift left).")
             if org is not None and svc is not None and PR.enabled():
                 self._promotion_board(db, org, S.get(db, svc.service_id), boss, scene, result)
+            if BT.enabled() and svc is not None and scene.player_id is not None:
+                test = BT.forced(db, scene.player_id)
+                force = test is not None and test[1] == "bully"
+                who, why = BT.pick_heckler(db, S.get(db, svc.service_id), set(scene.present), scene.player_id,
+                                           scene.now, scene.location, scene.uniform_org, force=force)
+                if who is not None:
+                    self._heckler = (who, why)
+                    result["heckle"] = [who]
+                    if force:
+                        BT.use_force(db, scene.player_id, test[0], scene.now)
+                elif force:
+                    logger.log(23, f"Living World guard banter: no heckle this conversation ({why})")
             processor.process(db, {"appraisal": claims.appraise})
         return result
 
@@ -792,6 +836,10 @@ class Guard:
                 return f"watch windows of duty {held.task_id} brought forward (sent with the next line)"
             if cmd.verb == "suspect":
                 return self._debug_suspect(db, org, svc, scene)
+            if cmd.verb in ("bully", "gossip"):
+                BT.force(db, scene.player_id, cmd.verb, scene.now)
+                what = "heckles you (when you are on duty)" if cmd.verb == "bully" else "gossips"
+                return f"the next guard you talk to alone {what}: start a new conversation"
             if cmd.verb == "board" and svc is not None and O.by_key(svc.org_key) is not None:
                 self.notices.append(PR.short(PR.board(db, O.by_key(svc.org_key), svc, scene.now)))
             return run(db, cmd, org, scene.player_id, scene.now, scene.location)

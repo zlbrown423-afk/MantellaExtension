@@ -537,3 +537,14 @@ Three fixes from the 2026-11-10 play session. All server side, no compile.
 | Held actions (`integration.action_only`) | A tool call reaches the game as an action-only reply before the NPC speaks. EnlistRecruit, ReportDuty, PayWages and PayFine are now held and handled with that NPC's next spoken line, so the uniform, wages and fines are handed over (they ride on a line). Before, only the 'EnlistRecruit:' text prefix worked. | (follows `MANTELLA_LW_GUARD` / `MANTELLA_LW_DECENCY`) |
 | First orders on enlisting (`guard/service.py` `first_orders`) | The prompt is written when a conversation starts, before the player enlists, so the superior knew of no duty and made one up. Now, on the player's next line after EnlistRecruit, if their superior (Caius) is in the conversation, the first duty is given by the usual rules (training step 1 for a Recruit) and added to that line as a note, with its on-screen notice. | (follows `MANTELLA_LW_GUARD`) |
 | Enlisting by word (`guard/enlist_words.py`) | A guard leader who says they take the player on ("I'll enlist you", "welcome to the guard", "here's your armour") without the EnlistRecruit prefix or tool call still enlists them: the action is added to that sentence and the guard's rules decide as usual. Never on a question, refusal or condition. | `MANTELLA_LW_ENLIST_WORDS=0` |
+
+## Barracks banter: bully guards and gossips
+
+`guard/banter.py`, server side only, no compile. Off with `MANTELLA_LW_GUARD_BANTER=0` (follows `MANTELLA_LW_GUARD`).
+
+| Part | What it does |
+| --- | --- |
+| Temperament | Each generic guard gets one the first time it is needed, kept in `guard_profile.traits_json` (not on the save timeline): bully about 1 in 12 (at least one per twelve met), gossip about 1 in 7, else plain. Picked by a hash of who they are. Leaders are always plain |
+| Heckling | A bully heckles the player only when the conversation **starts** with just the player and that guard (never when the guard joins a running conversation), the player serves in that guard, is on duty (a routine or training duty in hand, or wearing their own guard's uniform), is Guardsman or below, and has no incident duty or prisoner escort under way. At most once per bully per 4 game days, once per 1.5 days across all bullies, and only half of eligible conversations. Words only: no blows, threats or accusations, never holds the player up, drops it at once for real trouble or an order. Stored as a `guard.heckle` event (rolls back with the save) |
+| Gossip | A gossip guard trades town rumours and passes on guard news about the player from the last 10 days (enlisted, trained, promoted, commended, reprimanded, arrests, a wrongful arrest, a bully's heckling), two items at a time, each once (`guard.gossip_told`), and warns a member about the bullies by name |
+| Test | "debug guard bully" / "debug guard gossip": the next guard you talk to alone heckles you (if on duty) / gossips |
