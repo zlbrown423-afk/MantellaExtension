@@ -145,6 +145,32 @@ def incidents_line(name: str, org: O.Org, incidents) -> str:
             f"it, without inventing details beyond it.")
 
 
+def complaint_line(name: str, player: str, c, *, player_on_it: bool, player_dealt: bool, guard: str,
+                   ago: str) -> str:
+    """For the townsperson who reported an incident (``incident.Complaint``): they remember doing so."""
+    inc = c.incident
+    account = inc.complaint or inc.why
+    out = (f"{name} went to {guard} {ago} to report trouble, and remembers it well: {account}")
+    if inc.look:
+        out += (f" All {name} saw of the culprit was {inc.look}; {name} does not know their name and makes up no "
+                f"other description.")
+    elif inc.suspect:
+        out += f" {name} thinks it was {inc.suspect}, from what folk are saying."
+    if c.state == "open":
+        if player_on_it:
+            out += (f" {player} is the guard sent to deal with it: {name} recognises that this is about the "
+                    f"complaint, is glad someone has come, and readily tells {player} what happened, what was lost "
+                    f"and what they saw, to help find the culprit.")
+        else:
+            out += f" Nobody has been caught yet; {name} is still waiting on the guard and is impatient about it."
+    elif c.state in ("arrested", "cleared"):
+        out += (f" The guard has since dealt with it ({'the culprit was caught' if c.state == 'arrested' else 'it is over'})"
+                + (f", and it was {player} who did it: {name} is grateful to {player} for it." if player_dealt else "."))
+    else:
+        out += f" Nobody was ever caught for it, and {name} is sore that the guard let it go cold."
+    return out
+
+
 def filed_notice(boss: str, r, d, summary=None) -> str:
     gain = f" (+{d.merit:g} merit)" if r.outcome == "done" else ""
     shift = f" Shift: {summary.counts()}." if summary is not None else ""

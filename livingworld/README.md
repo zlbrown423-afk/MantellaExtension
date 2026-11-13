@@ -627,6 +627,19 @@ Three fixes from the 2026-11-10 play session. All server side, no compile.
 | Shift over | The game keeps the clock between conversations: the duty objective is ticked off (failed if never seen at the post) and "Shift over: report back to ... by 2:00 am" shows; past that it fails and the quest closes |
 | Settled | Reported, missed or dropped: the server sends task 0 with `done` / `failed` and the quest ticks off or fails what is showing, then closes. Sent with an NPC line when it changes and once per conversation, so a loaded save is put right |
 
+## Complainants remember reporting trouble
+
+`guard/incident.py` (`complaints_by`, `remember_complaint`) + `guard/service.py` `_complaint_lines`. Part of guard careers
+(off with `MANTELLA_LW_GUARD=0`). Data per incident in `guard/data/whiterun_duties.json`: `complainants`, `complaint`,
+`memory`, `losses`, `culprit_looks`.
+
+| Part | What it does |
+| --- | --- |
+| Who | The townsperson named in the order ("Carlotta Valentia had a purse snatched...") is stored on the `guard.incident` event, with what they lost and the glimpse they caught of the thief (never the name). Hulda now sends word about Bannered Mare brawls the same way |
+| Memory | They remember going to the guard, in their own words, dated when it happened: written as the incident opens if they are known to the world, otherwise the first time they talk. Once per incident, and it rolls back with saves |
+| Prompt | While it is open, or up to 3 days after it ends: what happened, what was lost, what they saw. If the player is the guard sent, they recognise it is about their complaint and help; after the player's arrest they are grateful; if it went cold, they are sore about it |
+| Older incidents | Opened before this: the complainant is read from the order's wording |
+
 ## Touch consent: a hug the NPC agreed to is not a grab
 
 An NPC can agree in the conversation to being hugged or touched, and then it reads as what it is. Code:

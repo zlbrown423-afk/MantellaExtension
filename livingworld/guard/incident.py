@@ -50,6 +50,10 @@ class Kind:
     suspect_chance: float = 0.0
     charge: str | None = None          # G2f: what an arrest for it is for ('theft', 'brawling')
     open_country: bool = False         # a fight anywhere in the unnamed wilderness counts (road bandits)
+    losses: tuple[str, ...] = ()       # what the complainant lost ({loss})
+    complaint: str = ""                # the complainant's account of it (for the prompt)
+    memory: str = ""                   # the same in their own words (their memory of it)
+    culprit_looks: tuple[str, ...] = ()  # the glimpse they caught of each culprit (same order as culprits)
 
 
 @dataclass
@@ -73,6 +77,10 @@ class Incident:
     day: int
     suspect: str | None = None         # G2f: a real person named as the culprit (arrest them for evidence)
     charge: str | None = None
+    complainant: str | None = None     # the townsperson who reported it (a real NPC; they remember doing so)
+    complaint: str = ""                # their account of it
+    look: str | None = None            # what they saw of the culprit (never the name)
+    memory: str = ""                   # their own words for it
 
 
 @functools.lru_cache(maxsize=None)
@@ -87,7 +95,9 @@ def kinds(org_key: str) -> tuple[Kind, ...]:
                       k.get("min_rank"), float(k.get("merit", 1.5)), tuple(k.get("complainants") or ()),
                       tuple(k.get("culprits") or ()), tuple(k.get("camps") or ()),
                       suspects=tuple(k.get("suspects") or ()), suspect_chance=float(k.get("suspect_chance", 0.0)),
-                      charge=k.get("charge"), open_country=bool(k.get("open_country", False)))
+                      charge=k.get("charge"), open_country=bool(k.get("open_country", False)),
+                      losses=tuple(k.get("losses") or ()), complaint=k.get("complaint", ""), memory=k.get("memory", ""),
+                      culprit_looks=tuple(k.get("culprit_looks") or ()))
                  for k in raw.get("incidents") or ())
 
 
@@ -102,11 +112,20 @@ def _roll(*parts) -> int:
 
 def _row(row) -> Incident:
     p = json.loads(row["payload_json"])
-    return Incident(row["event_id"], p["org"], p["key"], p["title"], p.get("why", ""), p.get("instructions", ""),
-                    tuple(p.get("where") or ()), p.get("need", "seen"), p.get("outcome", "arrested"), p.get("place", ""),
-                    float(p.get("shift_hours", 4)), p.get("min_rank"), float(p.get("merit", 1.5)), p.get("culprit"),
-                    row["game_time"], float(p["expires_gt"]), int(p.get("day", int(row["game_time"]))),
-                    p.get("suspect"), p.get("charge"))
+    inc = Incident(row["event_id"], p["org"], p["key"], p["title"], p.get("why", ""), p.get("instructions", ""),
+                   tuple(p.get("where") or ()), p.get("need", "seen"), p.get("outcome", "arrested"), p.get("place", ""),
+                   float(p.get("shift_hours", 4)), p.get("min_rank"), float(p.get("merit", 1.5)), p.get("culprit"),
+                   row["game_time"], float(p["expires_gt"]), int(p.get("day", int(row["game_time"]))),
+                   p.get("suspect"), p.get("charge"), p.get("complainant"), p.get("complaint") or "", p.get("look"),
+                   p.get("memory") or "")
+    if inc.complainant is None:
+        # opened before complainants were stored: the name is only in the 'why' ("Fralia Gray-Mane had a purse ...")
+        k = kind_of(inc)
+        inc.complainant = next((c for c in (k.complainants if k else ()) if inc.why.startswith(c)), None)
+        if inc.complainant and k and k.complaint:
+            inc.complaint = k.complaint.format(complainant=inc.complainant, loss="a purse", camp="")
+            inc.memory = k.memory.format(complainant=inc.complainant, loss="my purse", camp="")
+    return inc
 
 
 def get(db, event_id: int) -> Incident | None:
@@ -177,20 +196,29 @@ def spawn(db, org: O.Org, now: float, since: float | None = None) -> list[Incide
 
 def _open(db, org: O.Org, k: Kind, day: int, opened: float, seed: int) -> Incident:
     pick = lambda xs, shift: xs[(seed >> shift) % len(xs)] if xs else ""   # noqa: E731
-    fill = {"complainant": pick(k.complainants, 24), "camp": pick(k.camps, 32)}
+    fill = {"complainant": pick(k.complainants, 24), "camp": pick(k.camps, 32), "loss": pick(k.losses, 64)}
     title, why, place = (s.format(**fill) for s in (k.title, k.why, k.place))
     where = tuple(w.format(**fill) for w in k.where)
     culprit = pick(k.culprits, 40) or None
+    look = (k.culprit_looks[(seed >> 40) % len(k.culprits)]
+            if k.culprits and len(k.culprit_looks) == len(k.culprits) else None)
     suspect = None
     if k.suspects and ((seed >> 48) % 1000) / 1000 < k.suspect_chance:
         suspect = culprit = pick(k.suspects, 56)
         why += f". Word is it was {suspect}"
+        look = None                                 # the word names them; the complainant thinks it was them
     payload = {"org": org.key, "key": k.key, "title": title, "why": why, "instructions": k.instructions.format(**fill),
                "where": list(where), "need": k.need, "outcome": k.outcome, "place": place,
                "shift_hours": k.shift_hours, "min_rank": k.min_rank, "merit": k.merit, "culprit": culprit,
-               "expires_gt": opened + k.lasts_days, "day": day, "suspect": suspect, "charge": k.charge}
+               "expires_gt": opened + k.lasts_days, "day": day, "suspect": suspect, "charge": k.charge,
+               "complainant": fill["complainant"] or None, "complaint": k.complaint.format(**fill) if k.complaint else "",
+               "look": look, "memory": k.memory.format(**fill) if k.memory else ""}
     event_id = S.event(db, "incident", [], payload, opened, where[0] if where else org.hold, [])
-    return get(db, event_id)
+    inc = get(db, event_id)
+    who = complainant_id(db, inc)
+    if who is not None:                             # met already: they remember going to the guard from now on
+        remember_complaint(db, inc, who)
+    return inc
 
 
 def close(db, inc: Incident, outcome: str, gt: float, *, member_id: int | None = None, by: int | None = None,
@@ -229,3 +257,98 @@ def event_id_of(template: str | None) -> int | None:
         return int(template.rsplit(":", 1)[1])
     except ValueError:
         return None
+
+
+# ---- the complainant: the townsperson who reported it remembers doing so ----
+
+COMPLAINT_DAYS = 3.0       # how long after it is over the complainant still has it on their mind
+
+
+def complainant_id(db, inc: Incident) -> int | None:
+    """The complainant's NPC id, if they are known to the world (they have spoken through Mantella before) and
+    the name is not shared by anyone else."""
+    if not inc.complainant:
+        return None
+    rows = db.execute("SELECT npc_id FROM npc WHERE is_player = 0 AND display_name = ? COLLATE NOCASE",
+                      (inc.complainant,)).fetchall()
+    if len(rows) != 1 or S.is_child(db, rows[0][0]):
+        return None
+    return rows[0][0]
+
+
+def remember_complaint(db, inc: Incident, npc_id: int) -> bool:
+    """Give the complainant the memory of reporting it to the guard (once per incident; rolls back with saves).
+    Returns whether a memory was written."""
+    if db.execute("SELECT 1 FROM v_visible_memory WHERE owner_id = ? AND event_id = ? LIMIT 1",
+                  (npc_id, inc.event_id)).fetchone():
+        return False
+    org = O.by_key(inc.org_key)
+    guard = org.name if org else "the guard"
+    text = inc.memory or f"I reported trouble to {guard}: {inc.why}."
+    if inc.look:
+        text += f" All I saw of the culprit was {inc.look}."
+    elif inc.suspect:
+        text += f" I think it was {inc.suspect}."
+    mem_id = db.execute(
+        "INSERT INTO memory (timeline_id, owner_id, kind, content, about_ids_json, location, occurred_gt, importance,"
+        " valence, intensity, created_by, source_kind, confidence, event_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (S._timeline(db), npc_id, "episodic", text, "[]", inc.where[0] if inc.where else None, inc.opened_gt, 0.7,
+         -0.4, 0.5, "perception", "experienced", 1.0, inc.event_id)).lastrowid
+    db.execute("INSERT INTO memory_source (mem_id, event_id) VALUES (?,?)", (mem_id, inc.event_id))
+    db.execute("INSERT OR IGNORE INTO event_witness (event_id, npc_id, how) VALUES (?,?,?)",
+               (inc.event_id, npc_id, "participated"))
+    return True
+
+
+@dataclass
+class Complaint:
+    incident: Incident
+    state: str                      # 'open' | 'arrested' | 'cleared' | 'went cold'
+    member_id: int | None = None    # the guard sent to it (taken or dealt with), if any
+    closed_gt: float | None = None
+
+
+def _closing(db, event_id: int) -> tuple[str, float, list[int]] | None:
+    row = db.execute("SELECT payload_json, game_time, actors_json FROM v_visible_event WHERE type ="
+                     " 'guard.incident_closed' AND json_extract(payload_json, '$.incident') = ?"
+                     " ORDER BY game_time LIMIT 1", (event_id,)).fetchone()
+    if not row:
+        return None
+    return json.loads(row[0]).get("outcome", "closed"), row[1], json.loads(row[2] or "[]")
+
+
+def _taker(db, event_id: int) -> int | None:
+    row = db.execute("SELECT assignee_id FROM v_task WHERE template LIKE ? AND is_reset = 0 AND state IN"
+                     " ('accepted','in_progress','paused','completed') ORDER BY task_id DESC LIMIT 1",
+                     (f"{PREFIX}%:{event_id}",)).fetchone()
+    return row[0] if row else None
+
+
+def complaints_by(db, name: str, now: float) -> list[Complaint]:
+    """Incidents ``name`` reported that are still open, or over within the last few days (newest first)."""
+    if not name:
+        return []
+    rows = db.execute("SELECT event_id, payload_json, game_time FROM v_visible_event WHERE type = 'guard.incident'"
+                      " AND game_time <= ? AND game_time >= ? ORDER BY game_time DESC, event_id DESC",
+                      (now + 1e-9, now - 14)).fetchall()
+    out = []
+    for row in rows:
+        inc = _row(row)
+        if not inc.complainant or inc.complainant.casefold() != name.casefold():
+            continue
+        closing = _closing(db, inc.event_id)
+        taker = _taker(db, inc.event_id)
+        if closing is None:
+            if inc.expires_gt <= now and taker is None:
+                if now - inc.expires_gt > COMPLAINT_DAYS:
+                    continue
+                out.append(Complaint(inc, "went cold", None, inc.expires_gt))
+            else:
+                out.append(Complaint(inc, "open", taker))
+            continue
+        outcome, gt, actors = closing
+        if now - gt > COMPLAINT_DAYS:
+            continue
+        member = actors[0] if outcome in OUTCOMES and actors else None
+        out.append(Complaint(inc, outcome if outcome in OUTCOMES else "went cold", member, gt))
+    return out
