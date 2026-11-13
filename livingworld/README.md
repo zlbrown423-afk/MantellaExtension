@@ -614,6 +614,19 @@ Three fixes from the 2026-11-10 play session. All server side, no compile.
 | Gossip | A gossip guard trades town rumours and passes on guard news about the player from the last 10 days (enlisted, trained, promoted, commended, reprimanded, arrests, a wrongful arrest, a bully's heckling), two items at a time, each once (`guard.gossip_told`), and warns a member about the bullies by name |
 | Test | "debug guard bully" / "debug guard gossip": the next guard you talk to alone heckles you (if on duty) / gossips |
 
+## Guard duty in the journal: on show until the shift is over
+
+`guard/hud.py` + Mantella-Spell `MantellaConversation.LivingWorldGuardDuty` + the companion plugin `LWGuardDuty.esp`
+(Mantella-Spell `Tools/LWGuardDuty`). Off with `MANTELLA_LW_DUTY_HUD=0` (follows `MANTELLA_LW_GUARD`).
+
+| Part | What it does |
+| --- | --- |
+| Journal quest | "Guard Duty" starts when the superior gives a duty. Objective: the duty and the shift's end, e.g. "Stand watch at the main gate until 2:00 pm (3 h left). Be seen at your post" (training steps and trouble too) |
+| Reminder | The objective pops up again every `MANTELLA_LW_DUTY_HUD_EVERY` real seconds (default 180; 0 = only when it changes), with the time left |
+| Report back | Once it may be reported (seen at the post and half the shift gone, or dealt with): "You may report back to Commander Caius", with a compass marker on them |
+| Shift over | The game keeps the clock between conversations: the duty objective is ticked off (failed if never seen at the post) and "Shift over: report back to ... by 2:00 am" shows; past that it fails and the quest closes |
+| Settled | Reported, missed or dropped: the server sends task 0 with `done` / `failed` and the quest ticks off or fails what is showing, then closes. Sent with an NPC line when it changes and once per conversation, so a loaded save is put right |
+
 ## Touch consent: a hug the NPC agreed to is not a grab
 
 An NPC can agree in the conversation to being hugged or touched, and then it reads as what it is. Code:
