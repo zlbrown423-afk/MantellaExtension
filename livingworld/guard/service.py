@@ -168,6 +168,7 @@ class Guard:
         if enc_line:
             out.append(enc_line)
         out += self._prisoner_lines(db, npc_id, name, scene)
+        out += self._complaint_lines(db, npc_id, name, scene)
         if p is None:
             return out
         org = O.by_key(p.org_key)
@@ -197,6 +198,25 @@ class Guard:
             if last is None or scene.now - last >= INVITE_GAP_DAYS:
                 S.event(db, "invited", [scene.player_id, npc_id], {"org": org.key, "path": d.path}, scene.now,
                         scene.location, witnesses=[])
+        return out
+
+    def _complaint_lines(self, db, npc_id: int, name: str, scene: Scene) -> list[str]:
+        """The townsperson who reported a theft or brawl to the guard remembers doing so: a memory of it (once) and
+        a note on how it stands, most of all when the player is the guard sent to deal with it."""
+        from livingworld.memory.recall import time_ago
+        out = []
+        for c in INC.complaints_by(db, name, scene.now)[:2]:
+            inc = c.incident
+            if INC.complainant_id(db, inc) not in (None, npc_id):
+                continue                            # someone else of the same name
+            if INC.remember_complaint(db, inc, npc_id):
+                logger.log(23, f"Living World guard: {name} now remembers reporting incident {inc.event_id}")
+            org = O.by_key(inc.org_key)
+            mine = c.member_id is not None and c.member_id == scene.player_id
+            out.append(P.complaint_line(name, scene.player_name, c, player_on_it=mine and c.state == "open",
+                                        player_dealt=mine and c.state != "open",
+                                        guard=org.name if org else "the guard",
+                                        ago=time_ago(scene.now - inc.opened_gt)))
         return out
 
     def _prisoner_lines(self, db, npc_id: int, name: str, scene: Scene) -> list[str]:
