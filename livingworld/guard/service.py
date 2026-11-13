@@ -268,8 +268,14 @@ class Guard:
             title = task.title
             if not DU.ready(db, task, d, scene.now):
                 if DU.done_count(db, task, d) == 0:
-                    missing = ("no fist bout yet: ask a fellow guard for one and fight it out" if d.need == "fight"
-                               else f"nobody has seen {scene.player_name} at it yet")
+                    if d.need == "fight" and d.training:
+                        missing = "no fist bout yet: ask a fellow guard for one and fight it out"
+                    elif d.need == "fight":
+                        missing = (f"no fight on record yet: the guard only knows of a fight at "
+                                   f"{', '.join(d.where) or 'the place'}"
+                                   + (" or out on the open road" if DU.open_country_ok(db, d) else ""))
+                    else:
+                        missing = f"nobody has seen {scene.player_name} at it yet"
                 else:
                     missing = (f"not long enough yet: the shift runs until {P.clock(DU.shift_end(db, task, d))} and "
                                f"{scene.player_name} may report back from {P.clock(DU.assigned_gt(db, task) + d.shift_hours / 48.0)}")
@@ -537,7 +543,7 @@ class Guard:
                 logger.log(23, f"Living World guard: duty {task.task_id} '{d.key}' given day "
                                f"{DU.assigned_gt(db, task):.4f} ({P.clock(DU.assigned_gt(db, task))}), ends "
                                f"{P.clock(DU.shift_end(db, task, d))}, now day {scene.now:.4f} ({P.clock(scene.now)}), "
-                               f"seen {DU.seen_count(db, task)}, new={task.task_id in self._assigned}")
+                               f"{'fought' if d.need == 'fight' else 'seen'} {DU.done_count(db, task, d)}, new={task.task_id in self._assigned}")
                 done = DU.done_count(db, task, d)
                 if d.training:
                     n, total = TR.progress(db, org, svc)
