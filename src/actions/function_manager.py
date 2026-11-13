@@ -431,6 +431,9 @@ class FunctionManager:
             from livingworld.actions import trade as lw_trade # LIVINGWORLD PATCH
             parsed_tool['arguments'] = lw_trade.normalize(parsed_tool['arguments']) # LIVINGWORLD PATCH
             logger.log(23, f"Living World: trade agreed, {lw_trade.describe(parsed_tool['arguments'])}") # LIVINGWORLD PATCH
+        if identifier == 'mantella_lw_npc_undress' and (parsed_tool.get('arguments') or {}).get('item'): # LIVINGWORLD PATCH: "tunic" -> body, for the game
+            from livingworld.dialogue import undress_words as lw_undress # LIVINGWORLD PATCH
+            parsed_tool['arguments']['item'] = lw_undress.normalize_item(parsed_tool['arguments'].get('item')) # LIVINGWORLD PATCH
 
         # ShareConversation: store pending share for end of conversation
         if identifier == 'mantella_npc_shareconversation' and characters:

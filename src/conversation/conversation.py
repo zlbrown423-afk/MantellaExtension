@@ -314,6 +314,9 @@ class Conversation:
             touch_notes = living_world.touch_notes(self.__context) if living_world is not None else None # LIVINGWORLD PATCH: touch consent, what an NPC just agreed to
             if touch_notes: # LIVINGWORLD PATCH
                 new_message.add_event(touch_notes) # LIVINGWORLD PATCH
+            undress_notes = living_world.undress_notes(player_text, self.__context) if living_world is not None else None # LIVINGWORLD PATCH: undress, the player's yes / no
+            if undress_notes: # LIVINGWORLD PATCH
+                new_message.add_event(undress_notes) # LIVINGWORLD PATCH
             trip_notes = living_world.trip_notes(player_text, self.__context) if living_world is not None else None # LIVINGWORLD PATCH: trips, the player's yes / no
             if trip_notes: # LIVINGWORLD PATCH
                 new_message.add_event(trip_notes) # LIVINGWORLD PATCH
