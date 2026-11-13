@@ -49,6 +49,7 @@ class Kind:
     suspects: tuple[str, ...] = ()     # G2f: real local people who may be named as the culprit
     suspect_chance: float = 0.0
     charge: str | None = None          # G2f: what an arrest for it is for ('theft', 'brawling')
+    open_country: bool = False         # a fight anywhere in the unnamed wilderness counts (road bandits)
 
 
 @dataclass
@@ -86,8 +87,13 @@ def kinds(org_key: str) -> tuple[Kind, ...]:
                       k.get("min_rank"), float(k.get("merit", 1.5)), tuple(k.get("complainants") or ()),
                       tuple(k.get("culprits") or ()), tuple(k.get("camps") or ()),
                       suspects=tuple(k.get("suspects") or ()), suspect_chance=float(k.get("suspect_chance", 0.0)),
-                      charge=k.get("charge"))
+                      charge=k.get("charge"), open_country=bool(k.get("open_country", False)))
                  for k in raw.get("incidents") or ())
+
+
+def kind_of(inc: Incident) -> Kind | None:
+    """The kind an incident was opened from (looked up live, so incidents already open get later data changes)."""
+    return next((k for k in kinds(inc.org_key) if k.key == inc.key), None)
 
 
 def _roll(*parts) -> int:

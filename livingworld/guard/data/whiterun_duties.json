@@ -248,9 +248,11 @@
         "Whiterun Stables",
         "Honningbrew",
         "Pelagia",
-        "Riverwood Road"
+        "Riverwood Road",
+        "White River"
       ],
       "need": "fight",
+      "open_country": true,
       "outcome": "cleared",
       "place": "on the road to Riverwood",
       "shift_hours": 12,
