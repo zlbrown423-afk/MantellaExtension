@@ -149,6 +149,18 @@ personality, relationships and memories, mood, and the situation (privacy, who e
 Being asked, flattered, given gifts or offered gold is only weighed, never an obligation, and drink never
 makes them more willing. Nothing in code makes them agree; refusing is not calling the action.
 
+Undress from words (`dialogue/undress_words.py`): the dialogue model often has the NPC say "I suppose it might
+be time to take a dip without my tunic" without calling `Undress`, so nothing happened in game. Now, when the
+NPC's own line says she is taking something off now, the game shows "Fralia is taking off her tunic. Let
+Fralia? Say yes or no." On yes, her next line carries `Undress` with `item` (`body`, `feet`, `hands`, `head`,
+`cloak`, `jewelry` or `all`), so only that piece comes off, unless that line backs out ("actually, I'd rather
+not"). On no she keeps it on and the model is told. The yes is the player's, after she already chose it: the
+question is never asked before she says it herself. Limits nothing overrides (no question, and the model
+hears she thought better of it): children never; drunk or worse, nothing that leaves her bare; and her
+personality profile's limits for the main garment ("no intimacy with anyone", "nothing intimate with someone
+she does not know well" with familiarity under 0.2, "not where people can see" while other adults are near).
+`Dress` puts back what was taken off. Off: `set MANTELLA_LW_UNDRESS_PROMPT=0`.
+
 When there is nothing to sit on or nowhere pointed at, the game adds an in-game event line so the NPC can say so.
 
 ## Reputation and gossip (S1: word gets around Riverwood)

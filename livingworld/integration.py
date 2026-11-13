@@ -28,7 +28,7 @@ from livingworld.bodylang import (adult_gestures_enabled, body_language_enabled,
 from livingworld.bodylang.presence import gesture_group, is_presence
 from livingworld.bodylang.service import BodyLanguage
 from livingworld.dialogue import hearing, leads as player_leads
-from livingworld.dialogue import joins, place, promises, trips
+from livingworld.dialogue import joins, place, promises, trips, undress_words
 from livingworld import fog
 from livingworld import diary
 from livingworld.diary import service as diaries
@@ -193,6 +193,8 @@ class LivingWorld:
         self.keep_promises = enabled and promises.promises_enabled()   # NPCs do what they say (MANTELLA_LW_KEEP_PROMISES=0 turns off)
         self.trips = enabled and trips.trips_enabled()   # "let's go to X" sets off after the player's yes (MANTELLA_LW_TRIPS=0 off)
         self._trips: trips.TripPlanner | None = None   # this conversation's trip question and confirmed trip
+        self.undress_prompt = enabled and undress_words.enabled()   # "taking off my tunic" -> yes/no -> Undress (MANTELLA_LW_UNDRESS_PROMPT=0 off)
+        self._undress: undress_words.UndressPlanner | None = None   # this conversation's undress question and the player's yes
         self.hearing = enabled and hearing.hearing_enabled()   # catch misheard speech (MANTELLA_LW_HEARING=0 turns off)
         self.leads = enabled and player_leads.leads_enabled()  # ask about a lead without its name (MANTELLA_LW_LEADS=0 turns off)
         self._lead_ask: str | None = None           # the player's last line, while it asks after someone
@@ -475,6 +477,7 @@ class LivingWorld:
         self._lead_ask = None
         self._lead_learned = set()
         self._trips = trips.TripPlanner(here=str(getattr(context, "location", "") or "")) if self.trips else None
+        self._undress = undress_words.UndressPlanner() if self.undress_prompt else None
         self._desk = side_jobs.Desk() if self.side_jobs else None
         self._touch = touch_consent.Desk() if self.touch else None
         self._surrender_pending = set()   # survivors in this conversation who have not agreed to follow yet
@@ -1251,6 +1254,8 @@ class LivingWorld:
             self._hints_to_send += self._guard_for(self.store).take_notices()   # shift started / over
         if self._trips is not None:
             self._hints_to_send += self._trips.take_notices()   # "Go with Alfhild to Battle-Born Farm? Say yes or no."
+        if self._undress is not None:
+            self._hints_to_send += self._undress.take_notices()   # "Fralia is taking off her tunic. Let Fralia? Say yes or no."
         if self._desk is not None:
             self._hints_to_send += self._desk.take_notices()   # "Salonia's marks: say one, two or three, or no:"
             orders = self._desk.take_orders()
@@ -1848,6 +1853,11 @@ class LivingWorld:
         if self._trips is not None:
             from src.actions.function_manager import FunctionManager
             also = [trips.TripWatcher(self._trips, actions, FunctionManager._actions.keys())]
+        if self._undress is not None:
+            from src.actions.function_manager import FunctionManager
+            also.append(undress_words.UndressWatcher(self._undress, {getattr(a, "identifier", None) for a in actions}
+                                                     | set(FunctionManager._actions.keys()),
+                                                     gate=self._undress_gate, pronoun_of=self._undress_pronoun))
         if self._desk is not None:
             from src.actions.function_manager import FunctionManager
             also.append(side_jobs.TravelWatcher(self._desk, FunctionManager._actions.keys()))
@@ -1879,6 +1889,76 @@ class LivingWorld:
         if self._touch is None or context is not self._context:
             return []
         return self._touch.take_notes()
+
+    @_never_raises
+    def undress_notes(self, text: str, context: Any) -> list[str]:
+        """The player's answer to "Fralia is taking off her tunic. Let Fralia?", and any NPC who thought better
+        of undressing because of her own limits, as notes for the dialogue model (dialogue/undress_words.py)."""
+        if self._undress is None or context is not self._context:
+            return []
+        player = context.npcs_in_conversation.get_player_character()
+        if player is not None:
+            self._undress.player_name = player.name
+        notes = self._undress.take_notes()
+        note = self._undress.player_said(text.strip()) if text and text.strip() else None
+        return notes + ([note] if note else [])
+
+    def _undress_character(self, name: str) -> Any:
+        if self._context is None:
+            return None
+        for c in self._context.npcs_in_conversation.get_all_characters():
+            if c.name == name and not c.is_player_character:
+                return c
+        return None
+
+    def _undress_pronoun(self, name: str) -> str:
+        c = self._undress_character(name)
+        gender = str(getattr(c, "gender", "") or "").strip().lower() if c is not None else ""
+        if gender in ("female", "1"):
+            return "her"
+        if gender in ("male", "0"):
+            return "his"
+        return "their"
+
+    def _undress_gate(self, name: str, part: str) -> str | None:
+        """None when this NPC may take off ``part`` with the player watching, else why not. Never says yes
+        for her: she already chose it in her own words; this only checks the limits nothing may override."""
+        c = self._undress_character(name)
+        if c is None or self.store is None or self._context is None:
+            return "not in this conversation"
+        now = self._context.game_days
+        npc_id = self._npc_ids.get(c.ref_id) or self._register(c, now)
+        player = self._context.npcs_in_conversation.get_player_character()
+        player_id = (self._npc_ids.get(player.ref_id) or self._register(player, now)) if player is not None else None
+        present = {self._npc_ids.get(x.ref_id) for x in self._context.npcs_in_conversation.get_all_characters()}
+        with self.store.transaction() as db:
+            return self._undress_limits(db, npc_id, player_id, present, part, now)
+
+    def _undress_limits(self, db, npc_id: int, player_id: int | None, present: set, part: str, now: float) -> str | None:
+        if is_child(db, npc_id):
+            return "children are never undressed"
+        if part not in undress_words.MAIN:
+            return None
+        if drink_state(db, npc_id, now).stage in ("drunk", "very drunk"):
+            return "too drunk to choose that clearly"
+        if self.personality is None:
+            return None
+        profile = self.personality.profiles(db, [npc_id], now).get(npc_id)
+        if profile is None:
+            return None
+        boundaries = set(profile.get("boundaries") or [])
+        if profile.get("intimacy_boundary") == "never":
+            return "her own limit: no intimacy with anyone"
+        if "not_with_strangers" in boundaries and player_id is not None:
+            row = db.execute("SELECT familiarity FROM v_relationship WHERE from_id = ? AND to_id = ?",
+                             (npc_id, player_id)).fetchone()
+            if not row or (row[0] or 0.0) < undress_words.STRANGER_FAMILIARITY:
+                return "her own limit: nothing intimate with someone she does not know well"
+        if "no_public_affection" in boundaries:
+            others = [i for i in self._attire_now if i not in present and not is_child(db, i)]
+            if others:
+                return "her own limit: not where other people can see"
+        return None
 
     @_never_raises
     def trip_notes(self, text: str, context: Any) -> list[str]:
