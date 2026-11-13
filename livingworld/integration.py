@@ -46,6 +46,7 @@ from livingworld.intimacy import intimacy_enabled
 from livingworld.store.minors import is_child
 from livingworld.intimacy import scenes as intimate_scenes
 from livingworld.intimacy import confront
+from livingworld.guard import hud as duty_hud
 from livingworld.guard import decency, enlist_words, names as guard_names, training_words, uniform
 from livingworld.social import side_jobs, surrender, wingman
 from livingworld.bodylang.peek import KEY_PEEK_ON, peek_enabled
@@ -120,6 +121,19 @@ KEY_GUARD_WATCH_WIN = "mantella_lw_guard_watch_win"      # int[]: the window's n
 KEY_GUARD_WATCH_KIND = "mantella_lw_guard_watch_kind"    # int[]: 1 = someone comes over (else notice), 0 = notice
 KEY_GUARD_WATCH_OBS = "mantella_lw_guard_watch_obs"      # string[]: what the player notices if nobody comes over
 KEY_GUARD_WATCH_COOLDOWN = "mantella_lw_guard_watch_cooldown"   # float: days before the same person comes over again
+# The duty in hand as a journal objective (guard/hud.py, LWGuardDuty.esp), sent when it changes
+KEY_DUTY_HUD_TASK = "mantella_lw_duty_hud_task"          # int: the duty (task id); 0 = none: close the quest
+KEY_DUTY_HUD_TEXT = "mantella_lw_duty_hud_text"          # string: the duty line, without the clock
+KEY_DUTY_HUD_END = "mantella_lw_duty_hud_end"            # float: game days (+1) the shift ends; 0 = no shift
+KEY_DUTY_HUD_READY = "mantella_lw_duty_hud_ready"        # float: when it may be reported; -1 = not yet
+KEY_DUTY_HUD_REPORT_BY = "mantella_lw_duty_hud_report_by"   # float: missed after this; 0 = none
+KEY_DUTY_HUD_SEEN = "mantella_lw_duty_hud_seen"          # bool: seen at the post / dealt with
+KEY_DUTY_HUD_BOSS = "mantella_lw_duty_hud_boss"          # string: whom to report to
+KEY_DUTY_HUD_BOSS_ID = "mantella_lw_duty_hud_boss_id"    # int: their reference, plugin-relative (0 = no marker)
+KEY_DUTY_HUD_BOSS_PLUGIN = "mantella_lw_duty_hud_boss_plugin"
+KEY_DUTY_HUD_OUTCOME = "mantella_lw_duty_hud_outcome"    # string, with task 0: 'done' | 'failed' | ''
+KEY_DUTY_HUD_LAST = "mantella_lw_duty_hud_last"          # int, with task 0: the duty that outcome is about
+KEY_DUTY_HUD_EVERY = "mantella_lw_duty_hud_every"        # float: real seconds between reminders; 0 = only on change
 # Sent by the Living World build of Mantella-Spell (guard careers): per actor, and in the context
 KEY_IS_GUARD = "mantella_lw_is_guard"            # actor: Actor.IsGuard()
 KEY_CRIME_FACTION = "mantella_lw_crime_faction"  # actor: form ID of Actor.GetCrimeFaction()
@@ -190,6 +204,7 @@ class LivingWorld:
         self._guard_refreshed: int | None = None    # conv_id whose duties/probation were brought up to date
         self._player_said: str | None = None        # the player's last line (kept with a duty report)
         self._watch_sent: tuple | None = None       # G2e: the watch plan last sent to the game this conversation
+        self._duty_hud_sent: tuple | None = None    # the duty objective last sent to the game this conversation
         self.keep_promises = enabled and promises.promises_enabled()   # NPCs do what they say (MANTELLA_LW_KEEP_PROMISES=0 turns off)
         self.trips = enabled and trips.trips_enabled()   # "let's go to X" sets off after the player's yes (MANTELLA_LW_TRIPS=0 off)
         self._trips: trips.TripPlanner | None = None   # this conversation's trip question and confirmed trip
@@ -474,6 +489,7 @@ class LivingWorld:
         self._npc_last = None
         self._hints_to_send = []
         self._watch_sent = None
+        self._duty_hud_sent = None
         self._lead_ask = None
         self._lead_learned = set()
         self._trips = trips.TripPlanner(here=str(getattr(context, "location", "") or "")) if self.trips else None
@@ -1251,6 +1267,12 @@ class LivingWorld:
                 self.errors += 1
                 logger.exception("Living World: could not send the guard watch windows; carrying on")
         if self.guard and self.store is not None:
+            try:
+                keys.update(self._duty_hud_keys())
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not send the guard duty objective; carrying on")
+        if self.guard and self.store is not None:
             self._hints_to_send += self._guard_for(self.store).take_notices()   # shift started / over
         if self._trips is not None:
             self._hints_to_send += self._trips.take_notices()   # "Go with Alfhild to Battle-Born Farm? Say yes or no."
@@ -1306,6 +1328,24 @@ class LivingWorld:
                 KEY_GUARD_WATCH_AT: [w.at for w in plan.windows], KEY_GUARD_WATCH_WIN: [w.win for w in plan.windows],
                 KEY_GUARD_WATCH_KIND: [1 if w.kind == ENC.APPROACH else 0 for w in plan.windows],
                 KEY_GUARD_WATCH_OBS: [w.observation for w in plan.windows], KEY_GUARD_WATCH_COOLDOWN: cooldown}
+
+    def _duty_hud_keys(self) -> dict[str, Any]:
+        """The duty in hand as a journal objective the game keeps on show until the shift is over (guard/hud.py)."""
+        scene = self._guard_scene()
+        if scene is None or scene.player_id is None:
+            return {}
+        obj = duty_hud.objective_for(self.store, scene.player_id, scene.now) if duty_hud.enabled() else duty_hud.NONE
+        if obj is None or obj.signature() == self._duty_hud_sent:
+            return {}
+        self._duty_hud_sent = obj.signature()
+        if obj.task_id:
+            logger.log(23, f"Living World guard: duty objective for task {obj.task_id}: '{obj.text}' end "
+                           f"{obj.end:.4f} ready {obj.ready_at:.4f} report by {obj.report_by:.4f} seen={obj.seen}")
+        return {KEY_DUTY_HUD_TASK: obj.task_id, KEY_DUTY_HUD_TEXT: obj.text, KEY_DUTY_HUD_END: obj.end,
+                KEY_DUTY_HUD_READY: obj.ready_at, KEY_DUTY_HUD_REPORT_BY: obj.report_by, KEY_DUTY_HUD_SEEN: obj.seen,
+                KEY_DUTY_HUD_BOSS: obj.boss, KEY_DUTY_HUD_BOSS_ID: obj.boss_ref, KEY_DUTY_HUD_BOSS_PLUGIN: obj.boss_plugin,
+                KEY_DUTY_HUD_OUTCOME: obj.outcome, KEY_DUTY_HUD_LAST: obj.last_task,
+                KEY_DUTY_HUD_EVERY: duty_hud.every_seconds()}
 
     def start_reply_keys(self) -> dict[str, Any]:
         """Extra keys for the conversation start reply."""
