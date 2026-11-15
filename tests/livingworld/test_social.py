@@ -254,6 +254,23 @@ def test_riverwood_seed_data_is_consistent():
                 assert (a, b) not in rows, f"{a}->{b} written twice"
                 rows[(a, b)] = kinship
         for (a, b), kinship in rows.items():
-            assert (b, a) in rows, f"{a}->{b} has no {b}->{a}"
-            if kinship:
+            if kinship:   # a family tie is seen from both sides; one person's feelings may be seeded alone (no guessing the other's)
+                assert (b, a) in rows, f"{a}->{b} has no {b}->{a}"
                 assert rows[(b, a)] in inverse[kinship], (a, b, kinship, rows[(b, a)])
+
+
+def test_riverwood_seed_invents_no_friendships():
+    """Only ties vanilla Skyrim shows are seeded: marriages, family, the courting of Camilla and Sven's rivalry.
+    Everything else a Riverwood person feels about another comes from what happens in play."""
+    from livingworld.social.seed import seeds
+    allowed = {"spouse", "sibling", "parent", "nephew", "courting", "rival"}
+    friendly = {"friend", "close_friend"}
+    seed = next(s for s in seeds() if s["communities"][0]["key"] == "riverwood")
+    for r in seed["relationships"]:
+        kin = bool(r.get("kinship"))
+        undecided_side = r.get("one_way") and r["a"] == "camilla"       # she has chosen neither suitor
+        assert kin or r["status"] in {"courting", "rival"} or undecided_side, r
+        if r["status"] in friendly and not undecided_side:
+            assert kin, f"{r['a']}-{r['b']} is a friendship with no family tie behind it"
+    assert not any("gossipy" in p for p in seed["people"])      # gossip comes from each person's own bio
+    assert {m["influence"] for p in seed["people"] for m in p["member_of"].values()} == {0.5}

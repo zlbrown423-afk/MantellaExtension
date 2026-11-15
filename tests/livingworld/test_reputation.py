@@ -261,13 +261,15 @@ def test_traits_come_from_the_bio_and_the_seed_file_wins():
     assert all(0.4 <= v <= 0.6 for v in plain.values())
 
 
-def test_seed_file_gossipiness_survives_bio_traits(tmp_path):
+def test_seed_file_sets_no_gossipiness_so_the_bio_decides(tmp_path):
     talk(tmp_path, [sigrid()], 1.0)
     db = open_db(tmp_path)
     import json
-    row = db.execute("SELECT traits_json FROM persona_version WHERE npc_id = ?", (npc_id(db, "Sigrid"),)).fetchone()
-    data = json.loads(row[0])
-    assert data["gossipy"] == 0.6           # riverwood.json
+    pid = npc_id(db, "Sigrid")
+    row = db.execute("SELECT bio, traits_json FROM persona_version WHERE npc_id = ?", (pid,)).fetchone()
+    ident = db.execute("SELECT plugin, base_form_id FROM npc WHERE npc_id = ?", (pid,)).fetchone()
+    data = json.loads(row[1])
+    assert data["gossipy"] == traits.from_bio(row[0], f"{ident[0]}:{ident[1]}")["gossipy"]   # not a seeded 0.6
     assert "honest" in data                 # from her Mantella bio
 
 

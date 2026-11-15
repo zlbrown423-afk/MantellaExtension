@@ -29,11 +29,12 @@ def _local_id(base_id: str) -> str:
 
 
 def gossipiness() -> dict[tuple[str, str], float]:
-    """(plugin, base_form_id) -> gossipy 0..1 for seeded people."""
+    """(plugin, base_form_id) -> gossipy 0..1 for the seeded people whose file sets one (none is invented)."""
     out = {}
     for seed in seeds():
         for p in seed["people"]:
-            out[(p["plugin"], _local_id(p["base_id"]))] = float(p.get("gossipy", 0.5))
+            if "gossipy" in p:
+                out[(p["plugin"], _local_id(p["base_id"]))] = float(p["gossipy"])
     return out
 
 
@@ -99,8 +100,11 @@ class Seeder:
                            " ON CONFLICT(npc_id, community_id) DO UPDATE SET role = excluded.role,"
                            " influence = excluded.influence",
                            (npc_id, community_ids[key], m.get("role"), float(m.get("influence", 0.3))))
-            seeded_traits = {"gossipy": float(p.get("gossipy", 0.5)), **(p.get("traits") or {})}
-            if not db.execute("SELECT 1 FROM persona_version WHERE npc_id = ?", (npc_id,)).fetchone():
+            # a trait the file does not set is not invented here: it comes from the NPC's own bio, or the default
+            seeded_traits = {**({"gossipy": float(p["gossipy"])} if "gossipy" in p else {}), **(p.get("traits") or {})}
+            if not seeded_traits:
+                pass
+            elif not db.execute("SELECT 1 FROM persona_version WHERE npc_id = ?", (npc_id,)).fetchone():
                 db.execute("INSERT INTO persona_version (npc_id, version, bio, traits_json, source, created_gt)"
                            " VALUES (?, 1, '', ?, 'author', ?)", (npc_id, json.dumps(seeded_traits), gt))
             else:
