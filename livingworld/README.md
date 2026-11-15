@@ -665,3 +665,30 @@ timeline. The player discovers them through trust: private, suspected, known, or
 consent read the profile, and desire is never a yes. Settings file: `data/livingworld/personality.json`. Admin
 tool: `python -m livingworld.personality`. Migration 017. Off with `MANTELLA_LW_PERSONALITY=0`. Full details:
 `livingworld/personality/README.md`.
+
+## Turn timing: where the wait between exchanges goes
+
+On unless you set `MANTELLA_LW_TURN_TIMING=0` (works with or without `MANTELLA_LIVING_WORLD=1`). For every player
+turn the server logs one line when the first line of the reply reaches the game, with the time between each step
+it passed through:
+
+```
+Living World turn timing (Fralia Gray-Mane, mic): mic open to speech 2.31 s | speech to pause 3.10 s |
+pause to transcript 0.62 s | transcript to AI request 0.004 s | AI request to first token 0.81 s |
+first token to first sentence 0.40 s | first sentence to voiced 0.55 s | voiced to game 0.02 s |
+wait after speaking 2.41 s
+```
+
+"pause" is the moment the mic's silence threshold passed (or push-to-talk was released), so "wait after speaking"
+is what the player sits through once they stop talking, minus the silence threshold itself. Typed lines start at
+"transcript". Steps that did not happen in a turn are left out (a goodbye line needs no AI call). The last 50 turns
+are kept in `livingworld.perf.turn_timeline.TURN.finished`. Each mark is one clock read under a lock (under a
+microsecond in tests); nothing here changes what the server or the game does.
+
+Why it exists: the context the AI needs (identity, memories, relationships, gossip, world state) is built once per
+conversation, and in group talk once per speaker in about 7 ms, so preparing it in the background would save at
+most a few milliseconds of a 5 to 8 second wait. This log shows which of the other steps to work on.
+
+Upstream patches (one line each, marked `LIVINGWORLD PATCH: turn timing`): `src/stt/stt.py` (speech heard, pause
+reached), `src/conversation/conversation.py` (turn start, words known), `src/output_manager.py` (AI request, first
+token, first sentence, first voice line), `src/game_manager.py` (first line handed to the game, conversation end).

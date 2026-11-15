@@ -21,6 +21,7 @@ from src.actions.function_manager import FunctionManager
 from src.random_llm_selector import RandomLLMSelector, LLMSelection
 from src.llm.client_base import ClientBase
 from livingworld.integration import LivingWorld # LIVINGWORLD PATCH
+from livingworld.perf.turn_timeline import TURN as LW_TURN # LIVINGWORLD PATCH: turn timing
 
 logger = utils.get_logger()
 
@@ -189,6 +190,7 @@ class GameStateManager:
                 reply[comm_consts.KEY_REPLYTYPE_NPCTALK] = self.sentence_to_json(sentence_to_play, topicInfoID)
                 reply[comm_consts.KEY_REPLYTYPE_NPCTALK].update(self.__living_world.line_reply_keys(sentence_to_play) or {}) # LIVINGWORLD PATCH: mood meter
                 self.__living_world.npc_line(sentence_to_play, self.__talk.context) # LIVINGWORLD PATCH
+                LW_TURN.line_sent(sentence_to_play.speaker.name if sentence_to_play.text.strip() else None) # LIVINGWORLD PATCH: turn timing
                 self.__first_line = False
 
                 if {'identifier': comm_consts.ACTION_RELOADCONVERSATION} in sentence_to_play.actions:
@@ -267,6 +269,7 @@ class GameStateManager:
             self.__talk.end(end_timestamp)
             self.__living_world.conversation_ended(end_timestamp, self.__talk.context) # LIVINGWORLD PATCH
             self.__talk = None
+        LW_TURN.cancel() # LIVINGWORLD PATCH: turn timing, a turn left open does not run into the next conversation
 
         logger.log(24, '\nConversations not starting when you select an NPC? See here:')
         logger.log(25, 'https://art-from-the-machine.github.io/Mantella/pages/issues_qna')

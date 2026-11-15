@@ -27,6 +27,7 @@ from src.llm.client_base import ClientBase
 from src.model_profile_manager import get_profile_manager, ModelProfileManager
 from src.actions.function_manager import FunctionManager
 from src.llm.messages import AssistantMessage, ToolMessage, UserMessage # LIVINGWORLD PATCH: UserMessage
+from livingworld.perf import turn_timeline as lw_turn # LIVINGWORLD PATCH: turn timing
 from src.tts.ttsable import TTSable
 from src.tts.synthesization_options import SynthesizationOptions
 from src.tts.tts_factory import parse_tts_service, create_tts
@@ -355,6 +356,7 @@ class ChatManager:
                 while not has_text_response and retries < max_retries:
                     try:
                         start_time = time.time()
+                        lw_turn.TURN.mark(lw_turn.AI_REQUEST) # LIVINGWORLD PATCH: turn timing
                         async for item in active_client.streaming_call(messages=living_world.mood_messages(messages, active_character) if mood_filter else messages, is_multi_npc=is_multi_npc, tools=current_tools): # LIVINGWORLD PATCH: mood reminder
                             if self.__stop_generation.is_set():
                                 break
@@ -362,6 +364,7 @@ class ChatManager:
                                 continue
 
                             if first_token:
+                                lw_turn.TURN.mark(lw_turn.FIRST_TOKEN) # LIVINGWORLD PATCH: turn timing
                                 logger.log(self.loglevel, f"LLM took {round(time.time() - start_time, 5)} seconds to respond")
                                 first_token = False
                             
@@ -464,9 +467,11 @@ class ChatManager:
                                     if parsed_sentence:
                                         if not self.__config.narration_handling == NarrationHandlingEnum.CUT_NARRATIONS or parsed_sentence.sentence_type != SentenceTypeEnum.NARRATION:
                                             if first_sentence:
+                                                lw_turn.TURN.mark(lw_turn.FIRST_SENTENCE) # LIVINGWORLD PATCH: turn timing
                                                 logger.log(self.loglevel, f"LLM took {round(time.time() - start_time, 5)} seconds to return the first sentence")
                                                 first_sentence = False
                                             new_sentence = self.generate_sentence(parsed_sentence)
+                                            lw_turn.TURN.mark(lw_turn.VOICED) # LIVINGWORLD PATCH: turn timing (first time only)
                                             blocking_queue.put(new_sentence)
                                             parsed_sentence = None
                                 if settings.stop_generation:
