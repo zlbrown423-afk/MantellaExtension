@@ -74,3 +74,20 @@ Free-talk lines are never written to disk. Only the CSV numbers are meant to be 
 | V6 | Run the protocol again on another day | "Compared with the previous baseline": medians held within their spread |
 
 Send back `validation.csv` (and `day_compare.csv` after the second day). That table decides which measurements Stage 2 may use in game.
+
+## Mic calibration (mic capture design, step 2)
+
+Open `http://127.0.0.1:7861/calibrate` (link at the top of the Voice Lab page) after picking the mic on the main page. Five guided recordings, about 5 minutes: room silence (10 s), loud speech, normal speech (the Rainbow Passage, 45 s), quiet speech, and an optional echo check (stay silent while an NPC talks).
+
+It measures RMS, peak, clipping (full-scale samples and flat tops), noise floor, SNR, mains hum (50/60 Hz), signs of a noise gate or automatic gain before Windows, whether Mantella's speech detector (threshold 0.4) hears your quiet speech, and whether NPC speech leaks into the mic. It works out the fixed gain that would bring normal speech to -23 dBFS and gives plain advice (for example "lower this mic's level in Windows"). **Play back** plays a take raw.
+
+**Save profile for this mic** writes numbers only to `Documents\My Games\Mantella\data\audio\mic_profiles.json`, one profile per mic and connection (Steam Streaming Microphone, Razer USB Sound Card, and so on), and marks it active. Run it once per mic, then compare the SNR and "analysis signal clean" rows to choose. Takes are saved as 32-bit float WAVs under `audio\calibration\<mic>\` and removed by **Delete calibration recordings**; the saved profile stays.
+
+Nothing here changes Mantella, Windows or any setting; it only listens while a step is recording. Tests: `tests/livingworld/test_audio_calibration.py`.
+
+| ID | Test | Pass when |
+|---|---|---|
+| C1 | Calibrate the Steam Streaming Microphone, then the Razer mic | Each saves a profile; both show up under Saved profiles |
+| C2 | Loud speech with the Windows level too high | Clipped samples shown, advice says to lower the level; after lowering it, 0 clipped |
+| C3 | Echo check while an NPC talks | Seconds heard as speech are shown; advice appears if over 0.5 s |
+| C4 | Delete calibration recordings | No WAV left in `audio\calibration`; saved profile still there |

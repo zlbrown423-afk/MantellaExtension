@@ -76,9 +76,11 @@ def main(argv: list[str] | None = None) -> int:
     if wanted:
         lab.select_device(wanted, None if args.device else storage.load_settings().get("hostapi"))
 
-    server = serve(lab, args.port)
+    from tools.voice_lab.calibration import Calibrator
+    calibrator = Calibrator(lab, storage.root)
+    server = serve(lab, args.port, calibrator)
     url = f"http://{HOST}:{args.port}/"
-    print(f"Voice Lab is running at {url}  (Ctrl+C to quit). Files: {storage.root}")
+    print(f"Voice Lab is running at {url}  (Ctrl+C to quit). Mic calibration: {url}calibrate. Files: {storage.root}")
     if not args.no_browser:
         threading.Timer(0.5, lambda: webbrowser.open(url)).start()
     try:
