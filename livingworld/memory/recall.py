@@ -134,11 +134,17 @@ def recall_for(store: WorldStore, npc_id: int, now_gt: float, player_id: int | N
         with store.reading() as db:
             recall.beliefs = reputation.belief_lines(db, npc_id, about)
 
-    if mark_rehearsed and recall.mem_ids:
+    if mark_rehearsed:
+        mark_rehearsed_rows(store, recall, now_gt)
+    return recall
+
+
+def mark_rehearsed_rows(store: WorldStore, recall: Recall, now_gt: float) -> None:
+    """Count one more recall of each memory in ``recall`` (done once per NPC per conversation)."""
+    if recall.mem_ids:
         with store.transaction() as db:
             db.executemany("UPDATE memory SET rehearsal_count = rehearsal_count + 1, last_recalled_gt = ? WHERE mem_id = ?",
                            [(now_gt, m) for m in recall.mem_ids])
-    return recall
 
 
 def _add_memory(recall: Recall, now_gt: float, mem_id: int, content: str, occurred: float, source_kind: str | None,

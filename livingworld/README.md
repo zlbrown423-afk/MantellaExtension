@@ -692,3 +692,24 @@ most a few milliseconds of a 5 to 8 second wait. This log shows which of the oth
 Upstream patches (one line each, marked `LIVINGWORLD PATCH: turn timing`): `src/stt/stt.py` (speech heard, pause
 reached), `src/conversation/conversation.py` (turn start, words known), `src/output_manager.py` (AI request, first
 token, first sentence, first voice line), `src/game_manager.py` (first line handed to the game, conversation end).
+
+## Background context preparation (group talk)
+
+On unless you set `MANTELLA_LW_CONTEXT_PREP=0`. In group talk each speaker's prompt is rebuilt on every turn. When
+the mic opens for the player's line, one background thread reads each NPC's recalled rows (`recall_for`: facts,
+memories, recap, gossip, opinion of the player, beliefs about who is present) and keeps them by NPC. When the
+turn's prompt is built, `recall_text` uses that copy only if the world, timeline, conversation, NPC, player,
+everyone present and the game time all match and nothing that recall reads was written since; otherwise it reads
+fresh as before. Writes are seen through a SQLite trace callback on the store's connection; the tables recall
+reads are worked out from the schema (views expanded) and checked by tests against what SQLite reports as read.
+Lines and participant rows of the current conversation, new events, tasks, AI call records and similar writes
+do not count. The background read writes nothing; rehearsal counts are added at hand-over as before. One-to-one
+talk does not use it (its prompt is built once per conversation). The worker and the write watch stop when the
+conversation ends. Code: `livingworld/dialogue/context_prep.py`; hooks: `LivingWorld.player_turn_started` (from
+`Conversation.process_player_input` when the mic opens), `_prepared_recall` in `recall_text`, and
+`cancel_context_prep` (from `GameStateManager.end_conversation`).
+
+Measured on a copy of a real save (two NPCs, ten turns, cloud sandbox): 9 to 10 of 10 turns used the prepared copy,
+the background read took about 1.3 ms per NPC, the write watch cost about 2 us per statement (about 0.5 ms per turn),
+and the prompt build went from 6.6 ms to 5.8 ms per speaker. The saving is small because the prompt was already
+cheap; this is mainly the safe hand-over shape a later NPC context cache can use.

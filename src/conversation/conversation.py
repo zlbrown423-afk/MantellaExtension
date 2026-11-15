@@ -240,6 +240,8 @@ class Conversation:
         
         events_need_updating: bool = False
         TURN.start(mic=self.__mic_input and len(player_text) == 0) # LIVINGWORLD PATCH: turn timing
+        if self.__mic_input and len(player_text) == 0 and getattr(self.__output_manager, "living_world", None) is not None: # LIVINGWORLD PATCH: group talk, read each NPC's recall while the player speaks
+            self.__output_manager.living_world.player_turn_started(self.__context) # LIVINGWORLD PATCH
 
         with self.__generation_start_lock: #This lock makes sure no new generation by the LLM is started while we clear this
             self.__stop_generation() # Stop generation of additional sentences right now

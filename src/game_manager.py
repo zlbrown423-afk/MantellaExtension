@@ -270,6 +270,7 @@ class GameStateManager:
             self.__living_world.conversation_ended(end_timestamp, self.__talk.context) # LIVINGWORLD PATCH
             self.__talk = None
         LW_TURN.cancel() # LIVINGWORLD PATCH: turn timing, a turn left open does not run into the next conversation
+        self.__living_world.cancel_context_prep() # LIVINGWORLD PATCH: background context prep (group talk)
 
         logger.log(24, '\nConversations not starting when you select an NPC? See here:')
         logger.log(25, 'https://art-from-the-machine.github.io/Mantella/pages/issues_qna')
