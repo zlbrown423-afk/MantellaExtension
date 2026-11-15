@@ -49,7 +49,7 @@ class Kind:
     suspects: tuple[str, ...] = ()     # G2f: real local people who may be named as the culprit
     suspect_chance: float = 0.0
     charge: str | None = None          # G2f: what an arrest for it is for ('theft', 'brawling')
-    open_country: bool = False         # a fight anywhere in the unnamed wilderness counts (road bandits)
+    open_country: bool = False         # a fight out in the wilds (no named place) counts too: road work
 
 
 @dataclass
@@ -91,8 +91,8 @@ def kinds(org_key: str) -> tuple[Kind, ...]:
                  for k in raw.get("incidents") or ())
 
 
-def kind_of(inc: Incident) -> Kind | None:
-    """The kind an incident was opened from (looked up live, so incidents already open get later data changes)."""
+def kind_of(inc: "Incident") -> Kind | None:
+    """The incident's kind as configured now (so a setting added later also applies to incidents already open)."""
     return next((k for k in kinds(inc.org_key) if k.key == inc.key), None)
 
 

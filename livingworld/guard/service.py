@@ -543,7 +543,8 @@ class Guard:
                 logger.log(23, f"Living World guard: duty {task.task_id} '{d.key}' given day "
                                f"{DU.assigned_gt(db, task):.4f} ({P.clock(DU.assigned_gt(db, task))}), ends "
                                f"{P.clock(DU.shift_end(db, task, d))}, now day {scene.now:.4f} ({P.clock(scene.now)}), "
-                               f"{'fought' if d.need == 'fight' else 'seen'} {DU.done_count(db, task, d)}, new={task.task_id in self._assigned}")
+                               f"{'fought' if d.need == 'fight' else 'seen'} {DU.done_count(db, task, d)}, "
+                               f"new={task.task_id in self._assigned}")
                 done = DU.done_count(db, task, d)
                 if d.training:
                     n, total = TR.progress(db, org, svc)

@@ -49,6 +49,7 @@ class PerceptionPipeline:
     def ingest(self, raw_records: list[str]) -> list[Outcome]:
         """Parse and store each record; a bad record is logged and skipped, never fatal."""
         outcomes = []
+        fights = []
         for raw in raw_records:
             try:
                 record = parse_record(raw)
@@ -56,7 +57,23 @@ class PerceptionPipeline:
                 logger.error(f"Living World: perception record skipped ({e}): {raw[:200]}")
                 continue
             outcomes.append(self.record(record))
+            if record.type == "fight":
+                fights.append(record)
+        if fights:
+            self._combat(fights)
         return outcomes
+
+    def _combat(self, fights: list[PerceptionRecord]) -> None:
+        """The fight records of this batch, as shared fights with each NPC's own memory (livingworld/combat).
+        The hygiene and guard-duty handling of each record has already happened; this only adds the event."""
+        from livingworld.combat import combat_enabled
+        if not combat_enabled():
+            return
+        try:
+            from livingworld.combat import fights as combat_fights
+            combat_fights.store_fights(self, fights)
+        except Exception:
+            logger.exception("Living World: could not store a shared fight; carrying on")
 
     def record(self, record: PerceptionRecord) -> Outcome:
         if record.type == "attire":
