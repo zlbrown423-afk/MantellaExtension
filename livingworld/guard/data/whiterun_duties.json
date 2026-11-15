@@ -172,7 +172,7 @@
       "merit": 2.0
     }
   ],
-  "_about_incidents": "Incidents (G2d, guard/incident.py): trouble the guard is sent to deal with. Each game day every kind is rolled once (chance); at most one of each kind is open. The member's superior gives an open incident as a duty ahead of routine duties, at any hour, if the member's rank is at least min_rank. need 'seen' = done by being at a place in 'where' (a conversation there); need 'fight' = done only by fighting there. Reporting back after that closes it (outcome arrested / cleared, which gossip carries); merit as for duties. It goes cold after lasts_days if nobody takes it. {complainant} and {camp} are filled from the lists.",
+  "_about_incidents": "Incidents (G2d, guard/incident.py): trouble the guard is sent to deal with. Each game day every kind is rolled once (chance); at most one of each kind is open. The member's superior gives an open incident as a duty ahead of routine duties, at any hour, if the member's rank is at least min_rank. need 'seen' = done by being at a place in 'where' (a conversation there); need 'fight' = done only by fighting there. Reporting back after that closes it (outcome arrested / cleared, which gossip carries); merit as for duties. It goes cold after lasts_days if nobody takes it. {complainant} and {camp} are filled from the lists. The complainant (a real townsperson) remembers filing the complaint: 'complaint' is their account for the prompt and 'memory' the same in their own words ({loss} picked from 'losses'), and 'culprit_looks' (same order as 'culprits') is the glimpse they caught of the thief, never the name.",
   "incidents": [
     {
       "key": "market_theft",
@@ -196,6 +196,20 @@
         "Anoriath",
         "Brenuin"
       ],
+      "losses": [
+        "a coin purse holding about forty septims",
+        "a purse with thirty septims and a silver ring in it",
+        "the day's takings, some sixty septims in a leather pouch",
+        "a purse of twenty-odd septims and a lucky copper amulet"
+      ],
+      "complaint": "{complainant} was in the Plains District market when someone pressed close in the crowd, and a moment later {loss} was gone. {complainant} went straight to the guard about it and wants the thief caught and the coin back.",
+      "memory": "In the Plains District market someone pressed close in the crowd and cut away {loss}, so I went to the guard to get the thief caught and my coin back.",
+      "culprit_looks": [
+        "a scruffy, unwashed drifter in a patched brown cloak",
+        "a grey-skinned Dunmer in worn sellsword's leathers",
+        "a short Breton with a tinker's pack on his back",
+        "a tall, bony Nord in a farmhand's tunic"
+      ],
       "culprits": [
         "a drifter named Hrolfr Two-Purses",
         "a Dunmer sellsword named Teris Arvel",
@@ -212,7 +226,7 @@
     {
       "key": "tavern_brawl",
       "title": "break up the brawl at the Bannered Mare",
-      "why": "Hulda sent word that drinkers at the Bannered Mare have come to blows",
+      "why": "{complainant} sent word that drinkers at the Bannered Mare have come to blows",
       "instructions": "Get to the Bannered Mare, separate the brawlers, and take the one who started it to the cells.",
       "where": [
         "Bannered Mare"
@@ -225,6 +239,16 @@
       "chance": 0.25,
       "min_rank": "recruit",
       "merit": 1.0,
+      "complainants": [
+        "Hulda"
+      ],
+      "complaint": "Drinkers at the Bannered Mare came to blows, with stools and tankards flying, and {complainant} sent word to the guard to come and break it up before the place was wrecked.",
+      "memory": "Drinkers came to blows in the Bannered Mare, so I sent word to the guard to come and break it up.",
+      "culprit_looks": [
+        "a big, red-faced caravan guard, roaring drunk",
+        "a sunburnt farmhand with straw still on his boots",
+        "a loud sellsword with a broken nose"
+      ],
       "culprits": [
         "a drunk caravan guard named Bjorn Ale-Belly",
         "a farmhand from the Battle-Born fields named Gerdvald",

@@ -129,6 +129,24 @@ def at_post(d: Duty, location: str | None) -> bool:
     return bool(loc) and any(w.lower() in loc for w in d.where)
 
 
+# The game names the worldspace, not a place, for a fight out in unnamed wilderness.
+WILDERNESS = frozenset({"skyrim", "tamriel"})
+
+
+def in_open_country(location: str | None) -> bool:
+    return (location or "").strip().lower() in WILDERNESS
+
+
+def open_country_ok(db, d: Duty) -> bool:
+    """Whether a fight out in the open country counts for this duty (road bandits: the fight record has no hold)."""
+    if d.incident_id is None:
+        return False
+    from livingworld.guard import incident as INC
+    inc = INC.get(db, d.incident_id)
+    kind = INC.kind_of(inc) if inc else None
+    return bool(kind and kind.open_country)
+
+
 def superior_id(db, org: O.Org, svc: S.Service) -> int | None:
     person = org.superior(svc.rank_key)
     return profiles.leader_id(db, org, person.key) if person else None
@@ -255,33 +273,14 @@ def mark_seen(db, member_id: int, location: str | None, now: float, witnesses: l
     return T.change(db, task, state, f"seen at post: {location or 'developer'}", now, witnesses=witnesses)
 
 
-# The game names a place with no location of its own (open country between towns) after its worldspace.
-WILDERNESS = frozenset({"skyrim", "tamriel"})
-
-
-def in_open_country(location: str | None) -> bool:
-    return (location or "").strip().lower() in WILDERNESS
-
-
-def open_country_ok(db, d: Duty) -> bool:
-    """Whether a fight out in the wilds counts for this duty: an incident whose kind says so (road bandits)."""
-    if d.incident_id is None:
-        return False
-    from livingworld.guard import incident as INC
-    inc = INC.get(db, d.incident_id)
-    k = INC.kind_of(inc) if inc else None
-    return bool(k and k.open_country)
-
-
 def mark_fought(db, member_id: int, location: str | None, now: float) -> T.Task | None:
-    """A fight the game reported at ``location``: counts for a bandit duty there, while it runs. For road work
-    (``open_country``) a fight out in the wilds counts too, since the road between towns has no place name."""
+    """A fight the game reported at ``location``: counts for a bandit duty there, while it runs."""
     task = in_hand(db, member_id)
     d = duty_for(db, task) if task else None
     if d is None or d.need != "fight" or (task.deadline_gt and now > task.deadline_gt):
         return None
     if not at_post(d, location) and not (in_open_country(location) and open_country_ok(db, d)):
-        return None
+        return None      # a camp raid still needs the camp
     state = "in_progress" if task.state in ("accepted", "paused") else None
     return T.change(db, task, state, f"fought at post: {location}", now)
 
