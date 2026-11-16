@@ -266,6 +266,7 @@ class GameStateManager:
         if(self.__talk):
             # Extract end timestamp from game client
             end_timestamp = input_json.get(comm_consts.KEY_ENDCONVERSATION_TIMESTAMP, None)
+            end_timestamp = self.__living_world.end_timestamp(end_timestamp, input_json, self.__talk.context) # LIVINGWORLD PATCH: a save load does not move the end back in time
             self.__talk.end(end_timestamp)
             self.__living_world.conversation_ended(end_timestamp, self.__talk.context) # LIVINGWORLD PATCH
             self.__talk = None

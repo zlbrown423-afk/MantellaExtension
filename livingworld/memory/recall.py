@@ -9,6 +9,8 @@ import math
 import re
 from dataclasses import dataclass, field
 
+from livingworld.continuity.resume import MAX_CHARS as RESUME_CHARS, MAX_LINES as RESUME_LINES
+from livingworld.continuity.resume import resume_enabled, resumed_from
 from livingworld.memory.settings import memory_boost_enabled
 from livingworld.store.world_store import WorldStore
 
@@ -117,7 +119,7 @@ def recall_for(store: WorldStore, npc_id: int, now_gt: float, player_id: int | N
         if last is not None:
             player = store.scalar("SELECT display_name FROM npc WHERE npc_id = ?", (player_id,))
             recall.last_spoke = f"I last spoke with {player} {time_ago(now_gt - last)}."
-        if memory_boost_enabled():
+        if memory_boost_enabled() or (current_conv_id is not None and resume_enabled()):
             _recap(store, recall, player_id, now_gt, current_conv_id)
 
     _seen(store, recall, now_gt)
@@ -199,9 +201,17 @@ def _pick_memories(store: WorldStore, recall: Recall, now_gt: float) -> None:
 
 def _recap(store: WorldStore, recall: Recall, player_id: int, now_gt: float, current_conv_id: int | None) -> None:
     """How the last conversation with the player ended, in their own words, so a conversation started again
-    picks up where it stopped. Works straight away, before the background extraction has run."""
+    picks up where it stopped. Works straight away, before the background extraction has run.
+
+    Only lines the active timeline may see are shown: after an older save is loaded, what was said after it
+    is not recapped. A conversation picked back up after a save load (continuity/resume.py) is shown as the
+    talk in progress instead."""
+    if resume_enabled() and _interrupted(store, recall, player_id, current_conv_id):
+        return
+    if not memory_boost_enabled():
+        return
     row = store.query(
-        "SELECT c.conv_id, COALESCE(c.ended_gt, c.started_gt), c.location, a.joined_seq, a.left_seq"
+        "SELECT c.conv_id, c.location, a.joined_seq, a.left_seq"
         " FROM conversation c"
         " JOIN participant a ON a.conv_id = c.conv_id AND a.npc_id = ?"
         " JOIN participant b ON b.conv_id = c.conv_id AND b.npc_id = ?"
@@ -212,25 +222,60 @@ def _recap(store: WorldStore, recall: Recall, player_id: int, now_gt: float, cur
         (recall.npc_id, player_id, current_conv_id if current_conv_id is not None else -1, now_gt + 1e-9))
     if not row:
         return
-    conv_id, ended, location, joined, left = row[0]
-    if now_gt - ended > RECAP_DAYS:
-        return
-    lines = store.query(
-        "SELECT n.display_name, u.text FROM utterance u JOIN npc n ON n.npc_id = u.speaker_id"
-        " WHERE u.conv_id = ? AND u.seq > ? AND (? IS NULL OR u.seq <= ?)"
-        " ORDER BY u.seq DESC LIMIT ?", (conv_id, joined or 0, left, left, RECAP_LINES))
+    conv_id, location, joined, left = row[0]
+    lines = _visible_lines(store, conv_id, joined, left, RECAP_LINES)
     if not lines:
+        return
+    ended = lines[0][2]   # the last line the active timeline may see, not the conversation's own end
+    if now_gt - ended > RECAP_DAYS:
         return
     player = store.scalar("SELECT display_name FROM npc WHERE npc_id = ?", (player_id,))
     where = f", in {location}" if location else ""
     recall.recap.append(f"The last time I talked with {player} ({time_ago(now_gt - ended)}{where}), "
                         f"it ended like this (pick up from here if it fits; do not repeat it word for word):")
-    for speaker, text in reversed(lines):
+    _recap_lines(recall, lines, RECAP_CHARS)
+
+
+def _visible_lines(store: WorldStore, conv_id: int, joined: int | None, left: int | None,
+                   limit: int) -> list[tuple]:
+    """The last ``limit`` lines of ``conv_id`` this NPC was there for and the active timeline may see, newest first."""
+    return store.query(
+        "SELECT n.display_name, u.text, u.game_time FROM utterance u JOIN npc n ON n.npc_id = u.speaker_id"
+        " JOIN v_timeline_scope s ON s.timeline_id = u.timeline_id AND u.game_time <= s.cutoff_gt"
+        " WHERE u.conv_id = ? AND u.seq > ? AND (? IS NULL OR u.seq <= ?)"
+        " ORDER BY u.seq DESC LIMIT ?", (conv_id, joined or 0, left, left, limit))
+
+
+def _recap_lines(recall: Recall, lines: list[tuple], max_chars: int) -> None:
+    for speaker, text, _ in reversed(lines):
         text = " ".join((text or "").split())
-        if len(text) > RECAP_CHARS:
-            text = text[:RECAP_CHARS].rsplit(" ", 1)[0] + "..."
+        if len(text) > max_chars:
+            text = text[:max_chars].rsplit(" ", 1)[0] + "..."
         speaker = f"{speaker} (me)" if speaker == recall.name else speaker
         recall.recap.append(f"    {speaker}: {text}")
+
+
+def _interrupted(store: WorldStore, recall: Recall, player_id: int, current_conv_id: int | None) -> bool:
+    """The conversation this one picks back up after a save load, as the talk in progress. Only for an NPC who
+    was in it; anyone else gets the ordinary recap."""
+    with store.reading() as db:
+        old = resumed_from(db, current_conv_id)
+    if old is None:
+        return False
+    row = store.query("SELECT joined_seq, left_seq FROM participant WHERE conv_id = ? AND npc_id = ?",
+                      (old, recall.npc_id))
+    if not row:
+        return False
+    lines = _visible_lines(store, old, row[0][0], row[0][1], RESUME_LINES)
+    if not lines:
+        return False
+    player = store.scalar("SELECT display_name FROM npc WHERE npc_id = ?", (player_id,))
+    recall.recap.append(f"I was in the middle of talking with {player} just now, and we are carrying on where we "
+                        f"left off; no time has passed. This is where we were (continue naturally from the last "
+                        f"line; do not greet {player} again, do not repeat these lines, and do not act as if we "
+                        f"have only just met):")
+    _recap_lines(recall, lines, RESUME_CHARS)
+    return True
 
 
 # ---- reputation and gossip (livingworld/social) ----

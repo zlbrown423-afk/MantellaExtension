@@ -33,6 +33,7 @@ from livingworld.dialogue import joins, place, promises, trips, undress_words
 from livingworld.squad import squad_enabled, service as squad_service, words as squad_words
 from livingworld import fog
 from livingworld.continuity import continuity_enabled, service as continuity
+from livingworld.continuity import resume as conv_resume
 from livingworld.spatial import spatial_enabled, service as spatial_service
 from livingworld import diary
 from livingworld.diary import service as diaries
@@ -195,6 +196,8 @@ class LivingWorld:
         self._social_refreshed: int | None = None   # conv_id the social world was last brought up to date for
         self._hints_to_send: list[str] = []         # overheard hints for the next NPC line (social/hints.py)
         self._after_load = False                     # the first conversation since a game load is still to come
+        self.resume = enabled and conv_resume.resume_enabled()   # pick a conversation back up after a load
+        self._resume_request: int | None = None     # conversation id the loaded save was in (start request)
         self.tasks = enabled and tasks_enabled()    # NPC tasks and shared work (livingworld/work)
         self._work: dict[int, Work] = {}            # id(store) -> tasks for that world
         self._work_refreshed: int | None = None     # conv_id tasks were last brought up to date for
@@ -461,6 +464,7 @@ class LivingWorld:
         """Handle the save load the game reports with each conversation start (see ``store/timeline.py``).
         Returns extra reply keys: the world and the timeline id the game should keep in its save."""
         reply = {worlds.KEY_WORLD_KEY: world_id}
+        self._resume_request = self._resume_id(request)
         nonce = request.get(KEY_LOAD_NONCE)
         if nonce is None or request.get(KEY_LOADED_GAME_DAYS) is None:
             return reply
@@ -476,6 +480,66 @@ class LivingWorld:
             else:
                 logger.log(23, f"Living World: save loaded on timeline {result.timeline_id}.")
         return {**reply, KEY_TIMELINE_ID: result.timeline_id}
+
+    # ---- picking a conversation back up after a save load (continuity/resume.py) ----
+    def _resume_id(self, request: dict[str, Any]) -> int | None:
+        if not self.resume:
+            return None
+        try:
+            value = int(request.get(conv_resume.KEY_RESUME_CONV) or 0)
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
+
+    def end_timestamp(self, end_timestamp: Any, request: dict[str, Any], context: Any) -> Any:
+        """The end time to use for an end request. The game ends the conversation a save held when that save
+        loads, and sends the loaded save's (earlier) time: that would stamp what was said after the save as if
+        it came before it, and the loaded game would remember it. Keeps the conversation's own time instead."""
+        if not self.enabled:
+            return end_timestamp
+        try:
+            days = getattr(context, "game_days", None) if context is not None else None
+            fixed, from_load = conv_resume.end_time(end_timestamp, days, bool(request.get(conv_resume.KEY_LOAD_END)))
+            if from_load:
+                logger.log(23, f"Living World: the conversation was ended by a save load (game day {end_timestamp});"
+                               f" it closes at its own time, game day {fixed}")
+            return fixed
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not check the end time; using the game's")
+            return end_timestamp
+
+    def _resume_conversation(self, context: Any) -> None:
+        """Link this conversation to the one the loaded save was in, and copy that one's lines when its own
+        memories cannot be seen from this save (see continuity/resume.py)."""
+        old, self._resume_request = self._resume_request, None
+        if old is None or self.conv_id is None:
+            return
+        player = context.npcs_in_conversation.get_player_character()
+        player_id = self._npc_ids.get(player.ref_id) if player else None
+        try:
+            with self.store.transaction() as db:
+                plan = conv_resume.plan(db, old, self.conv_id, set(self._present), player_id, context.game_days)
+                if plan.skipped:
+                    logger.log(23, f"Living World: conversation {old} from the loaded save is not picked back up:"
+                                   f" {plan.skipped}")
+                    return
+                db.execute("SAVEPOINT lw_resume")
+                try:
+                    copied = conv_resume.apply(db, self.conv_id, plan)
+                    db.execute("RELEASE lw_resume")
+                except sqlite3.IntegrityError as e:
+                    db.execute("ROLLBACK TO lw_resume")
+                    db.execute("RELEASE lw_resume")
+                    logger.log(23, f"Living World: the earlier lines could not be carried over ({e}); shown only")
+                    plan.copy = False   # e.g. a voice rebound since: show the lines, do not copy them
+                    copied = conv_resume.apply(db, self.conv_id, plan)
+            how = f"{copied} line(s) carried over" if copied else "its lines shown, not copied (already remembered)"
+            logger.log(23, f"Living World: conversation {self.conv_id} picks conversation {old} back up after the"
+                           f" save load ({how})")
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not pick the conversation back up; starting it fresh")
 
     @_never_raises
     def conversation_starting(self, world_id: str, context: Any) -> None:
@@ -533,6 +597,7 @@ class LivingWorld:
         self._npc_ids.clear()
         self._present.clear()
         self._sync(context)
+        self._resume_conversation(context)
         self._side_jobs_started(context)
         self._personality_started(context)
         logger.log(23, f"Living World: conversation {self.conv_id} started in {context.location}"
@@ -1566,6 +1631,9 @@ class LivingWorld:
     def start_reply_keys(self) -> dict[str, Any]:
         """Extra keys for the conversation start reply."""
         keys: dict[str, Any] = {KEY_QUIET_CHATTER: True} if self.quiet_chatter else {}
+        if self.conv_id is not None:
+            keys[conv_resume.KEY_CONV_ID] = int(self.conv_id)   # kept in the save, sent back after a load
+        keys[conv_resume.KEY_RESUME_OFF] = not self.resume
         keys[KEY_BODY_ON] = bool(self.body_language)
         keys[KEY_GESTURES_ON] = bool(self.body_language and gestures_enabled())
         keys[KEY_GESTURE_NOTICES] = gesture_notices()
