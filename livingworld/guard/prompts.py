@@ -14,6 +14,13 @@ def given_name(name: str, org: O.Org, p: Profile) -> str:
             f"{p.given_name} gives it when asked, and fellow guards use it.")
 
 
+def fellow_guards(name: str, own: str, others: list[str]) -> str:
+    """In a conversation with several guards, every one is 'Whiterun Guard' to the model: say who is who."""
+    who = others[0] if len(others) == 1 else ", ".join(others[:-1]) + " and " + others[-1]
+    return (f"{own} is standing with {who}, other guards with names of their own. {own} is not any of them and never "
+            f"gives one of their names as {own}'s own, even if one of them was just introduced.")
+
+
 def service_line(name: str, player: str, org: O.Org, svc: S.Service, now: float, leader_name: str | None) -> str:
     probation = ""
     if svc.status == "probation":

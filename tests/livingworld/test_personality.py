@@ -77,7 +77,7 @@ def test_migration_017_applies_on_an_existing_world(tmp_path):
     conn.commit()
     conn.close()
     store = WorldStore(path)
-    assert store.schema_version() == 17
+    assert store.schema_version() >= 17      # later migrations apply on top
     assert store.scalar("SELECT display_name FROM npc") == "Aela"      # existing data kept
     for table in ("personality_profile", "personality_change", "personality_knowledge", "personality_admin"):
         assert store.scalar("SELECT COUNT(*) FROM sqlite_master WHERE name = ?", (table,)) == 1
