@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 
 from livingworld.guard import arrest as AR, banter as BT, debug as D, duty as DU, encounter as ENC, incident as INC, reports as RP, training as TR, orgs as O, peace as PEACE, promotion as PR, prompts as P, profiles, recruit as R, store as S
 from livingworld.guard.profiles import GuardFacts
+from livingworld.dialogue.private_notes import PrivateNote
 from livingworld.social import claims, processor
 from livingworld.store.minors import is_child
 from livingworld.store.world_store import WorldStore
@@ -260,10 +261,10 @@ class Guard:
         if not lines:
             return []
         logger.log(23, f"Living World guard: first orders from {name} in the enlistment conversation")
-        return [f"{scene.player_name} has just joined the guard, so here is what the guard's record says for "
-                f"{name} now. These are {scene.player_name}'s real first orders: {name} gives exactly this, "
-                f"and any other duty mentioned earlier in this conversation is replaced by it:\n"
-                + "\n".join(f"- {line}" for line in lines)]
+        return [PrivateNote(f"{scene.player_name} has just joined the guard, so here is what the guard's record says "
+                            f"for {name} now. These are {scene.player_name}'s real first orders: {name} gives exactly "
+                            f"this, and any other duty mentioned earlier in this conversation is replaced by it:\n"
+                            + "\n".join(f"- {line}" for line in lines), boss)]   # the superior's record
 
     def report_turn(self, scene: Scene, text: str) -> list[str]:
         """G2g: the player tells their superior (here) they are reporting back. The model often never begins its
@@ -300,22 +301,22 @@ class Guard:
                     missing = (f"not long enough yet: the shift runs until {P.clock(DU.shift_end(db, task, d))} and "
                                f"{scene.player_name} may report back from {P.clock(DU.assigned_gt(db, task) + d.shift_hours / 48.0)}")
                 logger.log(23, f"Living World guard: report on duty {task.task_id} by word, not ready: {missing}")
-                return [P.report_note(name, scene.player_name, title, "not_ready", False, missing)]
+                return [PrivateNote(P.report_note(name, scene.player_name, title, "not_ready", False, missing), boss)]
         result, _ = self._duty_action(REPORT, boss, scene)
         self._worded_report = True     # a ReportDuty in the reply to this line would report the NEXT duty
         logger.log(23, f"Living World guard: report by word to {name}: {result}")
         r = self.filed
         if r is None or r.task is None or r.outcome != "done":
             return []
-        notes = [P.report_note(name, scene.player_name, title, "done", r.trained, None)]
+        notes = [PrivateNote(P.report_note(name, scene.player_name, title, "done", r.trained, None), boss)]
         with self.store.transaction() as db:
             svc = S.current(db, scene.player_id)
             org = O.by_key(svc.org_key) if svc else None
             lines = self._duty_lines(db, boss, name, org, svc, scene) if org else []
         if lines:
-            notes.append(f"Here is what the guard's record says for {name} now. Any next orders in it are "
-                         f"{scene.player_name}'s real next orders: {name} gives exactly those and makes up no other:\n"
-                         + "\n".join(f"- {line}" for line in lines))
+            notes.append(PrivateNote(f"Here is what the guard's record says for {name} now. Any next orders in it are "
+                                     f"{scene.player_name}'s real next orders: {name} gives exactly those and makes up "
+                                     f"no other:\n" + "\n".join(f"- {line}" for line in lines), boss))
         return notes
 
     def arrest_turn(self, scene: Scene, text: str) -> list[str]:

@@ -446,6 +446,7 @@ def test_service_flow(world, tmp_path):
         assert svc.notes(db, "Lovely day.", present, ids["player"], "D", 1) == []
         notes = svc.notes(db, "What do you look for in a man?", present, ids["player"], "D", 1)
         assert len(notes) == 1 and notes[0].startswith("Aela's heart")      # the child gets nothing
+        assert getattr(notes[0], "owner", None) == str(ids["aela"])          # private: Aela's prompt only
         p = P.resolve(db, ids["aela"], svc.settings(), 1)
         liked = schema.ATTRACTION[p.values["attracted_to"][0]]
         assert svc.npc_said(db, ids["aela"], ids["player"], f"I admire {liked}, if you must know.", 1, None)

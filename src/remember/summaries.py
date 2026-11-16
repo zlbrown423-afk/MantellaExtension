@@ -49,6 +49,16 @@ class Summaries(Remembering):
         except Exception:
             return None
 
+    @staticmethod
+    def __lw_view_for(message, character):  # LIVINGWORLD PATCH: an NPC's summary holds no other NPC's private notes
+        if not isinstance(message, UserMessage):
+            return message
+        try:
+            from livingworld.dialogue.private_notes import view_for
+            return view_for(message, getattr(character, "ref_id", None))
+        except ImportError:
+            return message
+
     def __lw_folder(self, file_path: str) -> str:
         """The NPC's summary folder, relative to the conversation folder (world/name - ref)."""
         root = str(self.__game.conversation_folder_path).replace(os.sep, '/').rstrip('/')
@@ -212,10 +222,11 @@ class Summaries(Remembering):
             start, end = intervals[-1]
 
             thread = message_thread(self.__config, None)
+            owner = next((c for c in all_chars_since_start if c.name == npc_name), None) # LIVINGWORLD PATCH: private notes
             for idx in range(start, min(end, total_messages)):
                 msg = all_messages[idx]
                 if isinstance(msg, (UserMessage, AssistantMessage)):
-                    thread.add_message(msg)
+                    thread.add_message(self.__lw_view_for(msg, owner)) # LIVINGWORLD PATCH: no other NPC's private notes
 
             # Find other NPCs who were present during this NPC's latest interval
             involved: set[str] = {npc_name}

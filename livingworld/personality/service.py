@@ -9,6 +9,7 @@ import logging
 import os
 from typing import Any
 
+from livingworld.dialogue.private_notes import PrivateNote
 from livingworld.personality import admin, bridge, debug, dialogue, discovery, evolve, intimacy, prompt
 from livingworld.personality.frameworks.ostim import OStim
 from livingworld.personality import profile as P
@@ -96,8 +97,9 @@ class PersonalityService:
             if not lines and not scene_lines:
                 continue
             if not lines:
-                blocks.append(f"{p.name} in this scene (her own preferences; consent is still hers to give or "
-                              f"withdraw):\n" + "\n".join(f"- {line}" for line in scene_lines))
+                blocks.append(PrivateNote(f"{p.name} in this scene (her own preferences; consent is still hers to "
+                                          f"give or withdraw):\n" + "\n".join(f"- {line}" for line in scene_lines),
+                                          npc_id))
                 continue
             if "intimacy" in prompt.topics(text) or "touch" in prompt.topics(text) or in_scene:
                 g = discovery.gate(db, p, player_id, listening)
@@ -108,8 +110,8 @@ class PersonalityService:
             lines = style + lines
             g = discovery.gate(db, p, player_id, listening)
             self._shareable[npc_id] = discovery.shareable(p, g)
-            blocks.append(f"{p.name}'s heart and desires (hers alone; {player_name} cannot see this):\n"
-                          + "\n".join(f"- {line}" for line in lines))
+            blocks.append(PrivateNote(f"{p.name}'s heart and desires (hers alone; {player_name} cannot see this):\n"
+                                      + "\n".join(f"- {line}" for line in lines), npc_id))   # nobody else's prompt
         return blocks
 
     def npc_said(self, db, npc_id: int, player_id: int, text: str, now: float, conv_id: int | None) -> list[str]:
