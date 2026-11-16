@@ -31,6 +31,7 @@ from livingworld.bodylang.presence import gesture_group, is_presence
 from livingworld.bodylang.service import BodyLanguage
 from livingworld.dialogue import asr_hud, hearing, leads as player_leads
 from livingworld.dialogue import joins, place, promises, trips, undress_words
+from livingworld.dialogue import private_notes
 from livingworld.squad import squad_enabled, service as squad_service, words as squad_words
 from livingworld import fog
 from livingworld.continuity import continuity_enabled, service as continuity
@@ -886,7 +887,12 @@ class LivingWorld:
         if not self.guard or self.conv_id is None or context is not self._context or not text:
             return squad
         scene = self._guard_scene()
-        return squad + (self._guard_for(self.store).turn_notes(scene, text) if scene else [])
+        return squad + (private_notes.reowned(self._guard_for(self.store).turn_notes(scene, text), self._ref_ids())
+                        if scene else [])
+
+    def _ref_ids(self) -> dict[int, Any]:
+        """npc_id -> the game ref_id, for the NPCs registered in this conversation (private notes)."""
+        return {npc_id: ref for ref, npc_id in self._npc_ids.items()}
 
     def _shared_history_block(self, npc_id: int, name: str, present: dict[int, str], now: float) -> str:
         """Who in the conversation this NPC has fought beside before (continuity/). Empty if nobody."""
@@ -928,7 +934,8 @@ class LivingWorld:
                         self._topic_told.add((self.conv_id, npc_id, mem_id))
                         if player_p is not None:
                             line = fog_names.hide_player_name(db, npc_id, player_p, line)
-                        out.append(f"({c.name} also remembers, about {', '.join(places)}: {line})")
+                        out.append(private_notes.PrivateNote(
+                            f"({c.name} also remembers, about {', '.join(places)}: {line})", c.ref_id))
             return out
         except Exception:
             self.errors += 1
@@ -949,7 +956,7 @@ class LivingWorld:
                     if c.is_player_character or npc_id is None:
                         continue
                     for note in spatial_service.notes_for(db, npc_id, now):
-                        out.append(f"{self._squad_label(db, npc_id)}: {note}")
+                        out.append(private_notes.PrivateNote(f"{self._squad_label(db, npc_id)}: {note}", c.ref_id))
             return out
         except Exception:
             self.errors += 1
@@ -1989,9 +1996,9 @@ class LivingWorld:
                     continue
                 npc_id = self._npc_ids.get(c.ref_id) or self._register(c, now)
                 lines = self._body_for(self.store).prompt_lines(npc_id, c.name, now)
-                out += [f"{c.name} noticed: {line}"
-                        if not (line.startswith("Because of this") or line.startswith(c.name)) else line
-                        for line in lines]
+                out += private_notes.private([f"{c.name} noticed: {line}"
+                                              if not (line.startswith("Because of this") or line.startswith(c.name))
+                                              else line for line in lines], c.ref_id)
             if out:
                 logger.log(23, "Living World body language: " + " / ".join(out))
             return out
@@ -2015,7 +2022,7 @@ class LivingWorld:
                 npc_id = self._npc_ids.get(c.ref_id) or self._register(c, now)
                 line = intimate_scenes.turn_note(npc_id, c.name, self._scenes_now)
                 if line:
-                    out.append(line)
+                    out.append(private_notes.PrivateNote(line, c.ref_id))   # what this NPC is in, or can see
             return out
         except Exception:
             self.errors += 1
@@ -2080,7 +2087,8 @@ class LivingWorld:
             return []
         scenes = [(set(s.people), list(s.acts)) for s in self._scenes_now] if self.intimacy else []
         with self.store.transaction() as db:
-            return self.personality.notes(db, text, present, player_id, player.name, context.game_days, scenes)
+            notes = self.personality.notes(db, text, present, player_id, player.name, context.game_days, scenes)
+        return private_notes.reowned(notes, self._ref_ids())
 
     def _personality_heard(self, npc_id: int, text: str, context: Any) -> None:
         try:

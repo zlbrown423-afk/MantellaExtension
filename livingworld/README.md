@@ -65,6 +65,19 @@ extraction call per NPC in it.
 
 Radiant conversations (two NPCs, no player) still use Mantella's own single call for now.
 
+#### Private notes on the player's line (`dialogue/private_notes.py`)
+
+Living World adds notes for the AI to the player's line. A note that belongs to one NPC is a `PrivateNote`
+naming that NPC's game ref_id. In group talk `thread_for` shows each speaker only their own private notes
+plus every shared note, and `src/remember/summaries.py` writes each NPC's summary from the same filtered
+view, so no NPC sees or later remembers another NPC's private note.
+
+| Private (owner only) | Shared (everyone present heard or saw it) |
+| --- | --- |
+| Place memories when the player names a place (`_topic_notes`), field reports to whoever gave the job (`_spatial_notes`), body language an NPC noticed and how it makes them feel (`body_events`), an intimate scene the NPC is in or can see (`scene_notes`), a woman's heart and desires (`personality_notes`), the superior's guard record: first orders and report outcome (`guard/service.py`) | Misheard-word and lead notes, names learned aloud (fog), identity corrections, party asks/dismissals, arrests, touch consent given or withdrawn, the player's yes / no to undress and trips, side-job instructions |
+
+In group talk a private note with an unknown owner is shown to nobody. One-on-one prompts are unchanged.
+
 ### PR D: save reloads and plugin names (server side, with the Mantella-Spell `living-world-m1` branch)
 
 | Piece | File | What it does |

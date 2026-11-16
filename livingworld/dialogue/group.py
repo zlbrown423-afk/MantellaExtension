@@ -7,7 +7,8 @@ Here each speaker gets their own call:
 * the prompt is the one-on-one prompt built for that NPC alone, so it holds only their identity
   and their own recalled rows, plus a note saying who else is present;
 * the shared conversation is shown from their side: their own past lines as the assistant,
-  everyone else's as "Name: text";
+  everyone else's as "Name: text", and the player's lines without notes private to another NPC
+  (dialogue/private_notes.py);
 * the reply can only be that NPC's. A line that tries to switch to another speaker is cut off
   there and logged, because the only characters the reply parser knows are the speaker and the player.
 
@@ -28,6 +29,8 @@ from src.llm.message_thread import message_thread
 from src.llm.messages import AssistantMessage, Message, UserMessage
 from src.llm.sentence import Sentence
 from src.llm.sentence_content import SentenceContent, SentenceTypeEnum
+
+from livingworld.dialogue import private_notes
 
 logger = utils.get_logger()
 
@@ -126,7 +129,7 @@ def thread_for(speaker: Any, system_prompt: str, messages: message_thread, confi
     for i in range(1, len(messages)):
         message = messages[i]
         if isinstance(message, UserMessage):
-            push("user", message.get_formatted_content())
+            push("user", private_notes.view_for(message, getattr(speaker, "ref_id", None)).get_formatted_content())
         elif isinstance(message, AssistantMessage):
             for content in message._AssistantMessage__sentences:
                 if not content.text.strip() or content.sentence_type == SentenceTypeEnum.NARRATION:
