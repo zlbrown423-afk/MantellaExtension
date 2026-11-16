@@ -42,8 +42,22 @@ def make_world(tmp_path):
                                                      "mantella_csv", 1.0))
         ids = seedmod._person_ids(db, installed)
         seedmod.Seeder._apply(db, installed, ids, 5.0)
+        _old_seed_traits(db, installed, ids)
     store.close()
     return path
+
+
+def _old_seed_traits(db, seed, ids):
+    """The old seed (e62b682, the one installed on the PC) let the seed file win over the bio: it wrote gossipy
+    (0.5 when unset) and its traits over whatever the bio gave. Today's seeder only fills missing traits, so the
+    fixture repeats the old write itself to build the world the clean-up tool has to repair."""
+    for p in seed["people"]:
+        npc_id = ids.get(p["key"])
+        if npc_id is None:
+            continue
+        for trait, value in {"gossipy": float(p.get("gossipy", 0.5)), **(p.get("traits") or {})}.items():
+            db.execute("UPDATE persona_version SET traits_json = json_set(traits_json, ?, ?) WHERE npc_id = ?",
+                       (f"$.{trait}", float(value), npc_id))
 
 
 def conn(path):
