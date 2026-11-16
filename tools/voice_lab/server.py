@@ -26,7 +26,7 @@ table{border-collapse:collapse;width:100%;font-size:14px}td,th{padding:4px 6px;b
 .zb{display:inline-block;width:120px;height:8px;background:var(--bar);position:relative;border-radius:4px;vertical-align:middle}.zb i{position:absolute;top:0;bottom:0;background:var(--acc)}.zb s{position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;background:var(--mut)}
 .bad{color:var(--warn)}.ok{color:var(--acc)}.wrap{overflow-x:auto}
 </style></head><body><main>
-<h1>Voice Lab</h1>
+<h1>Voice Lab <a href="/calibrate" style="font-size:14px;font-weight:400">Mic calibration</a></h1>
 <div class="card"><h2>Microphone</h2>
  <div class="row"><select id="dev"></select><button onclick="pick()">Use this mic</button><button onclick="act('devices')">Refresh list</button></div>
  <p id="devinfo" class="mut"></p>
@@ -81,7 +81,7 @@ setInterval(tick,400);tick();act('devices');
 """
 
 
-def make_handler(lab: Any) -> type[BaseHTTPRequestHandler]:
+def make_handler(lab: Any, calibrator: Any = None) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt: str, *args: Any) -> None:   # keep the console quiet
             pass
@@ -97,6 +97,11 @@ def make_handler(lab: Any) -> type[BaseHTTPRequestHandler]:
         def do_GET(self) -> None:
             if self.path in ("/", "/index.html"):
                 self._send(200, PAGE.encode("utf-8"), "text/html; charset=utf-8")
+            elif self.path == "/calibrate" and calibrator is not None:
+                from tools.voice_lab.calibration import CAL_PAGE
+                self._send(200, CAL_PAGE.encode("utf-8"), "text/html; charset=utf-8")
+            elif self.path == "/api/cal/state" and calibrator is not None:
+                self._send(200, json.dumps(calibrator.state()).encode("utf-8"), "application/json")
             elif self.path == "/api/state":
                 self._send(200, json.dumps(lab.state()).encode("utf-8"), "application/json")
             else:
@@ -111,14 +116,19 @@ def make_handler(lab: Any) -> type[BaseHTTPRequestHandler]:
                 body = json.loads(self.rfile.read(length) or b"{}") if length else {}
             except ValueError:
                 body = {}
-            lab.action(self.path[len("/api/"):], body if isinstance(body, dict) else {})
+            body = body if isinstance(body, dict) else {}
+            if self.path.startswith("/api/cal/") and calibrator is not None:
+                calibrator.action(self.path[len("/api/cal/"):], body)
+                self._send(200, json.dumps(calibrator.state()).encode("utf-8"), "application/json")
+                return
+            lab.action(self.path[len("/api/"):], body)
             self._send(200, json.dumps(lab.state()).encode("utf-8"), "application/json")
 
     return Handler
 
 
-def serve(lab: Any, port: int) -> ThreadingHTTPServer:
+def serve(lab: Any, port: int, calibrator: Any = None) -> ThreadingHTTPServer:
     """Bind to 127.0.0.1 only, so nothing outside this PC can reach the page."""
-    server = ThreadingHTTPServer((HOST, port), make_handler(lab))
+    server = ThreadingHTTPServer((HOST, port), make_handler(lab, calibrator))
     server.daemon_threads = True
     return server

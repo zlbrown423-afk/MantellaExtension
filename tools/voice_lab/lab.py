@@ -40,6 +40,7 @@ class VoiceLab:
         self.lister = lister
         self.capture_cls = capture_cls
         self.lock = threading.RLock()
+        self.block_listeners: list[Callable[[np.ndarray, float], None]] = []   # e.g. the calibration recorder
         self.capture: Any = None
         self.segmenter: Segmenter | None = None
         self.devices: list[Device] = []
@@ -95,6 +96,11 @@ class VoiceLab:
         return self.capture.device.name if self.capture is not None else ""
 
     def _on_block(self, block: np.ndarray, prob: float, rms_db: float, peak_db: float, clipped: int) -> None:
+        for listener in list(self.block_listeners):
+            try:
+                listener(block, prob)
+            except Exception:
+                log.exception("block listener failed")
         with self.lock:
             self.level_db = rms_db
             self.peak_hold_db = max(peak_db, self.peak_hold_db - METER_DECAY_DB)
