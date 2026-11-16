@@ -241,6 +241,21 @@ now sends each person's sex on attire records.
 Migrations are now applied by version number present, not by "above the highest", so feature branches
 (005 romance, 006 hygiene) can merge in either order.
 
+## What the mic heard (raw speech recognition HUD)
+
+On with `MANTELLA_LIVING_WORLD=1`. Switch off with `set MANTELLA_LW_ASR_HUD=0`. How long the line stays
+up: `set MANTELLA_LW_ASR_HUD_SECONDS=8` (1-60). Code: `dialogue/asr_hud.py`; needs the Mantella-Spell
+`MantellaConversation` build that reads `mantella_lw_asr_*`.
+
+| Part | What it does |
+| --- | --- |
+| Capture | `Conversation.process_player_input` keeps the text exactly as the speech recognition returned it, the moment it arrives, before misheard-speech notes, leads, guard words or anything else reads it. Typed lines (VR typing window) and the silence auto-response are not speech recognition and are never shown. |
+| Reply | `GameStateManager.player_input` adds `mantella_lw_asr_heard` (string[]), `mantella_lw_asr_shows` and `mantella_lw_asr_gap` to whichever reply goes back for that turn (NPC talk, action, or the stale-events re-send), once. Nothing else in the reply changes, and the NPCs get the same line as before. |
+| Game | Shown in the notification corner as `[Mic] "..."` (long lines as `[Mic 1/2]`, `[Mic 2/2]`, at most 3), not as a subtitle. A notification fades after a few seconds, so it is shown again every 4 s until the display time is up (8 s = twice). One string array per player turn; no polling. |
+
+This is what entered the system, not what an NPC believes it heard: per-NPC perception (misheard
+speech below) only adds notes for the NPCs and never changes this line.
+
 ## Misheard speech
 
 On with `MANTELLA_LIVING_WORLD=1`. Switch off with `set MANTELLA_LW_HEARING=0`. No extra AI call.

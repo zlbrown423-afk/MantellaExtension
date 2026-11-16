@@ -204,6 +204,16 @@ class GameStateManager:
 
     @utils.time_it
     def player_input(self, input_json: dict[str, Any]) -> dict[str, Any]:
+        """LIVINGWORLD PATCH: raw speech recognition HUD. Adds what the mic recognition heard this turn
+        to whichever reply goes back; the reply itself and what the NPCs get are unchanged."""
+        reply = self.__player_input(input_json)
+        talk = self.__talk
+        heard = talk.pop_lw_heard() if talk else None
+        if heard:
+            reply.update(self.__living_world.asr_hud_keys(heard) or {})
+        return reply
+
+    def __player_input(self, input_json: dict[str, Any]) -> dict[str, Any]: # LIVINGWORLD PATCH: was player_input
         if(not self.__talk ):
             return self.error_message("No running conversation.")
         

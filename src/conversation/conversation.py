@@ -47,6 +47,7 @@ class Conversation:
         self.__stt: Transcriber | None = stt
         self.__events_refresh_time: float = context_for_conversation.config.events_refresh_time  # Time in seconds before events are considered stale
         self.__transcribed_text: str | None = None
+        self.__lw_heard: str | None = None # LIVINGWORLD PATCH: raw speech recognition HUD, what STT returned this turn
         
         # Silence auto-response settings
         self.__silence_auto_response_enabled: bool = context_for_conversation.config.silence_auto_response_enabled
@@ -94,6 +95,12 @@ class Conversation:
     @property
     def transcribed_text(self) -> str | None:
         return self.__transcribed_text
+
+    def pop_lw_heard(self) -> str | None: # LIVINGWORLD PATCH: raw speech recognition HUD
+        """What the speech recognition returned in the last process_player_input call, exactly as
+        returned, then forgotten (so a line is only reported once). None when nothing came from the mic."""
+        heard, self.__lw_heard = self.__lw_heard, None
+        return heard
     
     @property
     def stt(self) -> Transcriber | None:
@@ -239,6 +246,7 @@ class Conversation:
             return '', False, None # If there is no player in the conversation, exit here
         
         events_need_updating: bool = False
+        self.__lw_heard = None # LIVINGWORLD PATCH: raw speech recognition HUD
         TURN.start(mic=self.__mic_input and len(player_text) == 0) # LIVINGWORLD PATCH: turn timing
         if self.__mic_input and len(player_text) == 0 and getattr(self.__output_manager, "living_world", None) is not None: # LIVINGWORLD PATCH: group talk, read each NPC's recall while the player speaks
             self.__output_manager.living_world.player_turn_started(self.__context) # LIVINGWORLD PATCH
@@ -286,6 +294,7 @@ class Conversation:
                     elif player_text:
                         # Player spoke -> reset the silence counter
                         self.__silence_auto_response_count = 0
+                        self.__lw_heard = player_text # LIVINGWORLD PATCH: raw speech recognition HUD, before anything reads or notes it
                     
                 if time.time() - input_wait_start_time >= self.__events_refresh_time:
                     # If too much time has passed, in-game events need to be updated

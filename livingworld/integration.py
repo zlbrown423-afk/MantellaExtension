@@ -28,7 +28,7 @@ from livingworld.bodylang import (adult_gestures_enabled, body_language_enabled,
                                   handshake_enabled, salute_enabled)
 from livingworld.bodylang.presence import gesture_group, is_presence
 from livingworld.bodylang.service import BodyLanguage
-from livingworld.dialogue import hearing, leads as player_leads
+from livingworld.dialogue import asr_hud, hearing, leads as player_leads
 from livingworld.dialogue import joins, place, promises, trips, undress_words
 from livingworld.squad import squad_enabled, service as squad_service, words as squad_words
 from livingworld import fog
@@ -217,6 +217,7 @@ class LivingWorld:
         self.undress_prompt = enabled and undress_words.enabled()   # "taking off my tunic" -> yes/no -> Undress (MANTELLA_LW_UNDRESS_PROMPT=0 off)
         self._undress: undress_words.UndressPlanner | None = None   # this conversation's undress question and the player's yes
         self.hearing = enabled and hearing.hearing_enabled()   # catch misheard speech (MANTELLA_LW_HEARING=0 turns off)
+        self.asr_hud = enabled and asr_hud.enabled()   # show what speech recognition heard (MANTELLA_LW_ASR_HUD=0 turns off)
         self.leads = enabled and player_leads.leads_enabled()  # ask about a lead without its name (MANTELLA_LW_LEADS=0 turns off)
         self._lead_ask: str | None = None           # the player's last line, while it asks after someone
         self._lead_learned: set[str] = set()        # names learned from that line and its answers
@@ -878,6 +879,14 @@ class LivingWorld:
             self.errors += 1
             logger.exception("Living World: could not add field-report notes; carrying on")
             return []
+
+    @_never_raises
+    def asr_hud_keys(self, heard: str | None) -> dict[str, Any]:
+        """Reply keys that show the game what the microphone recognition heard this turn, raw and
+        unchanged (livingworld/dialogue/asr_hud.py), or {} when off or nothing came from the mic."""
+        if not self.asr_hud or not heard:
+            return {}
+        return asr_hud.hud_keys(heard)
 
     @_never_raises
     def hearing_note(self, text: str, context: Any) -> str | None:
