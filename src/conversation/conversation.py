@@ -16,6 +16,7 @@ from src.output_manager import ChatManager
 from src.llm.messages import AssistantMessage, SystemMessage, UserMessage
 from src.conversation.context import Context
 from src.llm.message_thread import message_thread
+from livingworld.perf.turn_timeline import TURN, TRANSCRIPT # LIVINGWORLD PATCH: turn timing
 from src.conversation.conversation_type import conversation_type, multi_npc, pc_to_npc, radiant
 from src.character_manager import Character
 from src.http.communication_constants import communication_constants as comm_consts
@@ -238,6 +239,9 @@ class Conversation:
             return '', False, None # If there is no player in the conversation, exit here
         
         events_need_updating: bool = False
+        TURN.start(mic=self.__mic_input and len(player_text) == 0) # LIVINGWORLD PATCH: turn timing
+        if self.__mic_input and len(player_text) == 0 and getattr(self.__output_manager, "living_world", None) is not None: # LIVINGWORLD PATCH: group talk, read each NPC's recall while the player speaks
+            self.__output_manager.living_world.player_turn_started(self.__context) # LIVINGWORLD PATCH
 
         with self.__generation_start_lock: #This lock makes sure no new generation by the LLM is started while we clear this
             self.__stop_generation() # Stop generation of additional sentences right now
@@ -294,6 +298,7 @@ class Conversation:
                 # otherwise the player could constantly speak over the NPC and never hear a response
                 self.__stt.stop_listening()
 
+            TURN.mark(TRANSCRIPT) # LIVINGWORLD PATCH: turn timing
             # The player's input is now confirmed and the new response is about to start, 
             # so stop any Python-side streamed playback still playing.
             self.__output_manager.stop_external_playback()

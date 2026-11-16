@@ -21,7 +21,8 @@ from livingworld.memory.jobs import JobQueue, JobWorker
 from livingworld.memory import backfill
 from livingworld.memory import summary_timeline
 from livingworld.memory import settings as memory_settings
-from livingworld.memory.recall import recall_for
+from livingworld.memory.recall import mark_rehearsed_rows, recall_for
+from livingworld.dialogue import context_prep
 from livingworld import mood as moods
 from livingworld.bodylang import (adult_gestures_enabled, body_language_enabled, gesture_notices, gestures_enabled,
                                   handshake_enabled, salute_enabled)
@@ -29,7 +30,10 @@ from livingworld.bodylang.presence import gesture_group, is_presence
 from livingworld.bodylang.service import BodyLanguage
 from livingworld.dialogue import hearing, leads as player_leads
 from livingworld.dialogue import joins, place, promises, trips, undress_words
+from livingworld.squad import squad_enabled, service as squad_service, words as squad_words
 from livingworld import fog
+from livingworld.continuity import continuity_enabled, service as continuity
+from livingworld.spatial import spatial_enabled, service as spatial_service
 from livingworld import diary
 from livingworld.diary import service as diaries
 from livingworld.fog import places as fog_places, service as fog_names
@@ -47,7 +51,7 @@ from livingworld.store.minors import is_child
 from livingworld.intimacy import scenes as intimate_scenes
 from livingworld.intimacy import confront
 from livingworld.guard import hud as duty_hud
-from livingworld.guard import decency, enlist_words, names as guard_names, training_words, uniform
+from livingworld.guard import decency, enlist_words, identity_guard, names as guard_names, prompts as guard_prompts, training_words, uniform
 from livingworld.social import side_jobs, surrender, wingman
 from livingworld.bodylang.peek import KEY_PEEK_ON, peek_enabled
 from livingworld.guard.profiles import GuardFacts
@@ -159,6 +163,7 @@ def _never_raises(func: Callable) -> Callable:
 class LivingWorld:
     latest: "LivingWorld | None" = None   # the most recently created instance (used by tests)
     start_workers: bool = True            # tests switch this off to run jobs by hand
+    _context_prep: "context_prep.ContextPrep | None" = None   # group talk: recall read while the player speaks
 
     def __init__(self, save_folder: str, enabled: bool = True, default_tts_service: str = "unknown") -> None:
         self.save_folder = save_folder
@@ -178,6 +183,7 @@ class LivingWorld:
         self.complete: Callable[[str, str], str | None] | None = None
         self._last_recall: dict[int, tuple[list[int], list[int]]] = {}  # npc_id -> (know_ids, mem_ids) in their last prompt
         self._rehearsed: set[tuple[int, int]] = set()   # (conv_id, npc_id) already counted as recalled
+        self._topic_told: set[tuple[int, int, int]] = set()   # (conv_id, npc_id, mem_id) already raised by a place named
         self._attire_now: dict[int, awareness.AttireNow] = {}   # latest attire snapshot from the game, by npc_id
         self.mood_meter = enabled and os.environ.get(MOOD_ENV, "").strip().lower() not in _OFF
         self.quiet_chatter = enabled and os.environ.get(QUIET_ENV, "").strip().lower() not in _OFF
@@ -226,6 +232,9 @@ class LivingWorld:
         self.confront = self.intimacy and confront.enabled()   # partners who catch each other speak up; MANTELLA_LW_CONFRONT=0 off
         self._fine_sent: set[int] = set()           # lines whose PayFine was handled
         self._held_actions: dict[str, list[dict[str, Any]]] = {}   # speaker ref id -> actions from an action-only reply
+        self.squad = enabled and squad_enabled()   # temporary squads (livingworld/squad); MANTELLA_LW_SQUAD=0 off
+        self._squad_notes: list[str] = []          # for the dialogue model with the player's next line
+        self._squad_seen: tuple[int, str] | None = None   # (conversation, player line) already read for squad words
         self.asked_joins = enabled and joins.joins_enabled()   # only add people the player asked for (MANTELLA_LW_ASKED_JOINS=0 off)
         self.place = enabled and place.place_enabled()   # tell NPCs whether they are outdoors or inside (MANTELLA_LW_PLACE=0 off)
         self.decency = enabled and decency.enabled()   # guards tell a naked player to cover up; MANTELLA_LW_DECENCY=0 off
@@ -249,6 +258,8 @@ class LivingWorld:
         self._ref_raw: dict[str, int] = {}          # Mantella's 6-digit ref id -> the form ID exactly as the game sent it
         self.guard_names = self.guard and guard_names.enabled()   # generic guards show their own name; MANTELLA_LW_GUARD_NAMES=0 off
         self._guard_names_sent: dict[int, str] = {}  # npc_id -> the name sent to the game this conversation
+        self._identity_notes: list[str] = []         # corrections for the dialogue model after a false name claim
+        self._identity_told: set[tuple[int, int]] = set()   # (claimant, owner) already corrected this conversation
         self._bios: dict[int, str] = {}             # npc_id -> Mantella bio, for the diary writer
         self.personality = None                     # adult women's personality profiles; MANTELLA_LW_PERSONALITY=0 off
         if enabled:
@@ -483,6 +494,10 @@ class LivingWorld:
         self._moods_to_send = {}
         self._guard_sent = set()
         self._guard_names_sent = {}
+        self._identity_notes = []
+        self._identity_told = set()
+        self._squad_notes = []
+        self._squad_seen = None
         self._held_actions = {}
         self._player_said = None
         self._help_offered = False
@@ -552,6 +567,8 @@ class LivingWorld:
             self._agree_in_words(sentence, npc_id, text)
         if self.personality is not None:
             self._personality_heard(npc_id, text, context)
+        if self.squad:
+            self._squad_npc(npc_id, text, context)
         self._npc_last = text
 
     @_never_raises
@@ -591,6 +608,8 @@ class LivingWorld:
             result = self._guard_for(self.store).debug(text, scene) if scene else None
             if result:
                 logger.log(23, f"Living World guard test command: {result}")
+        if self.squad:
+            self._squad_player(text.strip(), npc_id, context)
 
     def _hygiene_debug(self, text: str, player_id: int, context: Any) -> None:
         from livingworld.hygiene import debug
@@ -618,6 +637,8 @@ class LivingWorld:
             except Exception:
                 self.errors += 1
                 logger.exception("Living World: could not file the written guard report; carrying on")
+        if self.squad and self.store is not None:
+            self._squad_end(game_days)
         self._close(game_days)
 
     # ---- Mantella's own summaries roll back with the save (memory/summary_timeline.py) ----
@@ -693,8 +714,7 @@ class LivingWorld:
                 continue
             npc_id = self._npc_ids.get(character.ref_id) or self._register(character, now)
             key = (self.conv_id, npc_id)
-            recall = recall_for(store, npc_id, now, player_id, mark_rehearsed=key not in self._rehearsed,
-                                about_ids=list(present), current_conv_id=self.conv_id)
+            recall = self._prepared_recall(npc_id, now, player_id, list(present), key not in self._rehearsed)
             self._rehearsed.add(key)
             self._last_recall[npc_id] = (recall.know_ids, recall.mem_ids)
             text = recall.text()
@@ -707,6 +727,12 @@ class LivingWorld:
                     fog_lines = fog_names.prompt_lines(db, me, player_p)
             if text:
                 blocks.append(text)
+            history = self._shared_history_block(npc_id, character.name, present, now)
+            if history:
+                if self._fog_active() and player is not None and player_id is not None:
+                    with store.reading() as db:
+                        history = fog_names.hide_player_name(db, npc_id, fog_names.Person(player_id, player.name), history)
+                blocks.append(history)
             if fog_lines:
                 blocks.append(f"Names, for {character.name}:\n" + "\n".join(f"- {line}" for line in fog_lines))
             noticed = self._noticed(npc_id, character.name, now, present, player_id,
@@ -740,11 +766,15 @@ class LivingWorld:
                 if agreed:
                     blocks.append(f"Touch, and {character.name}:\n" + "\n".join(f"- {line}" for line in agreed))
             guard = self._guard_lines(npc_id, character.name)
+            guard += self._fellow_guard_lines(npc_id, character.name, list(present))
             uni = self._uniform_lines(npc_id, character.name, player_id, player.name if player else "the player")
             if uni:
                 guard = uni + guard
             if guard:
                 blocks.append(f"The guard, and {character.name}:\n" + "\n".join(f"- {line}" for line in guard))
+            party = self._squad_lines(npc_id, character.name)
+            if party:
+                blocks.append(f"The party, and {character.name}:\n" + "\n".join(f"- {line}" for line in party))
         if self.place and player is not None:
             npcs = [c.name for c in characters if not c.is_player_character]
             where = place.prompt_lines(getattr(self._context, "location", ""),
@@ -763,10 +793,91 @@ class LivingWorld:
     def guard_notes(self, text: str, context: Any) -> list[str]:
         """Notes for the AI on the player's line: first orders just after enlisting, and what someone the player
         arrests does (G2f)."""
+        squad: list[str] = []
+        if self.squad and self.conv_id is not None and context is self._context and text and text.strip():
+            try:
+                player = context.npcs_in_conversation.get_player_character()
+                if player is not None:   # read the words now if the player line has not been seen yet
+                    self._squad_player(text.strip(), self._npc_ids.get(player.ref_id) or self._register(player, context.game_days),
+                                       context)
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not read squad words; carrying on")
+        squad, self._squad_notes = self._squad_notes, []
+        squad = squad + self._spatial_notes(text, context)
+        squad = squad + self._topic_notes(text, context)
         if not self.guard or self.conv_id is None or context is not self._context or not text:
-            return []
+            return squad
         scene = self._guard_scene()
-        return self._guard_for(self.store).turn_notes(scene, text) if scene else []
+        return squad + (self._guard_for(self.store).turn_notes(scene, text) if scene else [])
+
+    def _shared_history_block(self, npc_id: int, name: str, present: dict[int, str], now: float) -> str:
+        """Who in the conversation this NPC has fought beside before (continuity/). Empty if nobody."""
+        if self.store is None or not continuity_enabled():
+            return ""
+        try:
+            with self.store.reading() as db:
+                names = {i: identity_guard.guard_name(db, i) or n for i, n in present.items()}
+                lines = continuity.shared_history(db, npc_id, names, now)
+            return f"{name}'s history with the people here:\n" + "\n".join(f"- {l}" for l in lines) if lines else ""
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not add shared history; leaving it out")
+            return ""
+
+    def _topic_notes(self, text: str, context: Any) -> list[str]:
+        """When the player names a place, what each NPC here remembers of it that the prompt does not already hold."""
+        if (self.store is None or self.conv_id is None or context is not self._context or not text
+                or not continuity_enabled()):
+            return []
+        try:
+            places = [m.name for m in fog_places.mentioned(text)]
+            if not places:
+                return []
+            out: list[str] = []
+            now = context.game_days
+            player = context.npcs_in_conversation.get_player_character()
+            pid = self._npc_ids.get(player.ref_id) if player is not None else None
+            player_p = (fog_names.Person(pid, player.name) if self._fog_active() and pid is not None else None)
+            with self.store.reading() as db:
+                for c in context.npcs_in_conversation.get_all_characters():
+                    npc_id = self._npc_ids.get(c.ref_id)
+                    if c.is_player_character or npc_id is None:
+                        continue
+                    held = set(self._last_recall.get(npc_id, ([], []))[1])
+                    held |= {m for (cv, n, m) in self._topic_told if cv == self.conv_id and n == npc_id}
+                    lines, ids = continuity.topic_lines(db, npc_id, places, held, now)
+                    for line, mem_id in zip(lines, ids):
+                        self._topic_told.add((self.conv_id, npc_id, mem_id))
+                        if player_p is not None:
+                            line = fog_names.hide_player_name(db, npc_id, player_p, line)
+                        out.append(f"({c.name} also remembers, about {', '.join(places)}: {line})")
+            return out
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not add place memories; carrying on")
+            return []
+
+    def _spatial_notes(self, text: str, context: Any) -> list[str]:
+        """What the party ran into while someone had an assignment, told once to whoever gave it (spatial/)."""
+        if (self.store is None or self.conv_id is None or context is not self._context or not text
+                or not spatial_enabled()):
+            return []
+        try:
+            out: list[str] = []
+            now = context.game_days
+            with self.store.transaction() as db:
+                for c in context.npcs_in_conversation.get_all_characters():
+                    npc_id = self._npc_ids.get(c.ref_id)
+                    if c.is_player_character or npc_id is None:
+                        continue
+                    for note in spatial_service.notes_for(db, npc_id, now):
+                        out.append(f"{self._squad_label(db, npc_id)}: {note}")
+            return out
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not add field-report notes; carrying on")
+            return []
 
     @_never_raises
     def hearing_note(self, text: str, context: Any) -> str | None:
@@ -992,6 +1103,105 @@ class LivingWorld:
         except Exception:
             self.errors += 1
             logger.exception("Living World: could not add uniform lines; leaving them out")
+            return []
+
+    # ---- temporary squads (livingworld/squad) ----
+    def _squad_people(self, context: Any) -> dict[int, list[str]]:
+        """Everyone in the conversation but the player: npc_id -> the names they go by."""
+        out: dict[int, list[str]] = {}
+        with self.store.reading() as db:
+            for c in context.npcs_in_conversation.get_all_characters():
+                npc_id = self._npc_ids.get(c.ref_id)
+                if c.is_player_character or npc_id is None:
+                    continue
+                given = identity_guard.guard_name(db, npc_id)
+                out[npc_id] = [c.name] + ([given] if given else [])
+        return out
+
+    def _squad_label(self, db, npc_id: int) -> str:
+        row = db.execute("SELECT display_name FROM npc WHERE npc_id = ?", (npc_id,)).fetchone()
+        return identity_guard.guard_name(db, npc_id) or (row[0] if row else "someone")
+
+    def _squad_player(self, text: str, player_id: int, context: Any) -> None:
+        """The player's line: asking people to come along, dismissing them, or setting the formation."""
+        if self.store is None or self.conv_id is None or self._squad_seen == (self.conv_id, text):
+            return
+        self._squad_seen = (self.conv_id, text)
+        asks, dismisses, formation = squad_words.asks_to_come(text), squad_words.dismisses(text), squad_words.formation_in(text)
+        if not (asks or dismisses or formation):
+            return
+        people = self._squad_people(context)
+        now = context.game_days
+        with self.store.transaction() as db:
+            leader = self._squad_label(db, player_id)
+            if dismisses:
+                live = squad_service.active_squad(db, player_id)
+                mine = {i: n for i, n in people.items() if live is not None and squad_service.squad_of(db, i) == live}
+                named = squad_words.named_in(text, people)
+                if named and not set(named) & set(mine):
+                    return   # "Hrolf, stand down" to someone who is not in the party: nobody else leaves
+                who = [i for i in named if i in mine] or None   # nobody named (or a group): the whole party
+                for npc_id in squad_service.dismiss(db, player_id, who, now):
+                    self._squad_notes.append(f"{self._squad_label(db, npc_id)} has been dismissed from {leader}'s party.")
+            elif asks:
+                for npc_id in squad_service.ask(db, player_id, squad_words.targets(text, people), now, formation):
+                    self._squad_notes += squad_words.member_lines(self._squad_label(db, npc_id), leader, "loose", [], "asked")
+            if formation and squad_service.set_formation(db, player_id, formation):
+                self._squad_notes.append(f"{leader}'s party now keeps {squad_words.formation_text(formation)}.")
+
+    def _squad_npc(self, npc_id: int, text: str, context: Any) -> None:
+        """An asked NPC's reply: yes joins them, no sends them back; anything else leaves the ask open."""
+        if self.store is None or self.conv_id is None:
+            return
+        answer = squad_words.answer_in(text)
+        if answer is None:
+            return
+        with self.store.transaction() as db:
+            squad_service.answer(db, npc_id, answer, context.game_days)
+
+    def _squad_end(self, game_days: float | None) -> None:
+        """The conversation that holds the party ended, so the party ends with it."""
+        try:
+            with self.store.transaction() as db:
+                row = db.execute("SELECT npc_id FROM npc WHERE is_player = 1").fetchone()
+                if row is not None:
+                    squad_service.conversation_ended(db, row[0], self._summary_gt(self.store, game_days))
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not close the party at the end of the conversation; carrying on")
+
+    def _squad_lines(self, npc_id: int, name: str) -> list[str]:
+        """For a member of the player's party (or someone just asked): who they walk with and how."""
+        if not self.squad or self.store is None:
+            return []
+        try:
+            with self.store.reading() as db:
+                squad = squad_service.squad_of(db, npc_id)
+                if squad is None:
+                    return []
+                status = next(m.status for m in squad_service.members(db, squad.squad_id) if m.npc_id == npc_id)
+                mates = [self._squad_label(db, m.npc_id) for m in squad_service.members(db, squad.squad_id)
+                         if m.npc_id != npc_id and m.status == "active"]
+                return squad_words.member_lines(self._squad_label(db, npc_id), self._squad_label(db, squad.leader_id),
+                                                squad.formation, mates, status)
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not write the party lines; leaving them out")
+            return []
+
+    def _fellow_guard_lines(self, npc_id: int, name: str, present_ids: list[int]) -> list[str]:
+        """For a guard with a personal name: who else in this conversation has one, so they are not mistaken for them."""
+        if not self.guard_names or self.store is None:
+            return []
+        try:
+            with self.store.reading() as db:
+                mine = identity_guard.guard_name(db, npc_id)
+                others = [n for i in present_ids if i != npc_id
+                          for n in [identity_guard.guard_name(db, i)] if n]
+            return [guard_prompts.fellow_guards(name, mine, others)] if mine and others else []
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not list the other named guards here; leaving it out")
             return []
 
     def _guard_lines(self, npc_id: int, name: str) -> list[str]:
@@ -1226,9 +1436,15 @@ class LivingWorld:
         text = self._moods_to_send.pop(speaker.ref_id, None)
         if text:
             keys[KEY_MOOD] = text
+        false_claim = False
+        try:
+            false_claim = self._identity_check(sentence)
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not check an NPC line for a false name claim; carrying on")
         if self._fog_active() and self.store is not None and self.conv_id is not None:
             try:
-                keys.update(self._fog_line_keys(sentence))
+                keys.update(self._fog_line_keys(sentence, learn_names=not false_claim))
             except Exception:
                 self.errors += 1
                 logger.exception("Living World: could not check an NPC line for names and places; carrying on")
@@ -1534,8 +1750,9 @@ class LivingWorld:
         """Notes for the dialogue model with the player's line: names learned since the last one, the player's
         own introduction included. The system prompt is written once per conversation, so this is how a name
         learned mid-conversation reaches it."""
+        identity, self._identity_notes = self._identity_notes, []
         if not self._fog_active() or self.conv_id is None or context is not self._context:
-            return []
+            return identity
         if text and text.strip():
             player_p, present = self._fog_people(context)
             with self.store.transaction() as db:
@@ -1546,9 +1763,33 @@ class LivingWorld:
                                                         player_p.npc_id, context.game_days, self.conv_id):
                         logger.log(23, f"Living World guard names: {line}")
         notes, self._fog_notes = self._fog_notes, []
-        return notes
+        return identity + notes
 
-    def _fog_line_keys(self, sentence: Any) -> dict[str, Any]:
+    def _identity_check(self, sentence: Any) -> bool:
+        """True when this NPC line has the speaker give another actor's name as their own (guard/identity_guard.py).
+        The attempt is logged and stored, and the dialogue model is corrected on the player's next line."""
+        context = self._context
+        if (self.store is None or self.conv_id is None or context is None or sentence.is_narration
+                or sentence.is_system_generated_sentence):
+            return False
+        text = (sentence.text or "").strip()
+        speaker_id = self._npc_ids.get(sentence.speaker.ref_id)
+        if not text or speaker_id is None:
+            return False
+        present = [self._npc_ids[c.ref_id] for c in context.npcs_in_conversation.get_all_characters()
+                   if c.ref_id in self._npc_ids]
+        with self.store.transaction() as db:
+            claim = identity_guard.find_claim(db, speaker_id, text, present)
+            if claim is None:
+                return False
+            identity_guard.record(db, claim, text, context.game_days, self.conv_id)
+        key = (claim.claimant_id, claim.owner_id)
+        if key not in self._identity_told:
+            self._identity_told.add(key)
+            self._identity_notes.append(identity_guard.correction(claim))
+        return True
+
+    def _fog_line_keys(self, sentence: Any, learn_names: bool = True) -> dict[str, Any]:
         """Names and places said in this NPC line: the player learns them as the line is spoken."""
         context = self._context
         text = (sentence.text or "").strip()
@@ -1557,7 +1798,7 @@ class LivingWorld:
             player_p, present = self._fog_people(context)
             with self.store.transaction() as db:
                 speaker = next((p for p in present if p.npc_id == self._npc_ids.get(sentence.speaker.ref_id)), None)
-                if speaker is not None:
+                if speaker is not None and learn_names:   # a false name claim teaches nobody anything
                     self._fog_note(fog_names.npc_line(db, speaker, text, present, player_p, context.game_days,
                                                       self.conv_id))
                     if self.guard_names:
@@ -1834,6 +2075,65 @@ class LivingWorld:
             self.errors += 1
             logger.exception("Living World: could not work out what an NPC notices; leaving it out")
             return []
+
+    # ---- background context preparation (group talk; dialogue/context_prep.py) ----
+    def _prep_key(self, npc_id: int, now: float, player_id: int | None,
+                  present: list[int]) -> "context_prep.PrepKey":
+        return context_prep.PrepKey(id(self.store), self.store.active_timeline_id(), self.conv_id, npc_id,
+                                    player_id, tuple(present), now)
+
+    def _prepare_recall(self, key: "context_prep.PrepKey") -> Any:
+        return recall_for(self.store, key.npc_id, key.now_gt, key.player_id, mark_rehearsed=False,
+                          about_ids=list(key.present), current_conv_id=key.conv_id)
+
+    def _prepared_recall(self, npc_id: int, now: float, player_id: int | None, present: list[int],
+                         mark: bool) -> Any:
+        """``recall_for`` for this NPC, or the copy read while the player was speaking when it is still exact."""
+        prep = self._context_prep
+        if prep is not None and prep.store is self.store and self.conv_id is not None:
+            recall = prep.take(self._prep_key(npc_id, now, player_id, present))
+            if recall is not None:
+                if mark:
+                    prep.quiet_write(lambda: mark_rehearsed_rows(self.store, recall, now))
+                return recall
+        return recall_for(self.store, npc_id, now, player_id, mark_rehearsed=mark, about_ids=present,
+                          current_conv_id=self.conv_id)
+
+    @_never_raises
+    def player_turn_started(self, context: Any) -> None:
+        """The mic opened for the player's line: in group talk, start reading each NPC's recall in the
+        background. Nothing is prepared for an NPC the store has not seen yet (that needs a write)."""
+        if not context_prep.enabled() or self.conv_id is None or context is not self._context or self.store is None:
+            return
+        chars = context.npcs_in_conversation
+        if not chars.contains_multiple_npcs():
+            return
+        present: list[int] = []
+        npcs: list[int] = []
+        player_id = None
+        for c in chars.get_all_characters():
+            npc_id = self._npc_ids.get(c.ref_id)
+            if npc_id is None:
+                return
+            if npc_id not in present:
+                present.append(npc_id)
+            if c.is_player_character:
+                player_id = npc_id
+            else:
+                npcs.append(npc_id)
+        if self._context_prep is None or self._context_prep.store is not self.store:
+            if self._context_prep is not None:
+                self._context_prep.close()
+            self._context_prep = context_prep.ContextPrep(self.store, self._prepare_recall)
+        now = context.game_days
+        self._context_prep.begin([self._prep_key(n, now, player_id, present) for n in npcs])
+
+    @_never_raises
+    def cancel_context_prep(self) -> None:
+        """The conversation ended: drop any snapshot, stop the worker thread and the write watch."""
+        prep, self._context_prep = self._context_prep, None
+        if prep is not None:
+            prep.close()
 
     # ---- dialogue (called from ChatManager) ----
     @property

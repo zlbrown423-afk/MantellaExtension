@@ -404,13 +404,32 @@ def test_incidents_come_up_by_themselves_and_go_cold(tmp_path):
 
 def test_a_barracks_bunk_is_given_on_joining_and_taken_back_on_leaving(tmp_path):
     talk(tmp_path, DAY, say="I want to join the guard.")
-    assert talk.beds == [(0xD46B7, True)]
+    assert talk.beds == [(0xD46B8, True)]
     talk(tmp_path, DAY + 0.1, npcs=[whiterun_guard()])
     assert talk.beds == []                                      # once only
     talk(tmp_path, DAY + 0.2, say="debug guard dismiss", npcs=[whiterun_guard()])
-    assert talk.beds == [(0xD46B7, False)]                     # on the next line after leaving
+    assert talk.beds == [(0xD46B8, False)]                     # on the next line after leaving
     talk(tmp_path, DAY + 0.3, npcs=[whiterun_guard()])
     assert talk.beds == []
+
+
+def test_a_member_still_holding_the_old_bunk_is_moved_to_the_one_by_the_door(tmp_path):
+    talk(tmp_path, DAY, say="I want to join the guard.")
+    db = open_db(tmp_path)                       # a bunk given before it moved: its event did not name the bed
+    member = service(db)["member_id"]
+    S.event(db, "bed_granted", [member], {"org": "whiterun_guard"}, DAY + 0.05, None, [])
+    db.commit()
+    talk(tmp_path, DAY + 0.1, npcs=[whiterun_guard()])
+    assert talk.beds[:1] == [(0xD46B7, False)]                  # the old one taken back first,
+    given = talk.beds[1:]
+    if not given:                                                # (one line each: this talk may have had only one)
+        talk(tmp_path, DAY + 0.15, npcs=[whiterun_guard()])
+        given = talk.beds
+    assert given == [(0xD46B8, True)]                           # then the one by the door given
+    talk(tmp_path, DAY + 0.2, npcs=[whiterun_guard()])
+    assert talk.beds == []
+    talk(tmp_path, DAY + 0.3, say="debug guard dismiss", npcs=[whiterun_guard()])
+    assert talk.beds == [(0xD46B8, False)]
 
 
 def test_coming_back_to_caius_files_the_report_by_itself(tmp_path):

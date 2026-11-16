@@ -14,6 +14,7 @@ from typing import Optional, TYPE_CHECKING
 from datetime import datetime
 import queue
 import threading
+from livingworld.perf.turn_timeline import TURN, SPEECH, PAUSE # LIVINGWORLD PATCH: turn timing
 import time
 import os
 import wave
@@ -403,6 +404,7 @@ If you would prefer to run speech-to-text locally, please ensure the `Speech-to-
             transcribe: Whether to run transcription on the current buffer.
             save: Whether to save the audio buffer to disk (if ``save_mic_input`` also set).
         """
+        TURN.mark(PAUSE) # LIVINGWORLD PATCH: turn timing
         if transcribe and len(self._audio_buffer) > 0:
             transcription_start_time = time.time()
             self._current_transcription = self._transcribe(self._audio_buffer)
@@ -433,6 +435,7 @@ If you would prefer to run speech-to-text locally, please ensure the `Speech-to-
                 logger.log(self.loglevel, 'PTT pressed')
                 self._ptt_active = True
                 self._speech_detected = True
+                TURN.mark(SPEECH) # LIVINGWORLD PATCH: turn timing
                 self._last_update_time = time.time()
         elif self._ptt_active:
             # Key released after being held — attempt transcription
@@ -482,6 +485,7 @@ If you would prefer to run speech-to-text locally, please ensure the `Speech-to-
         if probability > self.audio_threshold and not self._speech_detected:
             logger.log(self.loglevel, 'Speech detected')
             self._speech_detected = True
+            TURN.mark(SPEECH) # LIVINGWORLD PATCH: turn timing
 
         effective_pause = self._temporary_pause_override if self._temporary_pause_override is not None else self.pause_threshold
         if probability <= self.audio_threshold and self._speech_detected and time.time() - self._last_update_time > effective_pause:

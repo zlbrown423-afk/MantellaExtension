@@ -65,6 +65,7 @@ class Org:
     pay: dict[str, Any] = field(default_factory=dict, compare=False, hash=False)
     quarters: str = ""                    # where a member sleeps and keeps their things
     bed: Item | None = None               # the bed reference the game makes the member's own (a REFR, not a base form)
+    old_beds: tuple[Item, ...] = field(default_factory=tuple, compare=False, hash=False)   # bunks given out before (moved_from)
     chest: Item | None = None             # a container base (CONT, never respawns) the game places by that bed, once
     jail: Item | None = None              # G2f: the prisoner marker inside a cell of the hold's jail (a REFR)
     promotion: dict[str, Any] = field(default_factory=dict, compare=False, hash=False)   # G3: the promotion board
@@ -140,7 +141,7 @@ def _org(raw: dict[str, Any]) -> Org:
                probation_days=float(raw.get("probation_days", 7)), recruit=dict(raw.get("recruit") or {}),
                uniform=uniform, generic_rank_key=raw.get("generic_rank"), rank_note=raw.get("rank_note", ""),
                duty_file=raw.get("duties"), pay=dict(raw.get("pay") or {}), quarters=raw.get("quarters", ""),
-               bed=_bed(raw.get("bed")), chest=_chest(raw.get("chest")),
+               bed=_bed(raw.get("bed")), old_beds=_old_beds(raw.get("bed")), chest=_chest(raw.get("chest")),
                jail=_bed(raw.get("jail")), promotion=dict(raw.get("promotion") or {}))
 
 
@@ -158,6 +159,12 @@ def _bed(raw: dict | None) -> Item | None:
     if not raw or not raw.get("ref"):
         return None
     return Item(raw.get("name", "bed"), raw.get("plugin", "Skyrim.esm"), local_id(raw["ref"]))
+
+
+def _old_beds(raw: dict | None) -> tuple[Item, ...]:
+    if not raw or not raw.get("ref"):
+        return ()
+    return tuple(Item(raw.get("name", "bed"), raw.get("plugin", "Skyrim.esm"), local_id(r)) for r in raw.get("moved_from") or ())
 
 
 def _chest(raw: dict | None) -> Item | None:
