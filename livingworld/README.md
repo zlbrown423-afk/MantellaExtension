@@ -105,6 +105,23 @@ stored by Mantella-Spell in `MantellaRepository.LivingWorldWorldKey`):
 Every start reply carries the key, and Mantella's summaries use the same world. Diary requests send the
 key too. Changing the World ID slider clears the key, so that still starts a separate world.
 
+### Backup before schema migrations
+
+When a world database that already holds data has migrations waiting (a new build added a
+`store/migrations/NNN_*.sql` file), `store/migration_backup.py` first copies it with SQLite's online
+backup API (so rows still in the `-wal` file are included) into `data/livingworld/backups/` as
+`<world>.v<from>-to-v<to>.<UTC time>.sqlite`. The copy must pass `PRAGMA integrity_check`, hold the same
+schema version and the same row count in every table as the live file; it is written as `*.partial` and
+renamed only then (retrying while OneDrive holds it).
+
+* Backup fails (disk full, check fails, file locked): nothing is migrated, the database is left as it
+  was, and `MigrationBackupError` stops that world from opening, with the reason in the log.
+* A migration fails: that file is rolled back, the copy is written back over the database (undoing the
+  earlier migrations of the same run too) and `MigrationFailed` says where the copy is.
+* New (empty) and up-to-date worlds take no copy. The newest 5 copies per world are kept
+  (`set MANTELLA_LW_MIGRATION_BACKUP_KEEP=10` to change). Off: `set MANTELLA_LW_MIGRATION_BACKUP=0`
+  migrates without a copy.
+
 ## Perception prototype: grabs, eating and drinking, witnesses
 
 NPCs remember being grabbed by the player and seeing it happen, and seeing someone eat or drink,
