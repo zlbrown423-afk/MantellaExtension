@@ -305,19 +305,21 @@ class Extractor:
                 db.execute("INSERT INTO memory_source (mem_id, utt_id) VALUES (?, ?)", (cur.lastrowid, heard[-1].utt_id))
                 result.memories_added += 1
 
-        self._apply_reports(owner_id, data, by_seq, names, location, game_time, result)
+        self._apply_reports(conv_id, owner_id, data, by_seq, names, location, game_time, result)
         for reason in result.rejected:
             logger.log(23, f"Living World: dropped a fact for {names[owner_id]}: {reason}")
         return result
 
     # ---- reports about other people become claims that can spread (livingworld/social) ----
-    def _apply_reports(self, owner_id: int, data: dict[str, Any], by_seq: dict[int, Line], names: dict[int, str],
+    def _apply_reports(self, conv_id: int, owner_id: int, data: dict[str, Any], by_seq: dict[int, Line], names: dict[int, str],
                        location: str, game_time: float, result: ExtractionResult) -> None:
         from livingworld.social import claims
         from livingworld.store.minors import is_child
         by_name = {name.lower(): npc_id for npc_id, name in names.items()}
         with self.store.transaction() as db:
-            timeline = db.execute("SELECT timeline_id FROM timeline WHERE is_active = 1").fetchone()[0]
+            # the conversation's own timeline, not the active one: the job can run after a save load has started
+            # a new timeline, and gossip from a conversation the loaded save never had must not land on it
+            timeline = db.execute("SELECT timeline_id FROM conversation WHERE conv_id = ?", (conv_id,)).fetchone()[0]
             if is_child(db, owner_id):
                 return
             for report in (data.get("reports") or [])[:3]:

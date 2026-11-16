@@ -843,6 +843,47 @@ step does not extract anything new. Quest and rumour context is as in "Spatial a
    bring up what they remember of it, once.
 3. Ask a guard who the enemies were in a shared fight: they should say they do not know, not invent it.
 
+### Picking a conversation back up after a save load
+
+A save made mid-conversation holds Mantella's conversation quest still running. When it loads, the game ends that
+conversation (an end request) and, with the Mantella-Spell side of this change, starts it again a few seconds later
+with the same people, if they are still within 15 m, alive, loaded and not fighting, and the player is not
+fighting or already talking to someone else. The server (`continuity/resume.py`):
+
+- **Closes the old conversation at its own time, not the save's.** The end request a load sends carries the
+  loaded save's game time. That used to stamp everything said after the save (its memories, its Mantella summary)
+  as if it came before it, so the loaded game remembered it. A load end (the game's `mantella_lw_load_end` flag, or
+  an end time earlier than the conversation's own) now keeps the conversation's latest time.
+- **Shows the NPC the talk in progress.** The start reply carries `mantella_lw_conv_id`, which the game keeps in the
+  save and sends back on the restart as `mantella_lw_resume_conv`. The NPC's prompt then holds the last 12 lines
+  of that conversation the loaded save may see (up to the save), framed as an interrupted talk: carry on, do not
+  greet again. Lines said after the save are never shown.
+- **Remembers it once.** If the old conversation ended after the save, its memories are not visible from the
+  loaded save, so its lines up to the save are copied into the new conversation (`conversation_resume`,
+  migration 023) and extracted once with it. If nothing was said after the save, the old conversation's memories
+  are already visible: nothing is copied, the lines are only shown. People in the new conversation who were not
+  in the old one join after the copied lines, so they do not "remember" them.
+- **Refuses anything that does not clearly belong**: an id this save never reached, a conversation without the
+  player or without anyone present now, or one whose last visible line is more than six game hours old. Those
+  start fresh, as before.
+
+Also fixed while here: the ordinary recap ("the last time I talked with...") showed lines said after the loaded
+save; gossip claims and diary entries written by a background job that ran after a load landed on the new
+timeline. All now follow the conversation's own timeline.
+
+Not restored: the exact moment in the game (an NPC line half spoken, a pending action, a Mantella message thread);
+the restart is a new conversation whose prompt carries the old one. Mantella's own summary of the old conversation
+is not shown after the load when it ended after the save (the copied lines cover it). Off with
+`MANTELLA_LW_RESUME=0` (the game then ends the conversation at a load, as before; the end-time fix stays).
+
+#### In-game checks for picking a conversation back up
+
+1. Talk to an NPC, ask something they answer, save mid-conversation, say something memorable, then load the save.
+   "Conversation ended." then "Picking the conversation back up..." should show, and the NPC should carry on
+   without greeting you and without knowing what you said after the save.
+2. Same, but load the save straight after saving: still picked back up; the log says "its lines shown, not copied".
+3. Load such a save, then cast the Mantella spell on someone else within a couple of seconds: no restart.
+
 ## Turn timing: where the wait between exchanges goes
 
 On unless you set `MANTELLA_LW_TURN_TIMING=0` (works with or without `MANTELLA_LIVING_WORLD=1`). For every player

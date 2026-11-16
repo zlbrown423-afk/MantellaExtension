@@ -241,7 +241,11 @@ def write_entry(store: WorldStore, complete: Complete, payload: dict[str, Any]) 
     if text is None:
         raise ValueError("the diary reply held no entry")
     with store.transaction() as db:
-        timeline = db.execute("SELECT timeline_id FROM timeline WHERE is_active = 1").fetchone()[0]
+        # the timeline of the conversation that queued the entry: the job can run after a save load has started
+        # a new timeline, and an entry about a day the loaded save never had must not land on it
+        row = db.execute("SELECT timeline_id FROM conversation WHERE conv_id = ?", (payload.get("conv_id"),)).fetchone() \
+            if payload.get("conv_id") is not None else None
+        timeline = row[0] if row else db.execute("SELECT timeline_id FROM timeline WHERE is_active = 1").fetchone()[0]
         db.execute("INSERT INTO diary_entry (timeline_id, npc_id, game_day, text, last_mem_id, conv_id, written_gt)"
                    " VALUES (?,?,?,?,?,?,?)",
                    (timeline, npc_id, day, text, notes.last_mem_id, payload.get("conv_id"),
