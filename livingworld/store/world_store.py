@@ -12,6 +12,9 @@ from contextlib import contextmanager
 from importlib import resources
 from typing import Iterator
 
+from livingworld.store import migration_backup
+from livingworld.store.migration_backup import MigrationBackupError, MigrationFailed  # noqa: F401  (re-exported)
+
 MIGRATIONS_PACKAGE = "livingworld.store.migrations"
 
 
@@ -65,14 +68,40 @@ class WorldStore:
 
     def migrate(self) -> None:
         """Apply every migration not yet recorded, in version order. A lower-numbered file that arrives
-        after a higher one (two features developed side by side) is still applied."""
+        after a higher one (two features developed side by side) is still applied.
+
+        A database that already holds data is first copied and the copy verified
+        (see ``migration_backup``); if that fails nothing is migrated and ``MigrationBackupError`` is
+        raised. If a migration then fails, the database is put back from the copy and
+        ``MigrationFailed`` is raised."""
         with self._lock:
             applied = self.applied_versions()
-            for version, sql in _migration_files():
-                if version in applied:
-                    continue
-                # executescript commits on its own, so wrap the file in an explicit transaction
-                self._conn.executescript(f"BEGIN;\n{sql}\nCOMMIT;")
+            pending = [(v, sql) for v, sql in _migration_files() if v not in applied]
+            if not pending:
+                return
+            backup = None
+            if self.path != ":memory:" and applied and migration_backup.enabled():
+                backup = migration_backup.take(self._conn, self.path, max(applied), max(v for v, _ in pending))
+            for version, sql in pending:
+                try:
+                    # executescript commits on its own, so wrap the file in an explicit transaction
+                    self._conn.executescript(f"BEGIN;\n{sql}\nCOMMIT;")
+                except Exception as exc:
+                    if self._conn.in_transaction:
+                        self._conn.execute("ROLLBACK")
+                    self._after_failed_migration(version, exc, backup)
+
+    def _after_failed_migration(self, version: int, exc: Exception, backup) -> None:
+        if backup is None:
+            raise MigrationFailed(f"migration {version:03d} failed: {exc}", False, None) from exc
+        try:
+            migration_backup.restore(backup, self._conn)
+        except Exception as restore_exc:
+            raise MigrationFailed(
+                f"migration {version:03d} failed ({exc}) and restoring the backup failed too ({restore_exc}); "
+                f"the verified copy is at {backup.path}", False, backup.path) from exc
+        raise MigrationFailed(f"migration {version:03d} failed ({exc}); the database was restored from "
+                              f"{backup.path}", True, backup.path) from exc
 
     # ---- access ----
     @contextmanager
