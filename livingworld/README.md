@@ -858,3 +858,28 @@ Measured on a copy of a real save (two NPCs, ten turns, cloud sandbox): 9 to 10 
 the background read took about 1.3 ms per NPC, the write watch cost about 2 us per statement (about 0.5 ms per turn),
 and the prompt build went from 6.6 ms to 5.8 ms per speaker. The saving is small because the prompt was already
 cheap; this is mainly the safe hand-over shape a later NPC context cache can use.
+
+## Context growth benchmark
+
+`python -m livingworld.perf.context_bench` measures how the cost of building NPC context grows with a world's
+history, before any NPC context cache is built. It never runs in the server and changes no behaviour. It builds
+throw-away synthetic worlds whose scale 1 matches a real 12-game-day save (memories, facts, gossip, relationship
+changes, conversations, save-reload timelines per day), then times `recall_for` and each of its parts and counts
+statements. `--db PATH` also measures a copy of a real world (the original file is only copied, never opened);
+`--full-prompt` also times `recall_text` (every Living World block in the prompt) in a headless group talk, the
+way group talk rebuilds it for each speaker on each turn. `--out` writes JSON.
+
+Measured 2026-11-16 (cloud sandbox, three NPCs with the player):
+
+| History | recall_for per NPC | recall_text, one group speaker |
+|---|---|---|
+| real save copy (12 days) | 1.3 to 1.6 ms | not measured |
+| x1 (12 days) | 2.2 to 2.4 ms | 7 ms |
+| x10 (~4 months) | 5.6 to 5.9 ms | 25 ms |
+| x50 (~1.6 years) | 24 to 26 ms | 96 ms |
+| x200 (~6.5 years) | 92 to 97 ms | about 7 s (hygiene catch-up, below) |
+
+What grows: every timeline-scoped view re-walks the active save's chain of reloads (about two a day of play), and
+`v_relationship` re-adds all relationship changes on each read. After a long jump in game time, hygiene catch-up
+(`hygiene/model.py`: `next_bath_due` calls `state`, which re-reads every hygiene change, every quarter day) cost
+1.6 s at x50 and did not settle at x200.
