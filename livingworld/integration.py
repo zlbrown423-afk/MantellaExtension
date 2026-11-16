@@ -24,8 +24,8 @@ from livingworld.memory import settings as memory_settings
 from livingworld.memory.recall import mark_rehearsed_rows, recall_for
 from livingworld.dialogue import context_prep
 from livingworld import mood as moods
-from livingworld.bodylang import (adult_gestures_enabled, body_language_enabled, gesture_notices, gestures_enabled,
-                                  handshake_enabled, salute_enabled)
+from livingworld.bodylang import (adult_gestures_enabled, body_language_enabled, conv_anim_enabled, gesture_notices,
+                                  gestures_enabled, handshake_enabled, salute_enabled)
 from livingworld.bodylang.presence import gesture_group, is_presence
 from livingworld.bodylang.service import BodyLanguage
 from livingworld.dialogue import hearing, leads as player_leads
@@ -98,6 +98,7 @@ KEY_GESTURE_NOTICES = "mantella_lw_gesture_notices"   # start reply: show each r
 KEY_HANDSHAKE_ON = "mantella_lw_handshake_on"          # start reply: handshake gesture (MANTELLA_LW_HANDSHAKE)
 KEY_SALUTE_ON = "mantella_lw_salute_on"                # start reply: salute gesture (MANTELLA_LW_SALUTE)
 KEY_ADULT_GESTURES_ON = "mantella_lw_adult_gestures_on"   # start reply: adult gestures (MANTELLA_LW_ADULT_GESTURES=1)
+KEY_CONV_ANIM_ON = "mantella_lw_conv_anim_on"          # start reply: listening/thinking head and eyes (MANTELLA_LW_CONV_ANIM)
 KEY_BODY = "mantella_lw_body"                    # sent with an NPC line: changed expression profiles ('Name|comfort|gaze|guard|step')
 KEY_HINTS = "mantella_lw_hints"                  # sent with the first NPC line: what the player overhears (S2)
 KEY_GUARD_ISSUE = "mantella_lw_guard_issue"      # sent with an NPC line: items handed to the player ('Name|plugin|0xID;...', for logs)
@@ -1572,6 +1573,7 @@ class LivingWorld:
         keys[KEY_HANDSHAKE_ON] = bool(self.body_language and handshake_enabled())
         keys[KEY_SALUTE_ON] = bool(self.body_language and salute_enabled())
         keys[KEY_ADULT_GESTURES_ON] = bool(self.body_language and adult_gestures_enabled())
+        keys[KEY_CONV_ANIM_ON] = bool(self.body_language and conv_anim_enabled())
         keys[intimate_scenes.KEY_INTIMACY_ON] = bool(self.intimacy)
         keys[confront.KEY_CONFRONT_ON] = bool(self.confront)
         keys[decency.KEY_DECENCY_ON] = bool(self.decency)
