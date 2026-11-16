@@ -36,7 +36,7 @@ from livingworld.social import seed as seedmod
 from livingworld.social import traits as traitsmod
 
 INSTALLED_SEED = "seed_history/riverwood_e62b682.json"
-MIN_SCHEMA, MAX_SCHEMA = 17, 21           # versions this tool was written and tested for
+MIN_SCHEMA, MAX_SCHEMA = 17, 22           # versions this tool was written and tested for (022 only adds timeline_scope)
 DEFAULT_BACKUP_ROOT = r"D:\ModdingTools\LWBackups"
 EPS = 1e-9
 REL_COLS = ("kinship", "status", "trust", "affinity", "respect", "familiarity", "attraction")

@@ -15,7 +15,7 @@ from livingworld.harness import actors, bodysim
 from livingworld.harness.perception import KEY_EVENTS, presence
 from livingworld.harness.scripted_llm import ScriptedLLM
 from livingworld.harness.session import HeadlessSession
-from livingworld.integration import ENV_VAR, KEY_BODY, KEY_BODY_ON, KEY_GESTURES_ON, KEY_MOOD, LivingWorld
+from livingworld.integration import ENV_VAR, KEY_BODY, KEY_BODY_ON, KEY_CONV_ANIM_ON, KEY_GESTURES_ON, KEY_MOOD, LivingWorld
 from livingworld.perception.records import BadRecord
 from src.http.communication_constants import communication_constants as comm_consts
 
@@ -116,7 +116,7 @@ def test_crowding_reaches_the_prompt_once_and_changes_feelings(tmp_path):
     records = [presence(actors.gerdur(), "approach", 3.499),
                presence(actors.gerdur(), "crowd", 3.4995, distance_m=0.6, seconds=5.0, count=2)]
     llm, start, first, later = talk(tmp_path, records, replies=["Hm.", "Well?"], more=["Hello."])
-    assert start[KEY_BODY_ON] is True
+    assert start[KEY_BODY_ON] is True and start[KEY_CONV_ANIM_ON] is True
     prompt = llm.dialogue_calls[0].system_prompt
     assert "What Gerdur noticed Torvar doing just now" in prompt
     assert "Torvar stood very close, 0.6 m away, for about 5 seconds (that is 2 times" in prompt
@@ -176,7 +176,7 @@ def test_switch_off(tmp_path, monkeypatch):
     monkeypatch.setenv("MANTELLA_LW_BODY_LANGUAGE", "0")
     rec = presence(actors.gerdur(), "crowd", 3.4995, distance_m=0.6, seconds=5.0)
     llm, start, first, _ = talk(tmp_path, [rec], replies=["<mood delighted 10> Hi."])
-    assert start[KEY_BODY_ON] is False
+    assert start[KEY_BODY_ON] is False and start[KEY_CONV_ANIM_ON] is False
     assert "stood very close" not in llm.dialogue_calls[0].system_prompt
     assert not any(KEY_BODY in r for r in first)
 
@@ -267,3 +267,40 @@ def test_gestures_switch_off(tmp_path, monkeypatch):
     assert start[KEY_GESTURES_ON] is False and start[KEY_BODY_ON] is True
     prompt = llm.dialogue_calls[0].system_prompt
     assert "waved" not in prompt and "stood very close" in prompt
+
+
+def test_conversation_states_switch_off_alone(tmp_path, monkeypatch):
+    monkeypatch.setenv("MANTELLA_LW_CONV_ANIM", "0")
+    rec = presence(actors.gerdur(), "crowd", 3.4995, distance_m=0.6, seconds=5.0)
+    llm, start, *_ = talk(tmp_path, [rec])
+    assert start[KEY_CONV_ANIM_ON] is False and start[KEY_BODY_ON] is True
+    assert "stood very close" in llm.dialogue_calls[0].system_prompt     # the rest of body language stays on
+
+
+# ---- face test command ("debug face happy") ----
+from livingworld.bodylang import face_test  # noqa: E402
+
+
+def test_face_command_words():
+    assert face_test.parse("Debug face happy.") == (10, 80)
+    assert face_test.parse("test face sad 50") == (11, 50)
+    assert face_test.parse("debug face puzzled 250") == (13, 100)
+    assert face_test.parse("I'm happy to see your face.") is None          # no debug word
+    assert face_test.parse("debug happy") is None                           # no 'face'
+    assert face_test.parse("debug face please") is None                     # no mood
+    assert face_test.target("debug face angry on Hod", ["Gerdur", "Hod"]) == "Hod"
+    assert face_test.target("debug face angry", ["Gerdur", "Hod"]) == ""
+
+
+def test_face_command_goes_once_with_the_next_line(tmp_path):
+    llm, _, first, later = talk(tmp_path, [], replies=["Hm.", "Like this?", "Aye."],
+                                more=["Debug face happy.", "How is the mill?"])
+    faces = [r[face_test.KEY_FACE] for r in first + later if face_test.KEY_FACE in r]
+    assert faces == ["10|80|5|"]
+    assert face_test.KEY_FACE in later[0]
+
+
+def test_face_command_switch_off(tmp_path, monkeypatch):
+    monkeypatch.setenv("MANTELLA_LW_FACE_TEST", "0")
+    _, _, first, later = talk(tmp_path, [], replies=["Hm.", "Like this?"], more=["Debug face happy."])
+    assert not any(face_test.KEY_FACE in r for r in first + later)

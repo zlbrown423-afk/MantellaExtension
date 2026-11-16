@@ -377,6 +377,23 @@ Mantella-Spell's `MantellaRepository.psc` holds the game side.
 
 `MANTELLA_LW_BODY_LANGUAGE=0` turns all of it off (the game hears it with the conversation start reply).
 
+**Conversation states (game side only).** While a talk is on, the game already knows from Mantella's own
+requests whether it is your turn (mic open or typing), your words are on their way and the reply is being
+worked out, or an NPC is speaking. While you talk, NPCs within 4 m look at you: attentive ones (gaze 0.35+)
+hold your gaze, shy ones glance at you every few seconds. While the reply is worked out, one reserved NPC
+(gaze below 0.6) per turn looks away for 1.5 s, at most every 15 s each. When an NPC line arrives it all lets
+go, before Mantella turns heads between speakers. Only `SetLookAt`, `ClearLookAt` and `SetHeadTracking`,
+each called once per change; nothing for NPCs riding, down, getting up or in an OStim scene; nothing sent to
+the server and no AI call. No idles or facial expressions yet (no verified idle or expression call for it).
+`MANTELLA_LW_CONV_ANIM=0` turns only this off (`mantella_lw_conv_anim_on` in the start reply).
+
+**Face test command.** Say "debug face happy" (or neutral, angry, afraid, sad, surprised, puzzled,
+disgusted; add "on Hod" for someone else in the talk, or a number for strength, default 80) and the NPC
+holds that face for 5 s through Skyrim's own `SetExpressionOverride` (the "Mood" faces), then it is cleared.
+Also cleared when the talk ends, on a load, or when an OStim scene takes the NPC. Use it to check that the
+face changes in VR and that the next line still moves the mouth. Off: `MANTELLA_LW_FACE_TEST=0`
+(`bodylang/face_test.py`).
+
 ### Step 2 (BL2): VR gestures
 
 In VR the game reads your right hand and headset through VRIK (0.8.x) and recognises a few gestures. Each
