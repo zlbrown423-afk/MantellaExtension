@@ -23,6 +23,12 @@ off while these are on): ``MANTELLA_LW_HANDSHAKE`` (offering a hand to shake; on
 (adult-only, OFF unless ``1``: a stroking motion at the groin and pointing down at it, which the NPC's eyes
 follow). See ``presence.py``.
 
+Conversation states (game side only): while a talk is on, the game already knows whether the NPC is
+listening to the player, waiting for the reply to be worked out, speaking, or waiting for the player. It
+gives each state a small, rate-limited head and eye behaviour of its own (hold the player's gaze while they
+talk, one short glance away while "thinking" for reserved NPCs). Nothing here is sent to the AI and no LLM
+call is involved. ``MANTELLA_LW_CONV_ANIM=0`` turns only that off.
+
 ``MANTELLA_LW_BODY_LANGUAGE=0`` turns all of it off, the mood clamp included. ``MANTELLA_LW_GESTURES=0``
 turns off only the gestures, and ``MANTELLA_LW_GESTURE_NOTICES=0`` stops the game showing each gesture it
 recognised (on while gestures are being tuned).
@@ -37,6 +43,7 @@ ENV_GESTURE_NOTICES = "MANTELLA_LW_GESTURE_NOTICES"
 ENV_HANDSHAKE = "MANTELLA_LW_HANDSHAKE"
 ENV_SALUTE = "MANTELLA_LW_SALUTE"
 ENV_ADULT_GESTURES = "MANTELLA_LW_ADULT_GESTURES"
+ENV_CONV_ANIM = "MANTELLA_LW_CONV_ANIM"
 _OFF = {"0", "false", "no", "off"}
 _ON = {"1", "true", "yes", "on"}
 
@@ -64,3 +71,8 @@ def salute_enabled() -> bool:
 def adult_gestures_enabled() -> bool:
     """Off unless switched on (``MANTELLA_LW_ADULT_GESTURES=1``)."""
     return body_language_enabled() and os.environ.get(ENV_ADULT_GESTURES, "").strip().lower() in _ON
+
+
+def conv_anim_enabled() -> bool:
+    """Conversation states (listening / thinking / speaking) in the game; on unless ``MANTELLA_LW_CONV_ANIM=0``."""
+    return body_language_enabled() and os.environ.get(ENV_CONV_ANIM, "").strip().lower() not in _OFF

@@ -24,8 +24,9 @@ from livingworld.memory import settings as memory_settings
 from livingworld.memory.recall import mark_rehearsed_rows, recall_for
 from livingworld.dialogue import context_prep
 from livingworld import mood as moods
-from livingworld.bodylang import (adult_gestures_enabled, body_language_enabled, gesture_notices, gestures_enabled,
-                                  handshake_enabled, salute_enabled)
+from livingworld.bodylang import (adult_gestures_enabled, body_language_enabled, conv_anim_enabled, gesture_notices,
+                                  gestures_enabled, handshake_enabled, salute_enabled)
+from livingworld.bodylang import face_test
 from livingworld.bodylang.presence import gesture_group, is_presence
 from livingworld.bodylang.service import BodyLanguage
 from livingworld.dialogue import hearing, leads as player_leads
@@ -98,6 +99,7 @@ KEY_GESTURE_NOTICES = "mantella_lw_gesture_notices"   # start reply: show each r
 KEY_HANDSHAKE_ON = "mantella_lw_handshake_on"          # start reply: handshake gesture (MANTELLA_LW_HANDSHAKE)
 KEY_SALUTE_ON = "mantella_lw_salute_on"                # start reply: salute gesture (MANTELLA_LW_SALUTE)
 KEY_ADULT_GESTURES_ON = "mantella_lw_adult_gestures_on"   # start reply: adult gestures (MANTELLA_LW_ADULT_GESTURES=1)
+KEY_CONV_ANIM_ON = "mantella_lw_conv_anim_on"          # start reply: listening/thinking head and eyes (MANTELLA_LW_CONV_ANIM)
 KEY_BODY = "mantella_lw_body"                    # sent with an NPC line: changed expression profiles ('Name|comfort|gaze|guard|step')
 KEY_HINTS = "mantella_lw_hints"                  # sent with the first NPC line: what the player overhears (S2)
 KEY_GUARD_ISSUE = "mantella_lw_guard_issue"      # sent with an NPC line: items handed to the player ('Name|plugin|0xID;...', for logs)
@@ -222,6 +224,8 @@ class LivingWorld:
         self._lead_learned: set[str] = set()        # names learned from that line and its answers
         self.perf_monitor: PerfMonitor | None = None  # MANTELLA_LW_PERF=1 (see livingworld/perf)
         self.body_language = enabled and body_language_enabled()   # MANTELLA_LW_BODY_LANGUAGE=0 turns off
+        self.face_test = self.body_language and face_test.enabled()  # 'debug face happy' (MANTELLA_LW_FACE_TEST=0 off)
+        self._face_to_send: str | None = None
         self._body: dict[int, BodyLanguage] = {}    # id(store) -> body language for that world
         self.intimacy = enabled and intimacy_enabled()   # OStim scenes (livingworld/intimacy); MANTELLA_LW_INTIMACY=0 off
         self._scenes_now: list[intimate_scenes.SceneNow] = []   # scenes running near the player, from the game's snapshot
@@ -492,6 +496,7 @@ class LivingWorld:
         self._scene_records = []
         self._moods_shown = {}
         self._moods_to_send = {}
+        self._face_to_send = None
         self._guard_sent = set()
         self._guard_names_sent = {}
         self._identity_notes = []
@@ -592,6 +597,12 @@ class LivingWorld:
                 self._learn_leads(player_leads.from_player(text, names), context.game_days)
         if self.hygiene_debug:
             self._hygiene_debug(text, npc_id, context)
+        if self.face_test:
+            face = face_test.parse(text)
+            if face is not None:
+                names = [c.name for c in context.npcs_in_conversation.get_all_characters() if not c.is_player_character]
+                self._face_to_send = face_test.wire(face_test.target(text, names), *face)
+                logger.log(23, f"Living World: face test command, sending '{self._face_to_send}' with the next line")
         if self.personality is not None:
             present = {self._npc_ids.get(c.ref_id) or self._register(c, context.game_days): c.name
                        for c in context.npcs_in_conversation.get_all_characters() if not c.is_player_character}
@@ -1436,6 +1447,8 @@ class LivingWorld:
         text = self._moods_to_send.pop(speaker.ref_id, None)
         if text:
             keys[KEY_MOOD] = text
+        if self._face_to_send:
+            keys[face_test.KEY_FACE], self._face_to_send = self._face_to_send, None
         false_claim = False
         try:
             false_claim = self._identity_check(sentence)
@@ -1572,6 +1585,7 @@ class LivingWorld:
         keys[KEY_HANDSHAKE_ON] = bool(self.body_language and handshake_enabled())
         keys[KEY_SALUTE_ON] = bool(self.body_language and salute_enabled())
         keys[KEY_ADULT_GESTURES_ON] = bool(self.body_language and adult_gestures_enabled())
+        keys[KEY_CONV_ANIM_ON] = bool(self.body_language and conv_anim_enabled())
         keys[intimate_scenes.KEY_INTIMACY_ON] = bool(self.intimacy)
         keys[confront.KEY_CONFRONT_ON] = bool(self.confront)
         keys[decency.KEY_DECENCY_ON] = bool(self.decency)
