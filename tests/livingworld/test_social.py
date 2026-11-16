@@ -274,3 +274,69 @@ def test_riverwood_seed_invents_no_friendships():
             assert kin, f"{r['a']}-{r['b']} is a friendship with no family tie behind it"
     assert not any("gossipy" in p for p in seed["people"])      # gossip comes from each person's own bio
     assert {m["influence"] for p in seed["people"] for m in p["member_of"].values()} == {0.5}
+
+
+# ---- seed is written once and never overwrites live state ----
+
+def test_restart_keeps_changed_relationship_membership_and_traits(tmp_path):
+    talk(tmp_path, [actors.gerdur(), actors.hod()], 1.0)
+    db = open_db(tmp_path)
+    hod, gerdur = npc_id(db, "Hod"), npc_id(db, "Gerdur")
+    db.execute("UPDATE relationship SET status = 'ex', trust = -0.5 WHERE from_id = ? AND to_id = ?", (hod, gerdur))
+    db.execute("UPDATE membership SET role = 'changed in play' WHERE npc_id = ?", (hod,))
+    db.commit()
+    db.close()
+    talk(tmp_path, [actors.gerdur(), actors.hod()], 2.0)   # new session = new Seeder
+    db = open_db(tmp_path)
+    row = db.execute("SELECT status, trust FROM relationship WHERE from_id = ? AND to_id = ?", (hod, gerdur)).fetchone()
+    assert (row["status"], row["trust"]) == ("ex", -0.5)
+    roles = {r[0] for r in db.execute("SELECT role FROM membership WHERE npc_id = ?", (hod,))}
+    assert roles == {"changed in play"}
+
+
+def test_a_person_who_turns_up_later_is_still_seeded(tmp_path):
+    talk(tmp_path, [actors.gerdur()], 1.0)
+    talk(tmp_path, [actors.gerdur(), actors.hod()], 2.0)
+    db = open_db(tmp_path)
+    hod, gerdur = npc_id(db, "Hod"), npc_id(db, "Gerdur")
+    row = db.execute("SELECT kinship FROM relationship WHERE from_id = ? AND to_id = ?", (hod, gerdur)).fetchone()
+    assert row and row["kinship"] == "spouse"
+
+
+def test_seed_applied_is_recorded_per_entry(tmp_path):
+    talk(tmp_path, [actors.gerdur(), actors.hod()], 1.0)
+    db = open_db(tmp_path)
+    kinds = {r[0] for r in db.execute("SELECT kind FROM seed_applied")}
+    assert kinds == {"membership", "relationship"}   # the file sets no traits, so no person entry
+
+
+def test_an_untouched_default_row_is_replaced_but_a_touched_one_is_not(tmp_path):
+    talk(tmp_path, [actors.gerdur(), actors.hod()], 1.0)
+    db = open_db(tmp_path)
+    hod, gerdur = npc_id(db, "Hod"), npc_id(db, "Gerdur")
+    # forget that the pair was seeded and blank the row to an untouched default: the seed may fill it in again
+    db.execute("DELETE FROM seed_applied WHERE kind = 'relationship'")
+    db.execute("UPDATE relationship SET kinship = NULL, status = 'stranger', trust = 0, affinity = 0, respect = 0,"
+               " familiarity = 0, attraction = 0 WHERE from_id = ? AND to_id = ?", (hod, gerdur))
+    db.commit()
+    db.close()
+    talk(tmp_path, [actors.gerdur(), actors.hod()], 2.0)
+    db = open_db(tmp_path)
+    assert db.execute("SELECT kinship FROM relationship WHERE from_id = ? AND to_id = ?", (hod, gerdur)).fetchone()[0] == "spouse"
+    # now a touched row (status moved by play) is left alone even if the marker is gone
+    db.execute("DELETE FROM seed_applied WHERE kind = 'relationship'")
+    db.execute("UPDATE relationship SET status = 'ex', trust = -0.9 WHERE from_id = ? AND to_id = ?", (hod, gerdur))
+    db.commit()
+    db.close()
+    talk(tmp_path, [actors.gerdur(), actors.hod()], 3.0)
+    db = open_db(tmp_path)
+    row = db.execute("SELECT status, trust FROM relationship WHERE from_id = ? AND to_id = ?", (hod, gerdur)).fetchone()
+    assert (row["status"], row["trust"]) == ("ex", -0.9)
+
+
+def test_migration_021_marks_what_the_old_seed_already_wrote(tmp_path):
+    talk(tmp_path, [actors.gerdur(), actors.hod()], 1.0)
+    db = open_db(tmp_path)
+    hod, gerdur = npc_id(db, "Hod"), npc_id(db, "Gerdur")
+    keys = {r[0] for r in db.execute("SELECT key FROM seed_applied WHERE kind = 'relationship'")}
+    assert f"{hod}:{gerdur}" in keys and f"{gerdur}:{hod}" in keys
