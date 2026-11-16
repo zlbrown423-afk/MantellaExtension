@@ -269,3 +269,92 @@ def test_debug_clean_on_a_named_npc(tmp_path):
     db = open_db(tmp_path)
     assert db.execute("SELECT COUNT(*) FROM hygiene_change h JOIN npc n ON n.npc_id = h.npc_id"
                       " WHERE n.display_name = 'Hod' AND h.cause = 'bath'").fetchone()[0] == 1
+
+
+# ---- catch-up speed (benchmark ME#90: quarter-day re-reads made long gaps quadratic) ---------------------
+
+def _old_state(db, npc_id, now, habits):
+    dirt = blood = 0.0
+    last_bath = t = None
+    for gt, cause, d_dirt, d_blood in db.execute(
+            "SELECT game_time, cause, dirt, blood FROM v_hygiene_change WHERE npc_id = ? AND game_time <= ?"
+            " ORDER BY game_time, change_id", (npc_id, now)).fetchall():
+        if t is not None:
+            dirt = model._clamp(dirt + habits.work_dirt_rate * (gt - t))
+            blood = model._clamp(blood - model.BLOOD_FADE_PER_DAY * (gt - t))
+        t = gt
+        if cause in model.RESETS:
+            dirt, blood, last_bath = model._clamp(d_dirt), model._clamp(d_blood), gt
+        else:
+            dirt, blood = model._clamp(dirt + d_dirt), model._clamp(blood + d_blood)
+    if t is not None:
+        dirt = model._clamp(dirt + habits.work_dirt_rate * (now - t))
+        blood = model._clamp(blood - model.BLOOD_FADE_PER_DAY * (now - t))
+    return model.HygieneState(dirt, blood, last_bath)
+
+
+def _old_catch_up(db, npc_id, now, habits):
+    """The catch-up as it was before the speed fix, kept here as the reference."""
+    added = 0
+    while added < 40:
+        last = _old_state(db, npc_id, now, habits).last_bath_gt
+        latest, t, due = last + habits.bath_interval_days, last + 0.25, None
+        while t < latest and t <= now:
+            s = _old_state(db, npc_id, t, habits)
+            if s.dirt >= habits.threshold or (s.bloodied and habits.hygiene_standard >= 0.4):
+                due = model._at_window(t + (0.5 if s.bloodied else 0.0), habits.bath_window)
+                break
+            t += 0.25
+        if due is None:
+            due = model._at_window(latest, habits.bath_window)
+        if due > now:
+            return added
+        model._insert(db, npc_id, due, "offscreen_bath")
+        added += 1
+    return added
+
+
+def _baths(db, npc_id):
+    return [r[0] for r in db.execute("SELECT game_time FROM hygiene_change WHERE npc_id = ? AND cause = 'offscreen_bath'"
+                                     " ORDER BY game_time", (npc_id,))]
+
+
+@pytest.mark.parametrize("name", ["Camilla", "Alvor the blacksmith", "Lucan the merchant", "a beggar", "a guard"])
+def test_faster_catch_up_writes_the_same_baths_as_before(name):
+    for store_ in range(2):
+        store, ids = store_with(name)
+        npc = ids[name]
+        with store.transaction() as db:
+            habits = habits_for(db, npc)
+            model._insert(db, npc, 2.0, "seed")
+            model._insert(db, npc, 5.3, "fight", 0.15, 0.6, "f1")       # bloodied: some bathe sooner
+            model._insert(db, npc, 9.9, "swim", -0.5, -0.8, "s1")
+            model._insert(db, npc, 14.2, "fight", 0.15, 0.35, "f2")
+            if store_ == 0:
+                added = model.catch_up(db, npc, 45.0, habits)
+                new = _baths(db, npc)
+            else:
+                old_added = _old_catch_up(db, npc, 45.0, habits)
+                old = _baths(db, npc)
+    assert added == old_added and new == old
+
+
+def test_someone_unseen_for_years_is_caught_up_in_one_go_and_quickly():
+    store, ids = store_with("Camilla")
+    camilla = ids["Camilla"]
+    with store.transaction() as db:
+        habits = habits_for(db, camilla)
+        model._insert(db, camilla, 2.0, "seed")
+        statements = []
+        db.set_trace_callback(statements.append)
+        added = model.catch_up(db, camilla, 2000.0, habits)
+        db.set_trace_callback(None)
+        assert 0 < added <= model.MAX_CATCH_UP_BATHS
+        assert model.catch_up(db, camilla, 2000.0, habits) == 0     # settled: asking again adds nothing
+        now = model.state(db, camilla, 2000.0, habits)
+        baths = _baths(db, camilla)
+    window = max(model.CATCH_UP_WINDOW_DAYS, model.CATCH_UP_WINDOW_INTERVALS * habits.bath_interval_days)
+    assert baths[0] >= 2000.0 - window - 1          # the distant past is skipped, not written bath by bath
+    assert now.days_since_bath(2000.0) <= habits.bath_interval_days + 1
+    assert now.dirt < habits.threshold + habits.work_dirt_rate
+    assert len(statements) < 6 * added + 20         # a few statements per bath, not one per quarter day
