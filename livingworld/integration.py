@@ -21,7 +21,8 @@ from livingworld.memory.jobs import JobQueue, JobWorker
 from livingworld.memory import backfill
 from livingworld.memory import summary_timeline
 from livingworld.memory import settings as memory_settings
-from livingworld.memory.recall import recall_for
+from livingworld.memory.recall import mark_rehearsed_rows, recall_for
+from livingworld.dialogue import context_prep
 from livingworld import mood as moods
 from livingworld.bodylang import (adult_gestures_enabled, body_language_enabled, gesture_notices, gestures_enabled,
                                   handshake_enabled, salute_enabled)
@@ -162,6 +163,7 @@ def _never_raises(func: Callable) -> Callable:
 class LivingWorld:
     latest: "LivingWorld | None" = None   # the most recently created instance (used by tests)
     start_workers: bool = True            # tests switch this off to run jobs by hand
+    _context_prep: "context_prep.ContextPrep | None" = None   # group talk: recall read while the player speaks
 
     def __init__(self, save_folder: str, enabled: bool = True, default_tts_service: str = "unknown") -> None:
         self.save_folder = save_folder
@@ -712,8 +714,7 @@ class LivingWorld:
                 continue
             npc_id = self._npc_ids.get(character.ref_id) or self._register(character, now)
             key = (self.conv_id, npc_id)
-            recall = recall_for(store, npc_id, now, player_id, mark_rehearsed=key not in self._rehearsed,
-                                about_ids=list(present), current_conv_id=self.conv_id)
+            recall = self._prepared_recall(npc_id, now, player_id, list(present), key not in self._rehearsed)
             self._rehearsed.add(key)
             self._last_recall[npc_id] = (recall.know_ids, recall.mem_ids)
             text = recall.text()
@@ -2074,6 +2075,65 @@ class LivingWorld:
             self.errors += 1
             logger.exception("Living World: could not work out what an NPC notices; leaving it out")
             return []
+
+    # ---- background context preparation (group talk; dialogue/context_prep.py) ----
+    def _prep_key(self, npc_id: int, now: float, player_id: int | None,
+                  present: list[int]) -> "context_prep.PrepKey":
+        return context_prep.PrepKey(id(self.store), self.store.active_timeline_id(), self.conv_id, npc_id,
+                                    player_id, tuple(present), now)
+
+    def _prepare_recall(self, key: "context_prep.PrepKey") -> Any:
+        return recall_for(self.store, key.npc_id, key.now_gt, key.player_id, mark_rehearsed=False,
+                          about_ids=list(key.present), current_conv_id=key.conv_id)
+
+    def _prepared_recall(self, npc_id: int, now: float, player_id: int | None, present: list[int],
+                         mark: bool) -> Any:
+        """``recall_for`` for this NPC, or the copy read while the player was speaking when it is still exact."""
+        prep = self._context_prep
+        if prep is not None and prep.store is self.store and self.conv_id is not None:
+            recall = prep.take(self._prep_key(npc_id, now, player_id, present))
+            if recall is not None:
+                if mark:
+                    prep.quiet_write(lambda: mark_rehearsed_rows(self.store, recall, now))
+                return recall
+        return recall_for(self.store, npc_id, now, player_id, mark_rehearsed=mark, about_ids=present,
+                          current_conv_id=self.conv_id)
+
+    @_never_raises
+    def player_turn_started(self, context: Any) -> None:
+        """The mic opened for the player's line: in group talk, start reading each NPC's recall in the
+        background. Nothing is prepared for an NPC the store has not seen yet (that needs a write)."""
+        if not context_prep.enabled() or self.conv_id is None or context is not self._context or self.store is None:
+            return
+        chars = context.npcs_in_conversation
+        if not chars.contains_multiple_npcs():
+            return
+        present: list[int] = []
+        npcs: list[int] = []
+        player_id = None
+        for c in chars.get_all_characters():
+            npc_id = self._npc_ids.get(c.ref_id)
+            if npc_id is None:
+                return
+            if npc_id not in present:
+                present.append(npc_id)
+            if c.is_player_character:
+                player_id = npc_id
+            else:
+                npcs.append(npc_id)
+        if self._context_prep is None or self._context_prep.store is not self.store:
+            if self._context_prep is not None:
+                self._context_prep.close()
+            self._context_prep = context_prep.ContextPrep(self.store, self._prepare_recall)
+        now = context.game_days
+        self._context_prep.begin([self._prep_key(n, now, player_id, present) for n in npcs])
+
+    @_never_raises
+    def cancel_context_prep(self) -> None:
+        """The conversation ended: drop any snapshot, stop the worker thread and the write watch."""
+        prep, self._context_prep = self._context_prep, None
+        if prep is not None:
+            prep.close()
 
     # ---- dialogue (called from ChatManager) ----
     @property
