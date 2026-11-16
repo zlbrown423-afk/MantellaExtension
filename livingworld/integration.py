@@ -26,6 +26,7 @@ from livingworld.dialogue import context_prep
 from livingworld import mood as moods
 from livingworld.bodylang import (adult_gestures_enabled, body_language_enabled, conv_anim_enabled, gesture_notices,
                                   gestures_enabled, handshake_enabled, salute_enabled)
+from livingworld.bodylang import face_test
 from livingworld.bodylang.presence import gesture_group, is_presence
 from livingworld.bodylang.service import BodyLanguage
 from livingworld.dialogue import hearing, leads as player_leads
@@ -223,6 +224,8 @@ class LivingWorld:
         self._lead_learned: set[str] = set()        # names learned from that line and its answers
         self.perf_monitor: PerfMonitor | None = None  # MANTELLA_LW_PERF=1 (see livingworld/perf)
         self.body_language = enabled and body_language_enabled()   # MANTELLA_LW_BODY_LANGUAGE=0 turns off
+        self.face_test = self.body_language and face_test.enabled()  # 'debug face happy' (MANTELLA_LW_FACE_TEST=0 off)
+        self._face_to_send: str | None = None
         self._body: dict[int, BodyLanguage] = {}    # id(store) -> body language for that world
         self.intimacy = enabled and intimacy_enabled()   # OStim scenes (livingworld/intimacy); MANTELLA_LW_INTIMACY=0 off
         self._scenes_now: list[intimate_scenes.SceneNow] = []   # scenes running near the player, from the game's snapshot
@@ -493,6 +496,7 @@ class LivingWorld:
         self._scene_records = []
         self._moods_shown = {}
         self._moods_to_send = {}
+        self._face_to_send = None
         self._guard_sent = set()
         self._guard_names_sent = {}
         self._identity_notes = []
@@ -593,6 +597,12 @@ class LivingWorld:
                 self._learn_leads(player_leads.from_player(text, names), context.game_days)
         if self.hygiene_debug:
             self._hygiene_debug(text, npc_id, context)
+        if self.face_test:
+            face = face_test.parse(text)
+            if face is not None:
+                names = [c.name for c in context.npcs_in_conversation.get_all_characters() if not c.is_player_character]
+                self._face_to_send = face_test.wire(face_test.target(text, names), *face)
+                logger.log(23, f"Living World: face test command, sending '{self._face_to_send}' with the next line")
         if self.personality is not None:
             present = {self._npc_ids.get(c.ref_id) or self._register(c, context.game_days): c.name
                        for c in context.npcs_in_conversation.get_all_characters() if not c.is_player_character}
@@ -1437,6 +1447,8 @@ class LivingWorld:
         text = self._moods_to_send.pop(speaker.ref_id, None)
         if text:
             keys[KEY_MOOD] = text
+        if self._face_to_send:
+            keys[face_test.KEY_FACE], self._face_to_send = self._face_to_send, None
         false_claim = False
         try:
             false_claim = self._identity_check(sentence)

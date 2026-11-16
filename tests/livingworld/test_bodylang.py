@@ -275,3 +275,32 @@ def test_conversation_states_switch_off_alone(tmp_path, monkeypatch):
     llm, start, *_ = talk(tmp_path, [rec])
     assert start[KEY_CONV_ANIM_ON] is False and start[KEY_BODY_ON] is True
     assert "stood very close" in llm.dialogue_calls[0].system_prompt     # the rest of body language stays on
+
+
+# ---- face test command ("debug face happy") ----
+from livingworld.bodylang import face_test  # noqa: E402
+
+
+def test_face_command_words():
+    assert face_test.parse("Debug face happy.") == (10, 80)
+    assert face_test.parse("test face sad 50") == (11, 50)
+    assert face_test.parse("debug face puzzled 250") == (13, 100)
+    assert face_test.parse("I'm happy to see your face.") is None          # no debug word
+    assert face_test.parse("debug happy") is None                           # no 'face'
+    assert face_test.parse("debug face please") is None                     # no mood
+    assert face_test.target("debug face angry on Hod", ["Gerdur", "Hod"]) == "Hod"
+    assert face_test.target("debug face angry", ["Gerdur", "Hod"]) == ""
+
+
+def test_face_command_goes_once_with_the_next_line(tmp_path):
+    llm, _, first, later = talk(tmp_path, [], replies=["Hm.", "Like this?", "Aye."],
+                                more=["Debug face happy.", "How is the mill?"])
+    faces = [r[face_test.KEY_FACE] for r in first + later if face_test.KEY_FACE in r]
+    assert faces == ["10|80|5|"]
+    assert face_test.KEY_FACE in later[0]
+
+
+def test_face_command_switch_off(tmp_path, monkeypatch):
+    monkeypatch.setenv("MANTELLA_LW_FACE_TEST", "0")
+    _, _, first, later = talk(tmp_path, [], replies=["Hm.", "Like this?"], more=["Debug face happy."])
+    assert not any(face_test.KEY_FACE in r for r in first + later)

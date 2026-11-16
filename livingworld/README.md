@@ -387,6 +387,13 @@ each called once per change; nothing for NPCs riding, down, getting up or in an 
 the server and no AI call. No idles or facial expressions yet (no verified idle or expression call for it).
 `MANTELLA_LW_CONV_ANIM=0` turns only this off (`mantella_lw_conv_anim_on` in the start reply).
 
+**Face test command.** Say "debug face happy" (or neutral, angry, afraid, sad, surprised, puzzled,
+disgusted; add "on Hod" for someone else in the talk, or a number for strength, default 80) and the NPC
+holds that face for 5 s through Skyrim's own `SetExpressionOverride` (the "Mood" faces), then it is cleared.
+Also cleared when the talk ends, on a load, or when an OStim scene takes the NPC. Use it to check that the
+face changes in VR and that the next line still moves the mouth. Off: `MANTELLA_LW_FACE_TEST=0`
+(`bodylang/face_test.py`).
+
 ### Step 2 (BL2): VR gestures
 
 In VR the game reads your right hand and headset through VRIK (0.8.x) and recognises a few gestures. Each
