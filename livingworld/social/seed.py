@@ -1,9 +1,11 @@
 """Starting communities, memberships, personalities and relationships from ``data/*.json``.
 
 People are matched by plugin and base form ID, so a seed entry takes effect once that NPC has been
-seen in play (has an ``npc`` row). ``apply`` is cheap and idempotent; it runs at each refresh and only
-writes when someone new has turned up. Seeded values are the base of each relationship row: what
-happens in play is stored as ``relationship_change`` rows on top, so a seed never erases history.
+seen in play (has an ``npc`` row). ``apply`` runs at each refresh but writes each seed entry ONCE per
+world: the ``seed_applied`` table records what was written, so a restart never re-writes it and live
+changes (romance status, relationship history, edited memberships or traits) are never overwritten.
+A seeded relationship only replaces a row that is still the untouched default. Seeded values are the
+base of each relationship row; play adds ``relationship_change`` rows on top.
 Children are never seeded (see ``store/minors.py``).
 """
 from __future__ import annotations
@@ -29,11 +31,12 @@ def _local_id(base_id: str) -> str:
 
 
 def gossipiness() -> dict[tuple[str, str], float]:
-    """(plugin, base_form_id) -> gossipy 0..1 for seeded people."""
+    """(plugin, base_form_id) -> gossipy 0..1 for the seeded people whose file sets one (none is invented)."""
     out = {}
     for seed in seeds():
         for p in seed["people"]:
-            out[(p["plugin"], _local_id(p["base_id"]))] = float(p.get("gossipy", 0.5))
+            if "gossipy" in p:
+                out[(p["plugin"], _local_id(p["base_id"]))] = float(p["gossipy"])
     return out
 
 
@@ -95,19 +98,21 @@ class Seeder:
             if npc_id is None:
                 continue
             for key, m in (p.get("member_of") or {}).items():
-                db.execute("INSERT INTO membership (npc_id, community_id, role, influence) VALUES (?,?,?,?)"
-                           " ON CONFLICT(npc_id, community_id) DO UPDATE SET role = excluded.role,"
-                           " influence = excluded.influence",
-                           (npc_id, community_ids[key], m.get("role"), float(m.get("influence", 0.3))))
-            seeded_traits = {"gossipy": float(p.get("gossipy", 0.5)), **(p.get("traits") or {})}
-            if not db.execute("SELECT 1 FROM persona_version WHERE npc_id = ?", (npc_id,)).fetchone():
-                db.execute("INSERT INTO persona_version (npc_id, version, bio, traits_json, source, created_gt)"
-                           " VALUES (?, 1, '', ?, 'author', ?)", (npc_id, json.dumps(seeded_traits), gt))
-            else:
-                # traits from the bio may have been written first (social/traits.py): the seed file wins
-                for trait, value in seeded_traits.items():
-                    db.execute("UPDATE persona_version SET traits_json = json_set(traits_json, ?, ?) WHERE npc_id = ?",
-                               (f"$.{trait}", float(value), npc_id))
+                if _written(db, "membership", f"{npc_id}:{key}", gt):
+                    db.execute("INSERT OR IGNORE INTO membership (npc_id, community_id, role, influence) VALUES (?,?,?,?)",
+                               (npc_id, community_ids[key], m.get("role"), float(m.get("influence", 0.3))))
+            # a trait the file does not set is not invented here: it comes from the NPC's own bio, or the default
+            seeded_traits = {**({"gossipy": float(p["gossipy"])} if "gossipy" in p else {}), **(p.get("traits") or {})}
+            if seeded_traits and _written(db, "person", str(npc_id), gt):
+                if not db.execute("SELECT 1 FROM persona_version WHERE npc_id = ?", (npc_id,)).fetchone():
+                    db.execute("INSERT INTO persona_version (npc_id, version, bio, traits_json, source, created_gt)"
+                               " VALUES (?, 1, '', ?, 'author', ?)", (npc_id, json.dumps(seeded_traits), gt))
+                else:
+                    # traits the bio gave first stay: the seed only fills in what is missing
+                    for trait, value in seeded_traits.items():
+                        db.execute("UPDATE persona_version SET traits_json = json_set(traits_json, ?, ?)"
+                                   " WHERE npc_id = ? AND json_extract(traits_json, ?) IS NULL",
+                                   (f"$.{trait}", float(value), npc_id, f"$.{trait}"))
         for r in seed["relationships"]:
             a, b = ids.get(r["a"]), ids.get(r["b"])
             if a is None or b is None:
@@ -115,10 +120,11 @@ class Seeder:
             back = r.get("back") or {}
             values = (float(r.get("trust", 0)), float(r.get("affinity", 0)), float(r.get("respect", 0)),
                       float(r.get("familiarity", 0)), float(r.get("attraction", 0)))
-            _upsert(db, a, b, r.get("kinship"), r.get("status", "acquaintance"), values, gt)
-            if not r.get("one_way"):
-                _upsert(db, b, a, back.get("kinship", r.get("kinship")), back.get("status", r.get("status", "acquaintance")),
-                        values, gt)
+            if _written(db, "relationship", f"{a}:{b}", gt):
+                _write_relationship(db, a, b, r.get("kinship"), r.get("status", "acquaintance"), values, gt)
+            if not r.get("one_way") and _written(db, "relationship", f"{b}:{a}", gt):
+                _write_relationship(db, b, a, back.get("kinship", r.get("kinship")),
+                                    back.get("status", r.get("status", "acquaintance")), values, gt)
         for place in seed.get("places") or []:
             residents = [ids[k] for k in place.get("residents", []) if k in ids]
             staff = community_ids.get(place.get("staff", ""))
@@ -131,11 +137,27 @@ class Seeder:
                         float(place["privacy"]), int(bool(place.get("child_in_home"))), place.get("bed_ref")))
 
 
-def _upsert(db, from_id: int, to_id: int, kinship: str | None, status: str, values: tuple, gt: float) -> None:
+def _written(db, kind: str, key: str, gt: float) -> bool:
+    """True the first time a seed entry is about to be written to this world, and records that it was.
+    Every later start finds the mark and leaves the entry alone, so nothing in play is ever overwritten."""
+    cur = db.execute("INSERT OR IGNORE INTO seed_applied (kind, key, applied_gt) VALUES (?,?,?)", (kind, key, gt))
+    return cur.rowcount == 1
+
+
+def _write_relationship(db, from_id: int, to_id: int, kinship: str | None, status: str, values: tuple, gt: float) -> None:
+    """The seed's starting row. A row that is already there is replaced only when it is still the untouched
+    default one (nothing had happened between the two people yet)."""
     trust, affinity, respect, familiarity, attraction = values
     db.execute("INSERT INTO relationship (from_id, to_id, kinship, status, trust, affinity, respect, familiarity,"
                " attraction, updated_gt) VALUES (?,?,?,?,?,?,?,?,?,?)"
                " ON CONFLICT(from_id, to_id) DO UPDATE SET kinship = excluded.kinship, status = excluded.status,"
                " trust = excluded.trust, affinity = excluded.affinity, respect = excluded.respect,"
-               " familiarity = excluded.familiarity, attraction = excluded.attraction, updated_gt = excluded.updated_gt",
+               " familiarity = excluded.familiarity, attraction = excluded.attraction, updated_gt = excluded.updated_gt"
+               " WHERE relationship.kinship IS NULL AND relationship.status IN ('stranger', 'acquaintance')"
+               " AND relationship.trust = 0 AND relationship.affinity = 0 AND relationship.respect = 0"
+               " AND relationship.familiarity = 0 AND relationship.attraction = 0 AND relationship.fear = 0"
+               " AND NOT EXISTS (SELECT 1 FROM relationship_change c WHERE c.from_id = excluded.from_id"
+               "                 AND c.to_id = excluded.to_id)"
+               " AND NOT EXISTS (SELECT 1 FROM romance_bond_change b WHERE (b.a_id = excluded.from_id AND b.b_id = excluded.to_id)"
+               "                 OR (b.a_id = excluded.to_id AND b.b_id = excluded.from_id))",
                (from_id, to_id, kinship, status, trust, affinity, respect, familiarity, attraction, gt))

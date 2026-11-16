@@ -666,6 +666,151 @@ consent read the profile, and desire is never a yes. Settings file: `data/living
 tool: `python -m livingworld.personality`. Migration 017. Off with `MANTELLA_LW_PERSONALITY=0`. Full details:
 `livingworld/personality/README.md`.
 
+## Identity guard (false name claims)
+
+Two guards can stand in one conversation and both reach the dialogue model as "Whiterun Guard". If one then
+introduces himself with the name of another actor in the conversation ("I'm Kolbeinn" from the guard who is
+really Brand), `guard/identity_guard.py` refuses the claim: the line teaches nobody a name (fog and guard names
+skip it), the model gets a one-line correction with the player's next line, and the attempt is stored in
+`identity_conflict` (migration 018) and logged as `Living World identity: ...`. Who an NPC is never changes: the
+`npc` row is keyed by the game's reference ID. Each named guard's prompt also lists the other named guards here.
+Only self-introductions count ("I'm", "my name is", "call me"); talking about someone never does. No switch of
+its own: it runs with the Living World and with guard names on.
+
+## Squads (temporary walking party)
+
+`squad/` tracks the player's walking party. The player asks in conversation ("Brand, come with me", "everyone,
+follow me", "will you walk with me?"); an NPC joins only when their own reply says yes ("Aye, lead the way"), and
+a no sends them back. Several can join, each as their own person (`npc_id`); nobody is in two squads; children
+are never asked; the party is capped at 6. "Stand down" / "you're dismissed" ends it (name someone to dismiss
+only them). Formation is set by saying so: loose ("spread out", "give me some room"), close ("stay close"),
+autonomous ("use your own judgment", "scout ahead"), patrol ("keep patrol formation"). Each member's prompt says
+they are in the player's party, with whom, and in which formation; asked NPCs are told to answer yes or no.
+
+What it does not do: nobody is put in a follower faction, and no AI package or combat behaviour is changed, so
+vanilla combat and routines are untouched. Members are held by Mantella's own conversation hold, which lasts only
+while the conversation is open, so the squad ends (status `dropped`, reason `conversation ended`) when it ends.
+The formation is recorded and told to the NPCs; it does not yet change how they walk (that needs game-side work).
+Tables: `squad`, `squad_member` (migration 019). Developer view: `squad.service.report(db)`.
+Off with `MANTELLA_LW_SQUAD=0`.
+
+### In-game checks for squads and the identity guard (not covered by unit tests)
+
+1. Talk to three guards, ask each by name to come along: each answers; those who say yes follow, those who say
+   no do not. Look for `Living World squad: npc N joined` / `declined` in the Mantella log.
+2. Say "stand down": the log shows who left; the guards stop following.
+3. Say "stay close", then "spread out": the log shows the formation change; check whether anything visible changes
+   (expected: not yet).
+4. End the conversation mid-patrol: members become `dropped`; note whether the guards stop following.
+5. Introduce guards one by one and watch for `Living World identity:` warnings. A guard giving another guard's
+   name should be followed by a correction, and the name must not appear over the other guard's head.
+
+## Shared fights (what each NPC remembers of a fight beside the player)
+
+`combat/` turns the `fight` records the game already sends (one per adult who fought beside the player, when the
+player's fight ends, with the lowest share of health they fell to) into a single `combat.fight` world event and
+a separate first-person memory for each NPC. Two people in one fight remember it differently: who stood beside
+them, and how badly they got hurt ("I came out of it without a scratch" / "I was nearly killed; it was close").
+An NPC who was in the player's squad remembers being out on patrol with them. The player keeps their own memories.
+
+Only a fight the player took part in, beside at least one NPC, is stored. Children are left out. The same fight
+sent twice (an older save loaded) is stored once. The existing hygiene and guard-duty handling of each record is
+unchanged. Off with `MANTELLA_LW_COMBAT=0`. No migration: it uses `world_event`, `event_witness` and `memory`.
+
+What it does not know, and so never says: who the enemies were, how many, who won, or who died (a dead actor sends
+no record, so a friendly casualty is invisible today). The event's payload says `foes` and `outcome` are unknown.
+For ambush, casualty and enemy-type memories the game would have to send more in the fight record (for example
+the kinds and number of hostiles, the dead on each side, and whether a hostile appeared after the player stopped
+fighting). That is a game-side change not made here.
+
+Relationships: see "Fight bonds" below.
+
+### In-game checks for shared fights
+
+1. Take two or three guards (see Squads) into a fight and win it. Afterwards, in the Mantella log look for
+   `Living World: stored fight event ...` listing everyone with their lowest health.
+2. Talk to each guard later: each should be able to recall the fight, from their own side (the one who nearly died
+   says so). Memories should not name enemies or claim a victory.
+3. Fight alone: nothing should be stored. Fight with a guard who is not in a squad: the guard remembers it, without
+   the patrol wording.
+
+## Spatial and assignment context (field reports)
+
+`spatial/` sets each shared fight (see Shared fights) against the assignment every squad member had at the time
+(a guard duty: where it points, who gave it). Each fight leaves one `field_report` per member with an assignment
+(migration 020), classed by place name only: `assigned` (at a place the duty named), `open_road` (open country, for
+road work), `wilds` (open country, duty not about the road) or `elsewhere` (any other named place). There is no
+map geometry, so nothing says "near" or "far".
+
+The next time the player talks to whoever gave the assignment, that NPC gets one note per place. At the assigned
+place the note says it is the place they meant, and that whether the trouble is dealt with is for the party to say.
+Elsewhere it says this was not the place, not to treat it as the job done or as the trouble they heard about, and
+to ask what was found. Task state, quest objectives and merit are never changed here; the existing duty rules
+decide completion. Reports are told once. Off with `MANTELLA_LW_SPATIAL=0`.
+
+Not done: rumours, unverified scout reports and "investigation completed" as data of their own, and finds that
+are not fights (bodies, camps). The game sends no record for those; they need a game-side change.
+
+### In-game checks for field reports
+
+1. Get a bandit duty from a guard officer (for example a camp raid). Take a squad into a fight at a different
+   named place. Check the log for the fight event, then talk to the officer: they should say it was not the place
+   they sent you to, and not count it as done.
+2. Fight at the assigned place, then talk to the officer: they should accept that it is the right place without
+   claiming the bandits are dead.
+3. Talk to the officer again: no repeat note. Talk to a guard who did not give the duty: no note.
+
+## Fight bonds (relationships from shared fights)
+
+`combat/bonds.py`: when a shared fight is stored, every participant's view of every other participant (the player
+included, both directions) moves a little: familiarity +0.04, trust +0.03, respect +0.02, affinity +0.02. Staying
+in the fight down to under half health earns the others +0.02 more respect. Each earlier fight between the same two
+people shrinks the next by 1 / (1 + 0.5 n), so a campaign builds a bond and no single fight makes best friends.
+It is only ever positive: the game does not say who fled, who struck whom or who died, so nothing can claim a
+betrayal or grudge. Written as `relationship_change` rows (reason "fought side by side") caused by the fight's event
+and memory, so it rolls back with saves and feeds `v_relationship`, reputation "regard" and formation behaviour.
+The same fight sent twice changes nothing more. Off with `MANTELLA_LW_BONDS=0`. No migration.
+
+Not done: negative changes (needs the game to report fleeing, friendly fire, casualties), and reputation spreading
+by word of mouth from a fight (the existing gossip layer is untouched).
+
+### In-game checks for fight bonds
+
+1. Fight with a guard, then talk to them: they should treat you a little more familiarly. Do it again several
+   times: each fight should matter less. Nothing should turn hostile from a fight alone.
+2. Look in the log for `fought side by side` rows, or ask for the relationship in the debug tools.
+
+## Conversational continuity (shared history and place memories)
+
+The existing recall (`memory/recall.py`) already chooses each NPC's memories by importance and recency and keeps
+what was said apart from what was seen. `continuity/` adds two small things on top, without putting the world
+database in the prompt:
+
+- **History with the people here.** For each person in the conversation (the player included) that this NPC has
+  fought beside before, one line in the NPC's prompt: how many times, when last, near where. At most four people.
+  It says the NPC knows only that they fought, not who the enemies were or how it ended, unless a memory says so.
+  This is how a guard recognises a patrol companion even when that fight is not among the memories picked.
+- **Place memories.** When the player's line names a place on the game's map, each NPC present gets, for that
+  turn only, up to two of their own memories of that place that the prompt does not already hold (matched on the
+  memory's location or its text). A memory is raised once per conversation. This is how "that road to Rorikstead we
+  talked about" comes back.
+
+Only the NPC's own participation and memories are read, so nobody can mention a fight they were not in. The
+player's name is hidden from NPCs who do not know it yet (fog of war), as in the rest of the prompt. Off with
+`MANTELLA_LW_CONTINUITY=0`. No migration, no extra AI call.
+
+Not done: promises ("come back with stories") rely on the existing extraction having stored them as memories; this
+step does not extract anything new. Quest and rumour context is as in "Spatial and assignment context".
+
+### In-game checks for continuity
+
+1. Fight beside a guard (see Squads), end the conversation, talk to them again later with another NPC present.
+   The Mantella log's prompt for the guard should hold "I have fought beside <you> once...". Another NPC who was not
+   there should have no such line about you.
+2. Tell an NPC about a named place (for example a village on the map), then later say its name again. They should
+   bring up what they remember of it, once.
+3. Ask a guard who the enemies were in a shared fight: they should say they do not know, not invent it.
+
 ## Turn timing: where the wait between exchanges goes
 
 On unless you set `MANTELLA_LW_TURN_TIMING=0` (works with or without `MANTELLA_LIVING_WORLD=1`). For every player
