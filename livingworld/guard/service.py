@@ -772,7 +772,9 @@ class Guard:
 
     # ---- the barracks bunk ----
     def bed_change(self, scene: Scene) -> tuple[O.Item, bool] | None:
-        """The bed the game should give the player (True) or take back (False) now, once each; else None."""
+        """The bed the game should give the player (True) or take back (False) now, once each; else None.
+        A member who still holds a bunk the org no longer gives out (orgs.json bed.moved_from) has it taken back
+        on one line and the current bunk given on the next."""
         if scene.player_id is None:
             return None
         with self.store.transaction() as db:
@@ -782,14 +784,31 @@ class Guard:
                     continue
                 granted = S.last_event_gt(db, "bed_granted", scene.player_id, org.key)
                 revoked = S.last_event_gt(db, "bed_revoked", scene.player_id, org.key)
+                held = granted is not None and (revoked is None or revoked < granted)
                 serving = svc is not None and svc.org_key == org.key and svc.status in ("probation", "active")
-                if serving and (granted is None or granted < svc.joined_gt or (revoked or -1) > granted):
-                    S.event(db, "bed_granted", [scene.player_id], {"org": org.key}, scene.now, None, [])
+                if held:
+                    bed = self._held_bed(db, org, scene.player_id)
+                    if not serving or bed.form_id != org.bed.form_id:
+                        S.event(db, "bed_revoked", [scene.player_id], {"org": org.key, "ref": bed.form_id},
+                                scene.now, None, [])
+                        return bed, False
+                if serving and (not held or granted < svc.joined_gt):
+                    S.event(db, "bed_granted", [scene.player_id], {"org": org.key, "ref": org.bed.form_id},
+                            scene.now, None, [])
                     return org.bed, True
-                if not serving and granted is not None and (revoked is None or revoked < granted):
-                    S.event(db, "bed_revoked", [scene.player_id], {"org": org.key}, scene.now, None, [])
-                    return org.bed, False
         return None
+
+    @staticmethod
+    def _held_bed(db, org: O.Org, member_id: int) -> O.Item:
+        """The bunk named by the member's last bed_granted event. Records from before the event named its bunk
+        were for the first bunk ever given out (the oldest in moved_from)."""
+        row = db.execute("SELECT json_extract(payload_json, '$.ref') FROM v_visible_event WHERE type = 'guard.bed_granted'"
+                         " AND json_extract(actors_json, '$[0]') = ? AND json_extract(payload_json, '$.org') = ?"
+                         " ORDER BY game_time DESC, event_id DESC LIMIT 1", (member_id, org.key)).fetchone()
+        ref = O.local_id(row[0]) if row and row[0] else (org.old_beds[0].form_id if org.old_beds else org.bed.form_id)
+        if ref == org.bed.form_id:
+            return org.bed
+        return next((b for b in org.old_beds if b.form_id == ref), O.Item(org.bed.name, org.bed.plugin, ref))
 
     def chest_due(self, scene: Scene) -> O.Item | None:
         """The footlocker the game should place by the member's bunk: once per service, while serving."""
