@@ -100,7 +100,7 @@ def test_people_who_saw_a_grab_hold_a_claim_they_can_pass_on(tmp_path):
 def test_news_reaches_someone_who_was_not_there(tmp_path):
     meet_everyone(tmp_path)
     talk(tmp_path, [actors.gerdur()], 3.5, records=[grab_gerdur()])
-    llm = talk(tmp_path, [sigrid()], 14.0)
+    llm = talk(tmp_path, [sigrid()], 7.0)   # soon after: news heard days ago fades (migration 026)
     db = open_db(tmp_path)
     sigrid_id, torvar = npc_id(db, "Sigrid"), npc_id(db, "Torvar")
     heard = db.execute("SELECT * FROM v_claim_knowledge WHERE holder_id = ?", (sigrid_id,)).fetchone()

@@ -225,6 +225,50 @@ No AI call. Migration `009_reputation.sql`.
 | Player hints | `social/hints.py`, `player_notice` | Balanced: at most one hint per conversation start, only about the player or someone they have talked to 3+ times, as hearsay naming who was talking, so the player knows whom to ask ("You overhear Hilde talking about Hod."). Informative: up to 3 with names ("Hod has heard that you helped Gerdur."), plus what the place makes of you in the first conversation after a load. Never about something the player saw; each claim once; shown as notifications with the first NPC line (`mantella_lw_hints`). What the player overhears is stored as their own `knowledge` (`overheard`), which no NPC reads |
 | Game side | Mantella-Spell `MantellaRepository.psc` (LIVINGWORLD PATCH: reputation) | Gift (`OnItemRemoved` to an actor, not in barter or container menus, merged per person for 10 s), theft (`OnTrackedStatsEvent` "Items Stolen"/"Pockets Picked" paired with the last `OnItemAdded`), hit ("Assaults" count, or a conversation NPC's `OnHit`; once per person per 15 s) |
 
+## Fading relationships and reputations
+
+On with `MANTELLA_LIVING_WORLD=1`. Switch it off with `set MANTELLA_LW_FADE=0` (takes effect when the server
+next opens the world; the views then show the plain sums exactly as before). No AI call, no game-side change.
+Migration `026_relationship_fade.sql`, which lists every rate.
+
+Before this, every change to how one person feels about another and to their view of someone's honesty,
+decency and so on was summed for ever, so one bad evening (a hundred grabs) set a permanent ceiling. Now each
+change counts less as it ages: nothing fades for 3 game days, then the fading part halves after another H days
+(fear 7, jealousy 7, suspicion 10, attraction and satisfaction 20, trust, affinity, admiration, intimacy and
+commitment 30, respect 45, familiarity 120). A lasting mark stays (10 to 60 % of each change, by feeling), but
+the lasting part is held within a cap (0.15 to 0.8), so it is never a ceiling: a kind act later still moves the
+NPC. Feelings fade toward the seeded base row, not to zero. People who keep meeting keep adding fresh changes,
+and fresh changes never bring old faded ones back.
+
+| Part | Where | What it does |
+| --- | --- | --- |
+| Feelings | `v_relationship` (faded), `v_relationship_raw` (the plain sums) | Same columns as before, so every reader gets faded values. Kin (`kinship` set), spouses and partners never fade: they meet every day off screen where nothing is recorded |
+| Standing | `v_standing` (faded), `v_standing_raw` | Seen first-hand fades over 40 days, only heard over 15; lasting part 40 %, cap 0.4. Opinions (`belief`) drop as before once a faded standing falls back under 0.1 and the opinion is next checked |
+| Clock | `fade_clock`, `store/fading.py` | "Now" is the start of the newest conversation on the active timeline or the game time of the save just loaded (triggers), so an older save shows feelings as they were then. No clock yet means no fading |
+| Speed | index `relationship_change_pair` | Reading one pair now uses an index instead of scanning every change in the world |
+| Children | | Living World keeps no relationship rows for children, so nothing here touches them |
+
+### Who knows what (read-only inspection tool)
+
+Answers "why did Hilde say that?" without reading SQLite by hand. It reads the same views the prompts use
+(`v_known_facts`, `v_claim_knowledge`, `v_visible_memory`, `v_belief`, `v_name_known`) on the active save
+timeline, and says how each item was learned: seen, told by whom (and how many retellings from the
+witness), overheard, worked out, planted by hand, with the line of dialogue it came from.
+
+```
+python -m livingworld.social.who_knows --db World.sqlite summary          # counts, who knows most, most-spread claims
+python -m livingworld.social.who_knows --db World.sqlite npc Hilde        # everything Hilde knows, and how
+python -m livingworld.social.who_knows --db World.sqlite about Hod        # everyone who knows something about Hod
+python -m livingworld.social.who_knows --db World.sqlite claim 12         # is it true, and who told whom
+python -m livingworld.social.who_knows --db World.sqlite search flirt --npc Hilde
+```
+
+Names: exact or part of a name (any case), `#12` for an id, or `player`. Options: `--timeline N` (look at
+another save timeline), `--json`, `--limit N`. The world file is opened read-only only long enough to copy
+it into memory; every query runs on that copy, so it never writes to the world (a test checks the file's
+bytes) and is safe while Mantella runs, though a copy of the database is still the recommended input. The
+server never imports it (a test enforces that).
+
 ## Romance between NPCs (R1: off screen)
 
 Off unless you set `MANTELLA_LW_ROMANCE=1` (on top of `MANTELLA_LIVING_WORLD=1`). No AI call and no animation:
