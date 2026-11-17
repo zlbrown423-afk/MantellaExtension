@@ -13,6 +13,7 @@ logger = utils.get_logger()
 class ImageClient(ClientBase):
     '''Image class to handle LLM vision
     '''
+    _usage_task = "vision"  # LIVINGWORLD PATCH: AI cost logging
     @utils.time_it
     def __init__(self, config: ConfigLoader) -> None:
         self.__config = config    

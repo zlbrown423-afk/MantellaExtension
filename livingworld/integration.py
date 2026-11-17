@@ -14,7 +14,8 @@ import functools
 import os
 import sqlite3
 import time
-from typing import Any, Callable
+from contextlib import contextmanager
+from typing import Any, Callable, Iterator
 
 from livingworld.memory.extraction import Extractor
 from livingworld.memory.jobs import JobQueue, JobWorker
@@ -62,6 +63,8 @@ from livingworld.guard.service import ACTIONS as GUARD_ACTIONS, ENLIST as GUARD_
 from livingworld.work import words as task_words
 from livingworld.work.service import ACTIONS as TASK_ACTIONS, AGREE as TASK_AGREE, Scene as WorkScene, Work
 from livingworld.perception.records import KEY_ATTIRE, BadRecord, parse_record, records_from_context
+from livingworld.perf import llm_usage
+from livingworld.perf.llm_usage import insert_usage
 from livingworld.perf.game_records import split_perf_records
 from livingworld.perf.monitor import PerfMonitor
 from livingworld.perf.stats import STATS as PERF
@@ -717,7 +720,24 @@ class LivingWorld:
                 logger.exception("Living World: could not file the written guard report; carrying on")
         if self.squad and self.store is not None:
             self._squad_end(game_days)
+        self._log_conversation_cost()
         self._close(game_days)
+
+    def _log_conversation_cost(self) -> None:
+        """One log line with what this conversation's AI calls cost so far (AI cost logging)."""
+        if not llm_usage.enabled() or self.store is None or self.conv_id is None:
+            return
+        try:
+            with self.store.reading() as db:
+                calls, cost, tokens = db.execute(
+                    "SELECT COUNT(*), COALESCE(SUM(cost_usd), 0), COALESCE(SUM(COALESCE(prompt_tokens, 0)"
+                    " + COALESCE(completion_tokens, 0)), 0) FROM llm_request WHERE conv_id = ?",
+                    (self.conv_id,)).fetchone()
+            if calls:
+                logger.log(23, f"Living World: conversation {self.conv_id} AI cost ${cost:.4f} ({calls} calls,"
+                               f" {tokens} tokens). {llm_usage.LEDGER.session_line()}")
+        except Exception:
+            logger.debug("Living World: could not sum the conversation's AI cost", exc_info=True)
 
     # ---- Mantella's own summaries roll back with the save (memory/summary_timeline.py) ----
     def _summary_gt(self, store: WorldStore, game_days: float | None) -> float:
@@ -2255,24 +2275,45 @@ class LivingWorld:
         speaker = characters.last_added_character
         started = time.perf_counter()
         status, error = "ok", None
+        usage: list = []
         try:
-            asyncio.run(chat_manager.process_response(speaker, queue, messages, characters, actions, tools, game))
+            with self.usage_for(speaker) as usage:
+                asyncio.run(chat_manager.process_response(speaker, queue, messages, characters, actions, tools, game))
         except Exception as e:
             status, error = "error", str(e)
             raise
         finally:
-            self.record_dialogue_call(chat_manager, speaker, int((time.perf_counter() - started) * 1000), status, error)
+            self.record_dialogue_call(chat_manager, speaker, int((time.perf_counter() - started) * 1000), status, error,
+                                      usage)
+
+    @contextmanager
+    def usage_for(self, speaker: Any) -> Iterator[list]:
+        """Collect the LLM calls of one NPC's turn (AI cost logging), so ``record_dialogue_call`` can store them."""
+        npc_id = None
+        try:
+            npc_id = self._npc_ids.get(speaker.ref_id)
+        except Exception:
+            pass
+        with llm_usage.attribute(npc_id=npc_id, conv_id=self.conv_id, store=self.store), \
+                llm_usage.collect() as records:
+            yield records
 
     @_never_raises
     def record_dialogue_call(self, chat_manager: Any, speaker: Any, latency_ms: int, status: str,
-                             error: str | None) -> None:
-        """One ``llm_request`` row per dialogue call, with the speaker and the rows their prompt held."""
+                             error: str | None, usage: list | None = None) -> None:
+        """One ``llm_request`` row per dialogue call, with the speaker, the rows their prompt held, and (AI cost
+        logging) the tokens and cost of the streamed reply. Other calls of the turn (a tool-calling model) are
+        stored as rows of their own."""
         import json
         npc_id = self._npc_ids.get(speaker.ref_id) or self._register(speaker, self._context.game_days)
         try:
             model = chat_manager._get_per_character_client(speaker).model_name
         except Exception:
             model = "unknown"
+        usage = list(usage or [])
+        replies = [r for r in usage if r.task == "dialogue"]
+        others = [r for r in usage if r.task != "dialogue"]
+        cost = llm_usage.combine(replies) if replies else None
         know_ids, mem_ids = self._last_recall.get(npc_id, ([], []))
         with self.store.transaction() as db:
             timeline = db.execute("SELECT timeline_id FROM timeline WHERE is_active = 1").fetchone()[0]
@@ -2280,10 +2321,12 @@ class LivingWorld:
                 "INSERT INTO decision_trace (timeline_id, npc_id, summary, inputs_json, game_time) VALUES (?,?,?,?,?)",
                 (timeline, npc_id, f"dialogue prompt for {speaker.name}",
                  json.dumps({"know": know_ids, "mems": mem_ids}), self._context.game_days)).lastrowid
-            db.execute(
-                "INSERT INTO llm_request (timeline_id, task, model, npc_id, conv_id, trace_id, latency_ms, status, error)"
-                " VALUES (?,?,?,?,?,?,?,?,?)",
-                (timeline, "dialogue", str(model or "unknown"), npc_id, self.conv_id, trace, latency_ms, status, error))
+            insert_usage(db, timeline, "dialogue", str((cost or {}).get("model") or model or "unknown"), npc_id,
+                         self.conv_id, trace, latency_ms, status, error, cost, "foreground")
+        for rec in others:
+            rec.npc_id = rec.npc_id or npc_id
+            rec.conv_id = rec.conv_id or self.conv_id
+        llm_usage.LEDGER.deliver(others)
 
     def promise_parser(self, actions: list, player_said: str | None = None) -> Any:
         """A reply parser that starts Sit / Drink when the NPC says they are about to (dialogue/promises.py),
@@ -2575,9 +2618,33 @@ class LivingWorld:
                 logger.exception("Living World: could not queue the memory backfill; carrying on")
             if self.start_workers:
                 worker.start()
+            self._usage_store = store
+            if llm_usage.enabled():   # AI cost logging: records go to the world that is open (perf/llm_usage.py)
+                llm_usage.LEDGER.set_sink(self._store_usage)
         return self._stores[world_id]
 
+    def _store_usage(self, records: list) -> None:
+        """Write finished LLM calls (``llm_usage.UsageRecord``) to ``llm_request`` of their world: the one the
+        call was attributed to, else the world in play."""
+        for rec in records:
+            store = rec.store or self.store or getattr(self, "_usage_store", None)
+            if store is None:
+                continue
+            with store.transaction() as db:
+                insert_usage(db, store.active_timeline_id(), rec.task, rec.model, rec.npc_id, rec.conv_id,
+                             None, rec.latency_ms, rec.status, rec.error,
+                             {"prompt_tokens": rec.prompt_tokens, "completion_tokens": rec.completion_tokens,
+                              "cached_tokens": rec.cached_tokens, "estimated": int(rec.estimated),
+                              "cost_usd": rec.cost_usd, "cost_source": rec.cost_source}, rec.lane, rec.at,
+                             job_id=rec.job_id)
+
     def _run_job(self, store: WorldStore, kind: str, payload: dict[str, Any]) -> None:
+        conv = payload.get("conv_id") if isinstance(payload, dict) else None
+        with llm_usage.attribute(task="diary" if kind == diary.JOB else "extract", store=store,
+                                 conv_id=conv if isinstance(conv, int) else None):
+            self._run_job_inner(store, kind, payload)
+
+    def _run_job_inner(self, store: WorldStore, kind: str, payload: dict[str, Any]) -> None:
         if kind == diary.JOB:
             if self.complete is None:
                 raise RuntimeError("no LLM attached for the diary")

@@ -209,9 +209,12 @@ class GroupTurn:
                 before = len(turn_queue.spoken)
                 started = time.perf_counter()
                 status, error = "ok", None
+                usage: list = []
                 try:
-                    asyncio.run(chat_manager.process_response(speaker, turn_queue, thread, speaker_view(characters, speaker),
-                                                              actions, tools, game))
+                    with self.living_world.usage_for(speaker) as usage:   # AI cost logging
+                        asyncio.run(chat_manager.process_response(speaker, turn_queue, thread,
+                                                                  speaker_view(characters, speaker),
+                                                                  actions, tools, game))
                 except Exception as e:  # process_response handles its own API errors; this is a safety net
                     status, error = "error", str(e)
                     logger.exception(f"Living World: turn for {speaker.name} failed")
@@ -219,7 +222,7 @@ class GroupTurn:
                 said = " ".join(s.text.strip() for s in turn_queue.spoken[before:]
                                 if s.speaker.name == speaker.name and s.text.strip())
                 self._clear_false_discard(chat_manager, npcs)
-                self.living_world.record_dialogue_call(chat_manager, speaker, latency, status, error)
+                self.living_world.record_dialogue_call(chat_manager, speaker, latency, status, error, usage)
                 if said:
                     this_turn.append((speaker.name, said))
                     spoken = {n for n, _ in this_turn}
