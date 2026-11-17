@@ -1066,3 +1066,16 @@ What grows: every timeline-scoped view re-walks the active save's chain of reloa
 `v_relationship` re-adds all relationship changes on each read. After a long jump in game time, hygiene catch-up
 (`hygiene/model.py`: `next_bath_due` calls `state`, which re-reads every hygiene change, every quarter day) cost
 1.6 s at x50 and did not settle at x200.
+
+## Mic capture layer (`livingworld/audio/`, `MANTELLA_LW_AUDIO_V2=1`)
+
+Off by default. When on, `src/stt/stt.py` takes its microphone audio from `AudioCapture` instead of opening its own 16 kHz stream, so the same microphone signal can feed two paths on one sample clock:
+
+- **Analysis path**: native rate (48 kHz for the Steam Streaming Microphone), DC removal and one fixed gain from the mic profile. Nothing else touches it.
+- **Speech-to-text path**: the same signal resampled to 16 kHz, then only the filters the mic profile lists (none by default), then a soft limiter that acts above 0.9 of full scale. It reaches Mantella's existing speech detector and Moonshine/Whisper as 512-sample blocks, exactly the shape they got before.
+
+The device, fixed gain and filters come from the active profile in `Documents\My Games\Mantella\data\audio\mic_profiles.json`, which the calibration page (`python -m tools.voice_lab`, `/calibrate`) writes. `MANTELLA_LW_AUDIO_DEVICE=<name>` captures a different input by name. No profile: the Windows default mic at 0 dB with no filters, a warning in the log, and the analysis signal marked as unverified. If the capture layer can't open the device, Mantella falls back to its own stream.
+
+**Handoff.** `livingworld.audio.handoff.subscribe(fn)` calls `fn(UtteranceAudio)` for each finished player utterance, on a separate thread, before speech-to-text runs. An `UtteranceAudio` carries an id, wall-clock start and end, both audio arrays (analysis at native rate, speech-to-text at 16 kHz), the capture-clock sample range, the speech detector's probability per 32 ms block, the capture mode (`vad`, `proactive` or `ptt`), whether the listen timeout ended it, the pause threshold used, a `transcript` future, whether an NPC voice line overlapped (`None` until the first NPC line), and a mic snapshot (device, gain, noise floor, SNR, clipped samples, `analysis_clean`). Proactive mode gives one final utterance per turn. Typed lines give none. Consumers should copy and enqueue; nothing is written to disk and the arrays are dropped when the last consumer returns. With no subscribers nothing is copied.
+
+Also in this change, whatever the flag: the saved mic WAV and the Whisper upload clamp samples before the int16 conversion instead of wrapping.
