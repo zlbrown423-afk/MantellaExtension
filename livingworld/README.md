@@ -225,6 +225,27 @@ No AI call. Migration `009_reputation.sql`.
 | Player hints | `social/hints.py`, `player_notice` | Balanced: at most one hint per conversation start, only about the player or someone they have talked to 3+ times, as hearsay naming who was talking, so the player knows whom to ask ("You overhear Hilde talking about Hod."). Informative: up to 3 with names ("Hod has heard that you helped Gerdur."), plus what the place makes of you in the first conversation after a load. Never about something the player saw; each claim once; shown as notifications with the first NPC line (`mantella_lw_hints`). What the player overhears is stored as their own `knowledge` (`overheard`), which no NPC reads |
 | Game side | Mantella-Spell `MantellaRepository.psc` (LIVINGWORLD PATCH: reputation) | Gift (`OnItemRemoved` to an actor, not in barter or container menus, merged per person for 10 s), theft (`OnTrackedStatsEvent` "Items Stolen"/"Pockets Picked" paired with the last `OnItemAdded`), hit ("Assaults" count, or a conversation NPC's `OnHit`; once per person per 15 s) |
 
+### Who knows what (read-only inspection tool)
+
+Answers "why did Hilde say that?" without reading SQLite by hand. It reads the same views the prompts use
+(`v_known_facts`, `v_claim_knowledge`, `v_visible_memory`, `v_belief`, `v_name_known`) on the active save
+timeline, and says how each item was learned: seen, told by whom (and how many retellings from the
+witness), overheard, worked out, planted by hand, with the line of dialogue it came from.
+
+```
+python -m livingworld.social.who_knows --db World.sqlite summary          # counts, who knows most, most-spread claims
+python -m livingworld.social.who_knows --db World.sqlite npc Hilde        # everything Hilde knows, and how
+python -m livingworld.social.who_knows --db World.sqlite about Hod        # everyone who knows something about Hod
+python -m livingworld.social.who_knows --db World.sqlite claim 12         # is it true, and who told whom
+python -m livingworld.social.who_knows --db World.sqlite search flirt --npc Hilde
+```
+
+Names: exact or part of a name (any case), `#12` for an id, or `player`. Options: `--timeline N` (look at
+another save timeline), `--json`, `--limit N`. The world file is opened read-only only long enough to copy
+it into memory; every query runs on that copy, so it never writes to the world (a test checks the file's
+bytes) and is safe while Mantella runs, though a copy of the database is still the recommended input. The
+server never imports it (a test enforces that).
+
 ## Romance between NPCs (R1: off screen)
 
 Off unless you set `MANTELLA_LW_ROMANCE=1` (on top of `MANTELLA_LIVING_WORLD=1`). No AI call and no animation:
