@@ -17,6 +17,7 @@ from src.llm.messages import AssistantMessage, SystemMessage, UserMessage
 from src.conversation.context import Context
 from src.llm.message_thread import message_thread
 from livingworld.perf.turn_timeline import TURN, TRANSCRIPT # LIVINGWORLD PATCH: turn timing
+from livingworld.audio.handoff import note_npc_speech # LIVINGWORLD PATCH: mic overlap flag
 from src.conversation.conversation_type import conversation_type, multi_npc, pc_to_npc, radiant
 from src.character_manager import Character
 from src.http.communication_constants import communication_constants as comm_consts
@@ -178,6 +179,7 @@ class Conversation:
                 time.sleep(0.01)
             self.last_sentence_audio_length = next_sentence.voice_line_duration + self.__context.config.wait_time_buffer
             self.last_sentence_start_time = time.time()
+            note_npc_speech(next_sentence.voice_line_duration, self.last_sentence_start_time) # LIVINGWORLD PATCH: mic overlap flag
             return comm_consts.KEY_REPLYTYPE_NPCTALK, next_sentence
         else:
             # Check if end conversation was requested via tool call

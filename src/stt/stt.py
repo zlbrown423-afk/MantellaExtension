@@ -15,6 +15,7 @@ from datetime import datetime
 import queue
 import threading
 from livingworld.perf.turn_timeline import TURN, SPEECH, PAUSE # LIVINGWORLD PATCH: turn timing
+from livingworld.audio import settings as lw_audio # LIVINGWORLD PATCH: mic capture layer (MANTELLA_LW_AUDIO_V2)
 import time
 import os
 import wave
@@ -138,6 +139,8 @@ class Transcriber:
         self._audio_buffer = np.array([], dtype=np.float32)
         self._audio_queue = queue.Queue()
         self._stream: Optional[InputStream] = None
+        self._save_folder = config.save_folder
+        self._v2 = None   # LIVINGWORLD PATCH: AudioV2Session while the capture layer is on
         
         # Threading and synchronization
         self._lock = threading.Lock()
@@ -265,7 +268,7 @@ If you would prefer to run speech-to-text locally, please ensure the `Speech-to-
         
         # Server versions of Whisper require the audio data to be a file type
         audio_file = io.BytesIO()
-        audio_int16 = (audio * 32767).astype(np.int16)
+        audio_int16 = (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16)  # LIVINGWORLD PATCH: clamp, no wrap-around
         with wave.open(audio_file, 'wb') as wf:
             wf.setnchannels(1)  # Mono audio
             wf.setsampwidth(2)  # 16-bit audio
@@ -344,16 +347,19 @@ If you would prefer to run speech-to-text locally, please ensure the `Speech-to-
         self.prompt = prompt
         
         # Start audio stream
-        from sounddevice import InputStream
-        self._stream = InputStream(
-            samplerate=self.SAMPLING_RATE,
-            channels=1,
-            blocksize=self.CHUNK_SIZE,
-            dtype=np.float32,
-            callback=self._create_input_callback(self._audio_queue),
-            latency = 'low'
-        )
-        self._stream.start()
+        if lw_audio.enabled() and self._start_audio_v2():  # LIVINGWORLD PATCH: capture layer, falls back to the stream below
+            pass
+        else:
+            from sounddevice import InputStream
+            self._stream = InputStream(
+                samplerate=self.SAMPLING_RATE,
+                channels=1,
+                blocksize=self.CHUNK_SIZE,
+                dtype=np.float32,
+                callback=self._create_input_callback(self._audio_queue),
+                latency = 'low'
+            )
+            self._stream.start()
         
         # Start processing thread
         self._processing_thread = threading.Thread(
@@ -363,6 +369,19 @@ If you would prefer to run speech-to-text locally, please ensure the `Speech-to-
         self._processing_thread.start()
         logger.log(self.loglevel, 'Listening...')
 
+
+    def _start_audio_v2(self) -> bool:
+        """LIVINGWORLD PATCH: open the two-path capture layer. Any failure leaves Mantella's own stream to be used."""
+        try:
+            from livingworld.audio.session import AudioV2Session
+            session = AudioV2Session(self._save_folder, max_utterance_s=max(30.0, float(self.listen_timeout)))
+            if session.start(lambda block: self._audio_queue.put((block, 0))):
+                self._v2 = session
+                return True
+        except Exception as e:
+            logger.warning(f'Audio capture layer could not start, using the standard microphone stream: {e}')
+        self._v2 = None
+        return False
 
     def _process_audio(self) -> None:
         """Process audio data in a separate thread."""
@@ -378,6 +397,8 @@ If you would prefer to run speech-to-text locally, please ensure the `Speech-to-
                     self.__processing_audio_error_count += 1
                     continue
 
+                if self._v2 is not None:  # LIVINGWORLD PATCH: count blocks on the capture clock
+                    self._v2.on_chunk()
                 with self._lock:
                     if self.ptt_enabled:
                         self._process_ptt_chunk(chunk)
@@ -395,7 +416,7 @@ If you would prefer to run speech-to-text locally, please ensure the `Speech-to-
                 time.sleep(0.1)
 
 
-    def _finalize_transcription(self, *, transcribe: bool = True, save: bool = True) -> None:
+    def _finalize_transcription(self, *, transcribe: bool = True, save: bool = True, timed_out: bool = False) -> None:
         """Transcribe buffered audio, signal readiness, and reset state.
 
         Must be called while holding ``self._lock``.
@@ -403,14 +424,24 @@ If you would prefer to run speech-to-text locally, please ensure the `Speech-to-
         Args:
             transcribe: Whether to run transcription on the current buffer.
             save: Whether to save the audio buffer to disk (if ``save_mic_input`` also set).
+            timed_out: Whether the listen timeout ended this utterance (passed on to audio subscribers).
         """
         TURN.mark(PAUSE) # LIVINGWORLD PATCH: turn timing
-        if transcribe and len(self._audio_buffer) > 0:
-            transcription_start_time = time.time()
-            self._current_transcription = self._transcribe(self._audio_buffer)
-            logger.log(self.loglevel, f'STT took {round(time.time() - transcription_start_time, 5)} seconds to transcribe')
-        if save and self.__save_mic_input and len(self._audio_buffer) > 0:
-            self._save_audio(self._audio_buffer)
+        transcript_future = None
+        if self._v2 is not None:  # LIVINGWORLD PATCH: hand the utterance's audio to subscribers before STT runs
+            mode = 'ptt' if self.ptt_enabled else ('proactive' if self.proactive_mic_mode else 'vad')
+            pause = self._temporary_pause_override if self._temporary_pause_override is not None else self.pause_threshold
+            transcript_future = self._v2.publish(self._audio_buffer, mode, timed_out, None if self.ptt_enabled else pause)
+        try:
+            if transcribe and len(self._audio_buffer) > 0:
+                transcription_start_time = time.time()
+                self._current_transcription = self._transcribe(self._audio_buffer)
+                logger.log(self.loglevel, f'STT took {round(time.time() - transcription_start_time, 5)} seconds to transcribe')
+            if save and self.__save_mic_input and len(self._audio_buffer) > 0:
+                self._save_audio(self._audio_buffer)
+        finally:
+            if transcript_future is not None:  # LIVINGWORLD PATCH: subscribers always get an answer, even if STT failed
+                transcript_future.set_result(self._current_transcription or '')
         self._transcription_ready.set()
         # capture whether a transcription is pending, since _reset_state clears the speech flags
         has_transcription = bool(self._current_transcription and self._current_transcription.strip())
@@ -454,7 +485,7 @@ If you would prefer to run speech-to-text locally, please ensure the `Speech-to-
         # Timeout guard: prevent unbounded buffering from a stuck key
         if self._ptt_active and (len(self._audio_buffer) / self.SAMPLING_RATE) > self.listen_timeout:
             logger.warning(f'PTT timeout of {self.listen_timeout} seconds reached. Processing mic input...')
-            self._finalize_transcription()
+            self._finalize_transcription(timed_out=True)
 
 
     def _process_vad_chunk(self, chunk: np.ndarray, lookback_size: int, chunk_count: int) -> int:
@@ -478,6 +509,8 @@ If you would prefer to run speech-to-text locally, please ensure the `Speech-to-
 
         # Process with VAD
         probability = self.vad.process(chunk)
+        if self._v2 is not None:  # LIVINGWORLD PATCH
+            self._v2.on_vad_prob(probability)
 
         if probability > self.audio_threshold:
             self._last_update_time = time.time()
@@ -500,7 +533,7 @@ If you would prefer to run speech-to-text locally, please ensure the `Speech-to-
         # Check for maximum speech duration
         if (len(self._audio_buffer) / self.SAMPLING_RATE) > self.listen_timeout:
             logger.warning(f'Listen timeout of {self.listen_timeout} seconds reached. Processing mic input...')
-            self._finalize_transcription(save=False)
+            self._finalize_transcription(save=False, timed_out=True)
             return chunk_count
 
         # Periodic proactive transcription update
@@ -553,7 +586,7 @@ If you would prefer to run speech-to-text locally, please ensure the `Speech-to-
             wf.setsampwidth(2)  # 16-bit audio
             wf.setframerate(self.SAMPLING_RATE)
             # Convert float32 to int16
-            audio_int16 = (audio * 32767).astype(np.int16)
+            audio_int16 = (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16)  # LIVINGWORLD PATCH: clamp, no wrap-around
             wf.writeframes(audio_int16.tobytes())
 
 
@@ -637,10 +670,14 @@ If you would prefer to run speech-to-text locally, please ensure the `Speech-to-
             self._stream.close()
             self._stream = None
         
+        if self._v2 is not None:  # LIVINGWORLD PATCH: stop capture first; the session is dropped after the thread ends
+            self._v2.stop()
+
         # Wait for processing thread to finish
         if self._processing_thread:
             self._processing_thread.join()  # timeout=1.0 Add timeout to prevent hanging
             self._processing_thread = None
+        self._v2 = None  # LIVINGWORLD PATCH
         
         # Clear queue
         while not self._audio_queue.empty():
