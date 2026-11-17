@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from importlib import resources
 from typing import Iterator
 
-from livingworld.store import migration_backup
+from livingworld.store import fading, migration_backup
 from livingworld.store.migration_backup import MigrationBackupError, MigrationFailed  # noqa: F401  (re-exported)
 
 MIGRATIONS_PACKAGE = "livingworld.store.migrations"
@@ -48,6 +48,8 @@ class WorldStore:
             self._conn.execute("PRAGMA journal_mode = WAL")
             self._conn.execute("PRAGMA synchronous = NORMAL")
         self.migrate()
+        with self._lock:
+            fading.apply_setting(self._conn)
 
     @classmethod
     def for_world(cls, save_folder: str, world_id: str) -> "WorldStore":
