@@ -248,6 +248,27 @@ and fresh changes never bring old faded ones back.
 | Speed | index `relationship_change_pair` | Reading one pair now uses an index instead of scanning every change in the world |
 | Children | | Living World keeps no relationship rows for children, so nothing here touches them |
 
+### Who knows what (read-only inspection tool)
+
+Answers "why did Hilde say that?" without reading SQLite by hand. It reads the same views the prompts use
+(`v_known_facts`, `v_claim_knowledge`, `v_visible_memory`, `v_belief`, `v_name_known`) on the active save
+timeline, and says how each item was learned: seen, told by whom (and how many retellings from the
+witness), overheard, worked out, planted by hand, with the line of dialogue it came from.
+
+```
+python -m livingworld.social.who_knows --db World.sqlite summary          # counts, who knows most, most-spread claims
+python -m livingworld.social.who_knows --db World.sqlite npc Hilde        # everything Hilde knows, and how
+python -m livingworld.social.who_knows --db World.sqlite about Hod        # everyone who knows something about Hod
+python -m livingworld.social.who_knows --db World.sqlite claim 12         # is it true, and who told whom
+python -m livingworld.social.who_knows --db World.sqlite search flirt --npc Hilde
+```
+
+Names: exact or part of a name (any case), `#12` for an id, or `player`. Options: `--timeline N` (look at
+another save timeline), `--json`, `--limit N`. The world file is opened read-only only long enough to copy
+it into memory; every query runs on that copy, so it never writes to the world (a test checks the file's
+bytes) and is safe while Mantella runs, though a copy of the database is still the recommended input. The
+server never imports it (a test enforces that).
+
 ## Romance between NPCs (R1: off screen)
 
 Off unless you set `MANTELLA_LW_ROMANCE=1` (on top of `MANTELLA_LIVING_WORLD=1`). No AI call and no animation:
