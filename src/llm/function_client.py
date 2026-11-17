@@ -14,6 +14,7 @@ logger = utils.get_logger()
 class FunctionClient(ClientBase):
     '''LLM class to handle function calling / actions
     '''
+    _usage_task = "tools"  # LIVINGWORLD PATCH: AI cost logging
     @utils.time_it
     def __init__(self, config: ConfigLoader) -> None:
         self.__config = config

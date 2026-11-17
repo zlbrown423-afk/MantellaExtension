@@ -18,6 +18,7 @@ from src.telemetry.telemetry import create_span_from_thread
 from src.actions.function_manager import FunctionManager
 from src.llm.claude_cache_connector import ClaudeCacheConnector
 from livingworld.perf.stats import STATS as PERF  # LIVINGWORLD PATCH: performance counters
+from livingworld.perf import llm_usage  # LIVINGWORLD PATCH: AI cost logging
 
 logger = utils.get_logger()
 
@@ -38,6 +39,8 @@ class ClientBase(AIClient):
     api_token_limits = {}
     tiktoken_cache_dir = "data"
     os.environ["TIKTOKEN_CACHE_DIR"] = tiktoken_cache_dir
+
+    _usage_task: str = "request"  # LIVINGWORLD PATCH: what one-shot calls of this client are for (AI cost logging)
 
     def __init__(self, api_url: str, llm: str, llm_params: dict[str, Any] | None, custom_token_count: int, prompt_caching_enabled: bool = False) -> None:
         '''
@@ -199,17 +202,25 @@ class ClientBase(AIClient):
                 except Exception as e:
                     logger.debug(f"Claude caching transform failed: {e}")
 
+            started = time.perf_counter()  # LIVINGWORLD PATCH: AI cost logging (status, latency, usage)
+            call_status, call_error = "ok", None
             try:
                 chat_completion = sync_client.chat.completions.create(
                     model=self.model_name,
                     messages=openai_messages,
-                    **request_params,
+                    **llm_usage.merge_extras(request_params, llm_usage.request_extras(getattr(self, "_base_url", ""), False)),
                 )
-            except RateLimitError:
+            except RateLimitError as e:
+                call_status, call_error = "rate_limited", str(e)
                 logger.warning('Could not connect to LLM API, retrying in 5 seconds...')
                 time.sleep(5)
+            except Exception as e:
+                call_status, call_error = "error", str(e)
+                raise
             finally:
                 sync_client.close()
+                self._record_usage(llm_usage.task_for(self._usage_task), chat_completion, started, call_status,
+                                   call_error, messages)
 
             return chat_completion
 
@@ -252,19 +263,31 @@ class ClientBase(AIClient):
         request_params.update(params or {})
         attempts = [dict(request_params, response_format={"type": "json_object"}), request_params] if json_mode \
             else [request_params]
+        task = llm_usage.task_for("extract")
         with PERF.llm_call("request"):
             for i, attempt in enumerate(attempts):
                 sync_client = self.generate_sync_client()
+                started = time.perf_counter()
+                chat_completion = None
                 try:
                     chat_completion = sync_client.chat.completions.create(
-                        model=self.model_name, messages=openai_messages, **attempt)
+                        model=self.model_name, messages=openai_messages,
+                        **llm_usage.merge_extras(attempt, llm_usage.request_extras(getattr(self, "_base_url", ""), False)))
                 except BadRequestError as e:
                     if i + 1 < len(attempts):   # the service does not take JSON mode: ask again without it
                         logger.log(23, f"Living World: JSON mode refused ({e}); asking without it")
                         continue
+                    self._record_usage(task, None, started, "error", str(e), messages)
+                    raise
+                except RateLimitError as e:
+                    self._record_usage(task, None, started, "rate_limited", str(e), messages)
+                    raise
+                except Exception as e:
+                    self._record_usage(task, None, started, "error", str(e), messages)
                     raise
                 finally:
                     sync_client.close()
+                self._record_usage(task, chat_completion, started, "ok", None, messages)
                 if chat_completion and chat_completion.choices and chat_completion.choices[0].message.content:
                     choice = chat_completion.choices[0]
                     if getattr(choice, "finish_reason", None) == "length":
@@ -286,6 +309,12 @@ class ClientBase(AIClient):
                     request_params: dict[str, Any] = {}
                 if is_multi_npc: # override max_tokens to be at least 250 in radiant / multi-NPC conversations
                     request_params["max_tokens"] = max(self.max_tokens_param, 250)
+                # LIVINGWORLD PATCH: AI cost logging. The usage arrives in the last chunk when the service sends it.
+                usage_seen: Any = None
+                reply_parts: list[str] = []
+                call_status, call_error = "ok", None
+                stream_started = time.perf_counter()
+                async_client = None
                 try:
                     # Prepare the messages including the image if provided
                     vision_hints = ''
@@ -339,14 +368,17 @@ class ClientBase(AIClient):
                         model=self.model_name, 
                         messages=openai_messages, 
                         stream=True,
-                        **request_params,
+                        **llm_usage.merge_extras(request_params, llm_usage.request_extras(getattr(self, "_base_url", ""), True)),
                     ):
                         try:
+                            if chunk is not None and getattr(chunk, "usage", None):  # LIVINGWORLD PATCH
+                                usage_seen = chunk.usage
                             if chunk and chunk.choices and chunk.choices[0].delta:
                                 delta = chunk.choices[0].delta
                                 
                                 # Handle regular content
                                 if delta.content:
+                                    reply_parts.append(delta.content)  # LIVINGWORLD PATCH
                                     yield ("content", delta.content)
                                 
                                 # Accumulate tool calls by index
@@ -380,6 +412,7 @@ class ClientBase(AIClient):
                         tool_calls_list = [accumulated_tool_calls[i] for i in sorted(accumulated_tool_calls.keys())]
                         yield ("tool_calls", tool_calls_list)
                 except Exception as e:
+                    call_status, call_error = ("rate_limited" if isinstance(e, RateLimitError) else "error"), str(e)  # LIVINGWORLD PATCH
                     utils.play_error_sound()
                     if isinstance(e, APIConnectionError):
                         if e.code in [401, 'invalid_api_key']: # incorrect API key
@@ -398,8 +431,29 @@ class ClientBase(AIClient):
                     else:
                         logger.error(f"LLM API Streaming Error: {e}")
                 finally:
+                    self._record_usage("dialogue", None, stream_started, call_status, call_error, messages,  # LIVINGWORLD PATCH
+                                       usage=usage_seen, reply="".join(reply_parts))
                     if async_client:
                         await async_client.close()
+
+    # LIVINGWORLD PATCH: AI cost logging. One record per call; never raises.
+    def _record_usage(self, task: str, completion: Any, started: float, status: str, error: str | None,
+                      messages: Any, usage: Any = None, reply: str | None = None) -> None:
+        try:
+            if usage is None and completion is not None:
+                usage = getattr(completion, "usage", None)
+            if reply is None and completion is not None and getattr(completion, "choices", None):
+                reply = getattr(completion.choices[0].message, "content", None) or ""
+
+            def estimate() -> tuple[int | None, int | None]:
+                return self.get_count_tokens(messages), (self.get_count_tokens(reply) if reply else 0)
+
+            llm_usage.record_call(task=task, model=getattr(self, "_model_name", "unknown"), usage=usage,
+                                  latency_ms=int((time.perf_counter() - started) * 1000), status=status,
+                                  error=error, local=bool(getattr(self, "_is_local", False)),
+                                  estimate=estimate)
+        except Exception:
+            logger.debug("Living World: could not record AI usage", exc_info=True)
 
 
     @classmethod

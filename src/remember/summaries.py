@@ -8,6 +8,7 @@ from src.games.gameable import Gameable
 from src.llm.client_base import ClientBase
 from src.llm.llm_client import LLMClient
 from src.llm.summary_client import SummaryLLMClient
+from livingworld.perf import llm_usage  # LIVINGWORLD PATCH: AI cost logging
 from src.llm.message_thread import message_thread
 from src.llm.messages import UserMessage, AssistantMessage
 from src.characters_manager import Characters
@@ -438,7 +439,8 @@ class Summaries(Remembering):
             logger.log(23, f'Summary prompt sent to LLM: {prompt.strip()}')
             messages = message_thread(self.__config, prompt)
             messages.add_message(UserMessage(self.__config, text_to_summarize))
-            summary = self.__client.request_call(messages)
+            with llm_usage.attribute(task="summary"):  # LIVINGWORLD PATCH: AI cost logging
+                summary = self.__client.request_call(messages)
             if not summary:
                 logger.error(f"Summarizing conversation failed.")
                 return ""

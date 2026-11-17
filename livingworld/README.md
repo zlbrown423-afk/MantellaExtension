@@ -395,7 +395,7 @@ after a test hold.
 | File | Change |
 | --- | --- |
 | `src/http/routes/mantella_route.py` | Optional traffic recording (does nothing unless `MANTELLA_RECORD_TRAFFIC` is set); request timing for the performance monitor; the diary read request, answered outside the conversation lock |
-| `src/llm/client_base.py` | Counts LLM calls waiting or in flight for the performance monitor |
+| `src/llm/client_base.py` | Counts LLM calls waiting or in flight for the performance monitor; records each call's tokens and cost (AI cost logging) |
 | `src/actions/function_manager.py` | Also loads `livingworld/actions/*.json` (does nothing unless `MANTELLA_LIVING_WORLD` is set) |
 | `tests/conftest.py` | Registers the `baseline_behaviour` test marker |
 | `src/output_manager.py` | Hands each turn to the Living World when it is on (group turns), refuses synthesis in the wrong voice, keeps the "generating" flag up across a multi-speaker turn, and cuts mood tags out of the streamed reply |
@@ -913,6 +913,42 @@ is not shown after the load when it ended after the save (the copied lines cover
    without greeting you and without knowing what you said after the save.
 2. Same, but load the save straight after saving: still picked back up; the log says "its lines shown, not copied".
 3. Load such a save, then cast the Mantella spell on someone else within a couple of seconds: no restart.
+
+## AI cost logging: what each AI call costs
+
+On unless you set `MANTELLA_LW_COST_LOG=0`. Every LLM call Mantella makes is recorded with its model, tokens and
+cost: NPC replies (`dialogue`), the tool-calling model (`tools`), vision (`vision`), Mantella's conversation
+summaries (`summary`), memory extraction (`extract`) and diaries (`diary`). `dialogue`, `tools` and `vision` are
+the **foreground** lane (the player waits for them); the rest are **background**. With the Living World on
+(`MANTELLA_LIVING_WORLD=1`) the records go to the world database's `llm_request` table: the row each NPC reply
+already had now carries its tokens and cost, and every other call gets a row of its own (migration 024 added
+`lane`, `cached_tokens`, `estimated` and `cost_source`).
+
+Where the cost comes from (`cost_source`):
+
+| Source | When |
+| --- | --- |
+| `reported` | OpenRouter said what it charged (the server asks for it with `usage: {include: true}`) |
+| `free` / `local` | a `:free` model, or a model on this PC: $0 |
+| `priced` | tokens times the price table in `perf/llm_usage.py`; add or correct prices with `set MANTELLA_LW_PRICES=C:\path\prices.json` holding `{"model id": [input $/M, output $/M]}` |
+| `unknown` | none of the above: stored as $0, tokens kept, listed apart in the summary |
+
+When a service sends no token counts (only OpenAI and OpenRouter are asked to; a local server could refuse the
+extra field) they are counted locally with tiktoken and the row has `estimated = 1`. A reply cut off before its
+end is still recorded.
+
+**Summary:** `python -m livingworld.perf.costs "<save folder>\data\livingworld" --days 7` (or one world's
+`.sqlite`). It opens the database read-only, so it is safe while playing, and prints the total, foreground against
+background, by model, by task, by day, the NPCs whose replies cost most, and calls with no known price. It counts
+every row whatever save it was made on: the money is spent either way. The server log also gets one line at the
+end of each conversation: `Living World: conversation 41 AI cost $0.0031 (7 calls, 18240 tokens). AI cost this
+session: ...`.
+
+Code: `perf/llm_usage.py` (records, prices, ledger), `perf/costs.py` (summary), `integration.py`
+(`record_dialogue_call`, `_store_usage`, `_run_job`). Upstream patches (marked `LIVINGWORLD PATCH: AI cost
+logging`): `src/llm/client_base.py` (records every call; asks OpenAI/OpenRouter for usage),
+`src/llm/function_client.py` and `src/llm/image_client.py` (their task names), `src/remember/summaries.py`
+(summary calls named `summary`).
 
 ## Turn timing: where the wait between exchanges goes
 
