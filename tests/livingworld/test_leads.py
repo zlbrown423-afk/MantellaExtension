@@ -128,3 +128,11 @@ def test_switched_off(tmp_path, monkeypatch):
         s.say("Have you seen the man I'm looking for?")
         assert "they mean" not in llm.dialogue_calls[-1].last_user_text
         assert LivingWorld.latest.store.scalar("SELECT COUNT(*) FROM player_lead") == 0
+
+
+def test_everyday_words_opening_a_sentence_are_not_leads():
+    """2026-11-17 play log: "How are things at the temple?" -> "Things at the temple have been busy" made 'Things'
+    a person the player was looking for."""
+    assert leads.from_reply("Training is going great. How are things at the temple?",
+                            "I'm glad! Things at the temple have been busy, but fulfilling.", ["Ahlam"]) == []
+    assert leads.from_reply("How is everything?", "Everything is fine. Nothing to report.") == []

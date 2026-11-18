@@ -352,7 +352,7 @@ def test_a_theft_is_handed_out_dealt_with_and_the_arrest_gets_around(tmp_path):
     assert "Trouble: catch the cutpurse" in " ".join(talk.hints)
     task = duties(tmp_path)[-1]
     assert task["template"].startswith("duty:incident:market_theft:")
-    talk(tmp_path, DAY + 0.02, npcs=[whiterun_guard()])                 # asking around in the market
+    talk(tmp_path, DAY + 0.02, say="debug guard seen", npcs=[whiterun_guard()])   # the inquiry solved (see test_guard_inquiry)
     talk(tmp_path, DAY + 0.03, say="Reporting back, I caught the thief.")  # no half-shift wait for trouble
     assert duties(tmp_path)[-1]["state"] == "completed"
     db = open_db(tmp_path)

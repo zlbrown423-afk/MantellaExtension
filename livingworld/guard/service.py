@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from livingworld.guard import arrest as AR, banter as BT, debug as D, duty as DU, encounter as ENC, incident as INC, reports as RP, training as TR, orgs as O, peace as PEACE, promotion as PR, prompts as P, profiles, recruit as R, store as S
+from livingworld.guard import arrest as AR, banter as BT, debug as D, duty as DU, encounter as ENC, incident as INC, inquiry as INQ, reports as RP, training as TR, orgs as O, peace as PEACE, promotion as PR, prompts as P, profiles, recruit as R, store as S
 from livingworld.guard.profiles import GuardFacts
 from livingworld.dialogue.private_notes import PrivateNote
 from livingworld.social import claims, processor
@@ -22,6 +22,7 @@ REPORT = "mantella_lw_guard_report"
 PAY = "mantella_lw_guard_pay"
 ACTIONS = (ENLIST, REPORT, PAY)
 INVITE_GAP_DAYS = 7.0
+ENDED_TALK_DAYS = 30.0     # how long the guard still brings up a dismissal or a discharge
 
 
 @dataclass
@@ -90,6 +91,7 @@ class Guard:
         self._worded_report = False            # a report was filed from the player's words on their latest line
         self._heckler: tuple[int, str] | None = None   # banter: the bully heckling the player this conversation (npc, via)
         self._banter: dict[int, list[str]] = {}        # banter lines given this conversation, by npc_id
+        self._caught: tuple[int, str] | None = None      # inquiry: (task, place) the thief was cornered this conversation
 
     def take_notices(self) -> list[str]:
         out, self.notices = self.notices, []
@@ -170,6 +172,7 @@ class Guard:
             out.append(enc_line)
         out += self._prisoner_lines(db, npc_id, name, scene)
         out += self._complaint_lines(db, npc_id, name, scene)
+        out += self._inquiry_lines(db, npc_id, name, scene)
         if p is None:
             return out
         org = O.by_key(p.org_key)
@@ -191,6 +194,11 @@ class Guard:
             if other is not None:
                 out.append(P.other_org_line(name, player, other, svc))
             return out
+        gone = S.ended(db, scene.player_id, org.key) if scene.player_id is not None else None
+        if gone is not None and scene.now - gone[1]["gt"] <= ENDED_TALK_DAYS:
+            by = gone[1]["by"]
+            out.append(P.ended_line(name, player, org, gone[1], scene.now, by_me=by == npc_id,
+                                    by_name=self._name(db, by) if by is not None else None))
         d = self._decide(db, org, npc_id, scene)
         recruiters = [x.name for x in org.leaders if x.recruits]
         out += P.recruit_lines(name, player, d, recruiters, p.recruits, self._thane(db, org, scene))
@@ -218,6 +226,28 @@ class Guard:
                                         player_dealt=mine and c.state != "open",
                                         guard=org.name if org else "the guard",
                                         ago=time_ago(scene.now - inc.opened_gt)))
+        return out
+
+    def _inquiry_lines(self, db, npc_id: int, name: str, scene: Scene) -> list[str]:
+        """A market witness remembers what they saw of a theft; the people where the thief was cornered saw it."""
+        out = []
+        for inc in INC.witnessed_by(db, name, scene.now):
+            if INC.person_id(db, name) not in (None, npc_id):
+                continue                            # someone else of the same name
+            clue = next(c for w, c in inc.witnesses if w.casefold() == name.casefold())
+            if INC.remember_seen(db, inc, npc_id, clue):
+                logger.log(23, f"Living World guard: {name} now remembers witnessing incident {inc.event_id}")
+            org = O.by_key(inc.org_key)
+            taker = INC._taker(db, inc.event_id)
+            out.append(INQ.witness_line(name, scene.player_name, inc, clue,
+                                        player_on_it=taker is not None and taker == scene.player_id,
+                                        guard=org.name if org else "the guard"))
+        if self._caught is not None and npc_id != scene.player_id:
+            task = T.get(db, self._caught[0])
+            d = DU.duty_for(db, task) if task is not None else None
+            inc = INC.get(db, d.incident_id) if d is not None and d.incident_id is not None else None
+            if inc is not None:
+                out.append(INQ.caught_line(name, scene.player_name, inc, self._caught[1]))
         return out
 
     def _prisoner_lines(self, db, npc_id: int, name: str, scene: Scene) -> list[str]:
@@ -291,6 +321,14 @@ class Guard:
                 if DU.done_count(db, task, d) == 0:
                     if d.need == "fight" and d.training:
                         missing = "no fist bout yet: ask a fellow guard for one and fight it out"
+                    elif d.need == "fight" and DU.fought_elsewhere(db, svc.member_id, task, d):
+                        places = ", ".join(DU.fought_elsewhere(db, svc.member_id, task, d))
+                        logger.log(23, f"Living World guard: report on duty {task.task_id} by word, wrong place: {places}")
+                        self._worded_report = True
+                        return [PrivateNote(P.report_note(name, scene.player_name, title, "wrong_place", False, places),
+                                            boss)]
+                    elif d.need == INQ.NEED:
+                        missing = INQ.missing(db, task, d, scene.player_name)
                     elif d.need == "fight":
                         missing = (f"no fight on record yet: the guard only knows of a fight at "
                                    f"{', '.join(d.where) or 'the place'}"
@@ -306,6 +344,8 @@ class Guard:
         self._worded_report = True     # a ReportDuty in the reply to this line would report the NEXT duty
         logger.log(23, f"Living World guard: report by word to {name}: {result}")
         r = self.filed
+        if r is not None and r.task is not None and r.outcome == "wrong_place":
+            return [PrivateNote(P.report_note(name, scene.player_name, title, "wrong_place", False, r.places), boss)]
         if r is None or r.task is None or r.outcome != "done":
             return []
         notes = [PrivateNote(P.report_note(name, scene.player_name, title, "done", r.trained, None), boss)]
@@ -604,6 +644,7 @@ class Guard:
         self.spar_partners = set()
         self._heckler = None
         self._banter = {}
+        self._caught = None
         with self.store.transaction() as db:
             svc = S.current(db, scene.player_id) if scene.player_id is not None else None
             org = O.by_key(svc.org_key) if svc else None
@@ -637,6 +678,20 @@ class Guard:
                         self.notices.append(f"On duty: seen at your post ({scene.location}).")
             held = DU.in_hand(db, svc.member_id) if svc is not None else None
             d = DU.duty_for(db, held) if held is not None and org else None
+            if d is not None and d.need == INQ.NEED:
+                was_done = DU.done_count(db, held, d) > 0
+                step = INQ.progress(db, held, d, {i: self._name(db, i) for i in scene.present if i != scene.player_id},
+                                    scene.location, scene.now, [i for i in scene.present if i != scene.player_id])
+                for who in step.asked:
+                    self.notices.append(f"Inquiry: you asked {who} about the theft.")
+                if step.tracked:
+                    self._caught = (held.task_id, step.tracked)
+                    result.setdefault("tracked", []).append(held.task_id)
+                    self.notices.append(f"Caught the cutpurse at {step.tracked}.")
+                if step.asked or step.tracked:
+                    logger.log(23, f"Living World guard: inquiry on duty {held.task_id}: asked {step.asked}, "
+                                   f"tracked {step.tracked}" + (" (already done)" if was_done else ""))
+                held = DU.in_hand(db, svc.member_id)
             if d is not None and boss is not None and boss in scene.present and DU.ready(db, held, d, scene.now):
                 # coming back to the superior when the duty is done files the report: no action needed
                 witnesses = [i for i in scene.present if i != scene.player_id]
@@ -652,7 +707,7 @@ class Guard:
                     self.notices.append("Training complete!")
                 d = None
             if d is not None and d.incident_id is not None:
-                done = (DU.fought_count(db, held) if d.need == "fight" else DU.seen_count(db, held)) > 0
+                done = DU.done_count(db, held, d) > 0
                 if done:
                     self.notices.append(f"Dealt with: report back to {self._name(db, boss) or 'your superior'}.")
             elif d is not None:
@@ -985,7 +1040,20 @@ def _run_duty(db, cmd: D.Command, org: O.Org, svc: S.Service, now: float, locati
         k = next((k for k in kinds if cmd.arg and cmd.arg in k.key), kinds[0] if kinds else None)
         if k is None:
             return "no incidents configured"
-        inc = INC._open(db, org, k, int(now), now, INC._roll(org.key, now, k.key))
+        seed = INC._roll(org.key, now, k.key)
+        said = [w for w in cmd.words if len(w) >= 4 and w not in ("camp", "camps", "road", "brawl", "theft", "bandit",
+                                                                 "bandits", "towers", "tower")]
+        named = [c for c in k.camps if any(w in c.lower() for w in said)]
+        if named:                    # "debug guard incident camp valtheim": that camp
+            n = 0
+            while k.camps[(seed >> 32) % len(k.camps)] != named[0] and n < 500:
+                n += 1
+                seed = INC._roll(org.key, now, k.key, n)
+        if named:                    # it is the one handed out next: others of its kind nobody took go cold
+            for other in INC.open_incidents(db, org, now, free_only=True):
+                if other.key == k.key:
+                    INC.close(db, other, "went cold", now)
+        inc = INC._open(db, org, k, int(now), now, seed)
         return f"incident {inc.event_id}: {inc.title} (talk to {person.name if person else 'your superior'})"
     if boss is None:
         who = person.name if person else "a superior"
@@ -1018,6 +1086,9 @@ def _run_duty(db, cmd: D.Command, org: O.Org, svc: S.Service, now: float, locati
         if d is not None and d.need == "fight":
             DU.mark_fought(db, svc.member_id, d.where[0] if d.where else location, now)
             return f"fought at the place of: {held.title}"
+        if d is not None and d.need == INQ.NEED:
+            T.change(db, held, "in_progress", INQ.TRACKED + "developer", now, source="admin")
+            return f"inquiry solved for: {held.title}"
         DU.mark_seen(db, svc.member_id, location, now, force=True)
         return f"seen at the post of: {held.title}"
     r = DU.report(db, org, svc, boss, now, "(developer report)", location=location, source="admin")

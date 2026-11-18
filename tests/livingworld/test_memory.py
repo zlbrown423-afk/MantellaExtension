@@ -321,3 +321,20 @@ def test_the_background_worker_runs_jobs_on_its_own(tmp_path, monkeypatch):
             time.sleep(0.05)
     assert open_db(tmp_path).execute("SELECT status FROM job").fetchone()[0] == "done"
     assert len(llm.extraction_calls) == 1
+
+
+def test_yes_no_states_are_not_kept_as_facts(tmp_path):
+    """2026-11-17 play log: "Zachary Lex's is_reporting_in is true", "completed_drill is true"."""
+    extraction = ScriptedExtraction(
+        facts=[Fact("Falkreath", "Torvar", "hometown", "Falkreath", "Torvar")],
+        raw_facts=[{"about": "Torvar", "predicate": "is_reporting_in", "value": "true", "said_by": "Torvar", "line": 1},
+                   {"about": "Torvar", "predicate": "completed_drill", "value": "Yes", "said_by": "Torvar", "line": 1}])
+    llm = ScriptedLLM(replies=["Welcome."], extractions={"Gerdur": extraction})
+    with HeadlessSession(str(tmp_path), llm) as s:
+        s.start([actors.player("Torvar"), actors.gerdur()], location="Riverwood", game_days=3.5)
+        s.continue_until_player_turn()
+        s.say("Reporting in. I grew up in Falkreath.")
+        s.end(game_days=3.6)
+    LivingWorld.latest.wait_for_jobs()
+    db = open_db(tmp_path)
+    assert {r[0] for r in db.execute("SELECT predicate FROM knowledge")} == {"hometown"}

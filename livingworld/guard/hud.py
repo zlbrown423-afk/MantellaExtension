@@ -24,12 +24,30 @@ from livingworld.guard import duty as DU, orgs as O, store as S
 from livingworld.work import tasks as T
 
 ENV = "MANTELLA_LW_DUTY_HUD"
+ENV_MARKER = "MANTELLA_LW_DUTY_MARKER"   # 0 = no compass marker on the place of a bandit camp duty
 ENV_EVERY = "MANTELLA_LW_DUTY_HUD_EVERY"
 DEFAULT_EVERY = 180.0
 
 
 def enabled() -> bool:
     return os.environ.get(ENV, "").strip().lower() not in {"0", "false", "no", "off"}
+
+
+def marker_enabled() -> bool:
+    return os.environ.get(ENV_MARKER, "").strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _target(d) -> tuple[int, str]:
+    """The map marker of a bandit camp the duty sends the player to, as (plugin-relative id, plugin)."""
+    if not marker_enabled() or d is None or d.need != "fight" or d.incident_id is None:
+        return 0, ""
+    from livingworld.fog import places
+    by_name = {m.name.casefold(): m for m in places.markers()}
+    for where in d.where:
+        m = by_name.get((where or "").casefold())
+        if m is not None:
+            return m.form_int & 0x00FFFFFF, m.plugin
+    return 0, ""
 
 
 def every_seconds() -> float:
@@ -53,10 +71,12 @@ class Objective:
     boss_plugin: str = ""
     outcome: str = ""            # with task 0: 'done' | 'failed' (how the last duty ended), else ''
     last_task: int = 0           # with task 0: the duty that outcome is about
+    target_ref: int = 0          # a compass marker on the place of the duty (a bandit camp's map marker), 0 = none
+    target_plugin: str = ""
 
     def signature(self) -> tuple:
         return (self.task_id, self.text, round(self.end, 5), round(self.ready_at, 5), round(self.report_by, 5),
-                self.seen, self.boss, self.boss_ref, self.outcome, self.last_task)
+                self.seen, self.boss, self.boss_ref, self.outcome, self.last_task, self.target_ref)
 
 
 NONE = Objective(0)
@@ -123,7 +143,9 @@ def objective(db, player_id: int | None, now: float) -> Objective | None:
         ready_at = 0.0
     else:
         ready_at = DU.assigned_gt(db, task) + d.shift_hours / 48.0
-    return Objective(task.task_id, text, end, ready_at, task.deadline_gt or 0.0, done, boss, ref, plugin)
+    tref, tplugin = (0, "") if done else _target(d)     # dealt with: the marker moves to the superior
+    return Objective(task.task_id, text, end, ready_at, task.deadline_gt or 0.0, done, boss, ref, plugin,
+                     target_ref=tref, target_plugin=tplugin)
 
 
 def objective_for(store, player_id: int | None, now: float) -> Objective | None:

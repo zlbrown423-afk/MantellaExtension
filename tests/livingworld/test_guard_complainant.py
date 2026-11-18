@@ -74,7 +74,7 @@ def test_after_the_arrest_the_complainant_thanks_the_guard_who_did_it(tmp_path):
     talk(tmp_path, DAY + 0.005, say="debug guard incident theft", npcs=[whiterun_guard()], location="Riverwood")
     _, p = the_incident(tmp_path)
     talk(tmp_path, DAY + 0.01)
-    talk(tmp_path, DAY + 0.02, npcs=[whiterun_guard()])
+    talk(tmp_path, DAY + 0.02, say="debug guard seen", npcs=[whiterun_guard()])   # the inquiry solved
     talk(tmp_path, DAY + 0.03, say="Reporting back, I caught the thief.")
     assert duties(tmp_path)[-1]["state"] == "completed"
     prompt = talk(tmp_path, DAY + 0.05, npcs=[townsperson(p["complainant"])])

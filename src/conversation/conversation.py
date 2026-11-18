@@ -18,6 +18,7 @@ from src.conversation.context import Context
 from src.llm.message_thread import message_thread
 from livingworld.perf.turn_timeline import TURN, TRANSCRIPT # LIVINGWORLD PATCH: turn timing
 from livingworld.audio.handoff import note_npc_speech # LIVINGWORLD PATCH: mic overlap flag
+from livingworld.dialogue import debug_lines as lw_debug_lines # LIVINGWORLD PATCH: "debug ..." lines are not speech
 from src.conversation.conversation_type import conversation_type, multi_npc, pc_to_npc, radiant
 from src.character_manager import Character
 from src.http.communication_constants import communication_constants as comm_consts
@@ -317,6 +318,9 @@ class Conversation:
             new_message: UserMessage = UserMessage(self.__context.config, player_text, player_character.name, False)
             new_message.is_multi_npc_message = self.__context.npcs_in_conversation.contains_multiple_npcs()
             new_message = self.update_game_events(new_message)
+            if lw_debug_lines.is_debug(player_text): # LIVINGWORLD PATCH: "debug ..." test commands are not speech
+                new_message.text = lw_debug_lines.STAND_IN # LIVINGWORLD PATCH
+                new_message.is_system_generated_message = True # LIVINGWORLD PATCH: kept out of the summary
             living_world = getattr(self.__output_manager, "living_world", None) # LIVINGWORLD PATCH: note likely misheard words
             hearing_note = living_world.hearing_note(player_text, self.__context) if living_world is not None else None # LIVINGWORLD PATCH
             if hearing_note: # LIVINGWORLD PATCH

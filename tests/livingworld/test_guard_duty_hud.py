@@ -87,3 +87,32 @@ def test_reminder_interval_setting(monkeypatch):
 
 def test_not_in_a_guard_sends_nothing(tmp_path):
     assert objectives(tmp_path, DAY) == []
+
+
+def test_a_camp_raid_marks_the_camp_until_the_fight_is_on_record(tmp_path):
+    """User 2026-11-17: a compass marker on the bandit camp, and Valtheim Towers as the next one."""
+    enlisted(tmp_path)
+    G.talk(tmp_path, DAY + 0.005, say="debug guard incident camp valtheim", npcs=[whiterun_guard()],
+           location="Riverwood")
+    sent = objectives(tmp_path, DAY + 0.01)
+    task = duties(tmp_path)[-1]
+    assert task["template"].startswith("duty:incident:camp_raid:") and task["location"] == "Valtheim Towers"
+    assert sent[-1]["mantella_lw_duty_hud_target_id"] == 0x000162C9
+    assert sent[-1]["mantella_lw_duty_hud_target_plugin"] == "Skyrim.esm"
+    sent = objectives(tmp_path, DAY + 0.3, npcs=[whiterun_guard()], location="Whiterun",
+                      events=[G.fight(PLAYER, 0.5, DAY + 0.25, location="Valtheim Towers")])
+    assert sent and sent[-1]["mantella_lw_duty_hud_target_id"] == 0          # dealt with: back to the superior only
+
+
+def test_the_camp_marker_can_be_switched_off(tmp_path, monkeypatch):
+    monkeypatch.setenv(hud.ENV_MARKER, "0")
+    enlisted(tmp_path)
+    G.talk(tmp_path, DAY + 0.005, say="debug guard incident camp", npcs=[whiterun_guard()], location="Riverwood")
+    sent = objectives(tmp_path, DAY + 0.01)
+    assert sent[-1]["mantella_lw_duty_hud_target_id"] == 0
+
+
+def test_routine_duties_have_no_place_marker(tmp_path):
+    enlisted(tmp_path)
+    sent = objectives(tmp_path, DAY + 0.01)
+    assert sent[-1]["mantella_lw_duty_hud_target_id"] == 0

@@ -32,6 +32,10 @@ Return JSON only, with this shape:
 
 Rules:
 - A fact is a lasting personal detail about a named person: age, hometown, family, job, likes, fears, plans, and so on.
+- Not facts: what someone is doing or feeling right now, or yes/no states (reporting in, finished a drill, shift
+  was quiet, on probation). Leave those to the memories.
+- "about" is the person the detail belongs to. "I talked to Hoda, the barkeeper" says Hoda is a barkeeper, not
+  the speaker; if that person is not in the list, leave the fact out.
 - "line" is the number of the line where the fact was said, and "said_by" is who said that line.
 - Only record facts that were actually stated. Never guess. A question is not a fact.
 - "about" must be one of: {names}.
@@ -50,6 +54,10 @@ USER_PROMPT = """Conversation at {location}. People present: {names}.
 {transcript}
 
 Return the JSON for {owner}."""
+
+
+# yes/no values are moment-to-moment states ("is_reporting_in: true"), not lasting personal details
+_PASSING_VALUES = {"true", "false", "yes", "no", "none", "null", "n/a", "unknown"}
 
 
 @dataclass
@@ -247,6 +255,9 @@ class Extractor:
                     continue
                 if about is None or said_by is None or not predicate or not value:
                     result.rejected.append(f"unknown person or empty field: {fact}")
+                    continue
+                if value.lower() in _PASSING_VALUES:
+                    result.rejected.append(f"a passing state, not a lasting detail: {fact}")
                     continue
                 if (line is None or line.speaker_id != said_by) and said_by is not None and memory_boost_enabled():
                     line = _line_saying(heard, said_by, value, fact.get("line"))
