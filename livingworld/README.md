@@ -727,6 +727,7 @@ Three fixes from the 2026-11-10 play session. All server side, no compile.
 
 | Part | What it does |
 | --- | --- |
+| Camp marker | A bandit camp duty also puts a compass marker on the camp's map marker (`mantella_lw_duty_hud_target_id`/`_plugin`, alias `Target`, LWGuardDuty 0.3.0) until the fight there is on record. Off with `MANTELLA_LW_DUTY_MARKER=0`. "debug guard incident camp valtheim" opens a camp raid at that camp (others of its kind nobody took go cold) |
 | Journal quest | "Guard Duty" starts when the superior gives a duty. Objective: the duty and the shift's end, e.g. "Stand watch at the main gate until 2:00 pm (3 h left). Be seen at your post" (training steps and trouble too) |
 | Reminder | The objective pops up again every `MANTELLA_LW_DUTY_HUD_EVERY` real seconds (default 180; 0 = only when it changes), with the time left |
 | Report back | Once it may be reported (seen at the post and half the shift gone, or dealt with): "You may report back to Commander Caius", with a compass marker on them |
@@ -1079,3 +1080,29 @@ The device, fixed gain and filters come from the active profile in `Documents\My
 **Handoff.** `livingworld.audio.handoff.subscribe(fn)` calls `fn(UtteranceAudio)` for each finished player utterance, on a separate thread, before speech-to-text runs. An `UtteranceAudio` carries an id, wall-clock start and end, both audio arrays (analysis at native rate, speech-to-text at 16 kHz), the capture-clock sample range, the speech detector's probability per 32 ms block, the capture mode (`vad`, `proactive` or `ptt`), whether the listen timeout ended it, the pause threshold used, a `transcript` future, whether an NPC voice line overlapped (`None` until the first NPC line), and a mic snapshot (device, gain, noise floor, SNR, clipped samples, `analysis_clean`). Proactive mode gives one final utterance per turn. Typed lines give none. Consumers should copy and enqueue; nothing is written to disk and the arrays are dropped when the last consumer returns. With no subscribers nothing is copied.
 
 Also in this change, whatever the flag: the saved mic WAV and the Whisper upload clamp samples before the int16 conversion instead of wrapping.
+
+
+## The cutpurse inquiry, and a few fixes from the 2026-11-17 play log
+
+* **Theft inquiry** (`guard/inquiry.py`, `need: "inquiry"` on `market_theft`): no longer solved by any conversation in
+  Whiterun. When it opens, two market folk (not the complainant or suspect) are picked as witnesses, each with a clue
+  (they remember it, `event_witness` 'saw', and tell the guard sent to it; the complainant names them). Each one
+  talked to is a task change `asked: <name>`. An off-screen culprit went to ground at a hideout (Warmaiden's, The
+  Drunken Huntsman, Belethor's General Goods, Arcadia's Cauldron): after asking at least one person, a conversation
+  there is `tracked: <place>` and the people there see the thief cornered. A named suspect must be arrested (G2f).
+  Reporting before that, after asking around, is "not ready" (no reprimand); with nothing done it is still a false
+  report. The complainant is never also the suspect. Incidents opened before keep `need: "seen"`.
+  "debug guard seen" solves an inquiry.
+* **Wrong camp**: reporting a bandit duty done after fighting somewhere else (a named place, not the open road) is
+  `wrong_place`: no reprimand, the duty stays open and the superior says it was the wrong place.
+* **Dismissed / discharged**: for 30 days the guard (`S.ended`) knows it; the one who dismissed the player says so
+  plainly and hands out no shifts; the uniform line no longer says they do not know the player.
+* **"debug ..." lines** (`dialogue/debug_lines.py`): the command still runs, but the NPC is shown a neutral stand-in,
+  and the line stays out of the conversation log (memories, facts, leads, diaries), task/lead/squad hooks and
+  Mantella's summary. Off with `MANTELLA_LW_HIDE_DEBUG=0`.
+* Heard-from-the-teller lines swap the name the sentence actually starts with for "they" ("theypped by" fixed);
+  arrests and cleared camps no longer name the superior as the object ("arrested me Mikael"); everyday words that
+  open a sentence ("Things", "Everything") are not leads; yes/no fact values are dropped and the extraction prompt
+  says whose detail a fact is ("Hoda, the barkeeper" is Hoda's job).
+* `livingworld.*` loggers now reach Mantella's console and logging.log (the audio v2 "capturing" line, trips,
+  touch, squad and others were silently dropped).

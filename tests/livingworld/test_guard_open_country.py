@@ -43,3 +43,29 @@ def test_road_bandits_fight_at_the_white_river_counts(tmp_path):
 def test_camp_raid_still_needs_the_camp(tmp_path):
     store, member = _duty(tmp_path, "camp_raid")
     assert _fight(store, member, "Skyrim", DAY + 0.1) == (0, False)
+
+
+def test_a_fight_at_the_wrong_camp_is_not_a_false_report(tmp_path):
+    """2026-11-17 play log: sent to Valtheim Towers, the player fought at Fort Greymoor and said they had cleared the
+    bandits. That counted as a lie, the reprimand ended an extended probation and the player was dismissed."""
+    store, member = _duty(tmp_path, "camp_raid")
+    with store.transaction() as db:
+        db.execute("INSERT INTO world_event (timeline_id, type, location, actors_json, payload_json, source, game_time)"
+                   " VALUES ((SELECT timeline_id FROM timeline WHERE is_active = 1), 'combat.fight', 'Fort Greymoor',"
+                   " ?, '{}', 'game', ?)", (f"[{member}, 8]", DAY + 0.1))
+        svc = S.current(db, member)
+        boss = DU.superior_id(db, WHITERUN, svc)
+        r = DU.report(db, WHITERUN, svc, boss, DAY + 0.2, "I cleared out some bandits.")
+        assert r.outcome == "wrong_place" and r.places == "Fort Greymoor"
+        assert DU.in_hand(db, member) is not None                           # the duty stays open
+        assert db.execute("SELECT COUNT(*) FROM world_event WHERE type = 'guard.reprimanded'").fetchone()[0] == 0
+        mem = db.execute("SELECT content FROM memory WHERE owner_id = ? ORDER BY mem_id DESC LIMIT 1", (boss,)).fetchone()[0]
+        assert "Fort Greymoor" in mem and "sent them back" in mem
+
+
+def test_no_fight_anywhere_is_still_a_false_report(tmp_path):
+    store, member = _duty(tmp_path, "camp_raid")
+    with store.transaction() as db:
+        svc = S.current(db, member)
+        r = DU.report(db, WHITERUN, svc, DU.superior_id(db, WHITERUN, svc), DAY + 0.2, "I cleared them out.")
+        assert r.outcome == "false"

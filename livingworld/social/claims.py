@@ -339,7 +339,9 @@ def sentence(db, claim: dict, viewer: int, second_person: bool = False) -> str:
         return f"{subject} {claim['detail'].strip()}"
     if claim["act"] == "drank":
         return f"{subject} {'were' if subject == 'you' else 'was'} drinking{claim['detail']}{place}"
-    obj = f" {name(claim['object_id'])}" if claim["object_id"] is not None else ""
+    # an arrest or a cleared camp names the superior it was reported to as the object; the sentence is about the culprit
+    has_obj = claim["object_id"] is not None and claim["act"] not in ("arrested", "cleared")
+    obj = f" {name(claim['object_id'])}" if has_obj else ""
     verb = acts.act(claim["act"]).verb if obj else acts.NO_OBJECT.get(claim["act"], acts.act(claim["act"]).verb)
     text = f"{subject} {verb}{obj}{claim['detail']}{place}"
     return "you were " + text[len("you was "):] if text.startswith("you was ") else text

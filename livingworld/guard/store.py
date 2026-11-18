@@ -147,3 +147,24 @@ def last_event_gt(db, kind: str, member_id: int, org_key: str | None = None, act
         sql += " AND json_extract(actors_json, '$[1]') = ?"
         params.append(actor_id)
     return db.execute(sql, tuple(params)).fetchone()[0]
+
+
+def ended(db, member_id: int, org_key: str) -> tuple[Service, dict] | None:
+    """The member's last service in ``org_key`` if it has ended (dismissed, discharged, resigned) and they have not
+    joined again since, with the ending ``guard.<status>`` event's payload, its game time and who ended it
+    (``{"status", "gt", "by", "reason", "reprimands"}``). None while they serve or never served."""
+    rows = find(db, "member_id = ? AND org_key = ?", (member_id, org_key))
+    if not rows or rows[-1].status not in ENDED:
+        return None
+    svc = rows[-1]
+    row = db.execute("SELECT game_time, actors_json, payload_json FROM v_visible_event WHERE type = ?"
+                     " AND json_extract(payload_json, '$.service_id') = ? ORDER BY game_time DESC, event_id DESC LIMIT 1",
+                     (f"guard.{svc.status}", svc.service_id)).fetchone()
+    if row is None:
+        return None
+    actors, payload = json.loads(row[1] or "[]"), json.loads(row[2] or "{}")
+    reprimands = [json.loads(r[0] or "{}").get("why") for r in db.execute(
+        "SELECT payload_json FROM v_visible_event WHERE type = 'guard.reprimanded'"
+        " AND json_extract(payload_json, '$.service_id') = ? ORDER BY game_time", (svc.service_id,))]
+    return svc, {"status": svc.status, "gt": row[0], "by": actors[1] if len(actors) > 1 else None,
+                 "reason": payload.get("reason") or "", "reprimands": [r for r in reprimands if r]}

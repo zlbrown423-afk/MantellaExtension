@@ -145,12 +145,15 @@ _FEEL = {
 
 
 def lines(name: str, player: str, u: Uniform, *, serves: bool, is_member: bool, knows_player: bool,
-          att: Attitude, reg: float) -> list[str]:
+          att: Attitude, reg: float, former: bool = False) -> list[str]:
     """Prompt lines for ``name`` about the player in uniform ``u``."""
     who = "one of " + u.label if u.city_guard or u.key != "thalmor" else "a Thalmor agent"
     out = [f"{player} is wearing {u.item or 'the uniform'}, the uniform of {u.label}."]
     if serves:
         out.append(f"{player} really is {who}." + ("" if knows_player else f" {name} takes them for exactly that."))
+    elif is_member and former:
+        out.append(f"{name} serves in {u.label} and knows {player} is no longer one of them; {player} has no right to "
+                   f"that uniform now.")
     elif is_member:
         out.append(f"{name} serves in {u.label} and does not know {player} as one of their own. {name} may ask who "
                    f"they are, where they are posted and who their superior is.")

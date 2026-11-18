@@ -43,6 +43,7 @@ class Command:
     org_key: str | None
     rank: str | None = None
     arg: str | None = None
+    words: tuple[str, ...] = ()         # the rest of the line (e.g. a camp: "debug guard incident camp valtheim")
 
 
 def parse(text: str) -> Command | None:
@@ -63,4 +64,4 @@ def parse(text: str) -> Command | None:
     arg = None
     if verb == "incident":
         arg = next((w for w in words[words.index("incident") + 1:] if w in ("camp", "road", "brawl", "theft")), None)
-    return Command(verb, org, rank, arg)
+    return Command(verb, org, rank, arg, tuple(words[words.index(verb) + 1:]))

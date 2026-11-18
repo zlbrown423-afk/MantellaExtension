@@ -288,6 +288,18 @@ def doubt(believed: float) -> str:
     return "I'm not sure I believe it."
 
 
+def _they(db, claim: dict, viewer: int, text: str, teller: str) -> str:
+    """The teller talking about themselves: their name at the start of the sentence becomes "they". The sentence
+    names them the way the viewer knows them (often the first name only, or a description), so only that exact
+    prefix is swapped; anything else is left as it is rather than cutting into the verb."""
+    from livingworld.fog.service import shown_name
+    prefixes = {shown_name(db, viewer, claim["subject_id"]), teller, (teller or "").split(" ")[0]}
+    for prefix in sorted((p for p in prefixes if p), key=len, reverse=True):     # "Zachary Lex" before "Zachary"
+        if text.startswith(prefix + " "):
+            return "they" + text[len(prefix):]
+    return text
+
+
 def _heard(store: WorldStore, recall: Recall, now_gt: float) -> None:
     from livingworld.social.claims import sentence
     rows = store.query(
@@ -301,7 +313,7 @@ def _heard(store: WorldStore, recall: Recall, now_gt: float) -> None:
             claim = dict(row)
             text = sentence(db, claim, recall.npc_id)
             if claim["told_by_id"] == claim["subject_id"]:
-                text = "they" + text[len(row["teller"]):]   # "Torvar told me that they helped Gerdur"
+                text = _they(db, claim, recall.npc_id, text, row["teller"])   # "Torvar told me that they helped Gerdur"
             recall.know_ids.append(row["know_id"])
             recall.heard.append(f"({time_ago(now_gt - row['learned_gt'])}) {row['teller']} told me that {text}. "
                                 f"{doubt(row['believed'] or 0.0)} I did not see it myself.")

@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from importlib import resources
 
 from livingworld.guard import orgs as O, store as S
+from livingworld.work import tasks as T
 
 ENV = "MANTELLA_LW_GUARD_ARRESTS"
 SUBMIT, ARGUE, FLEE, FIGHT = "submit", "argue", "flee", "fight"
@@ -204,7 +205,7 @@ def evidence(db, org: O.Org, svc: S.Service, npc_id: int, name: str, now: float)
             continue
         task = DU.in_hand(db, svc.member_id)
         mine = task is not None and INC.event_id_of(task.template) == inc.event_id
-        asked = mine and DU.seen_count(db, task) > 0
+        asked = mine and (DU.seen_count(db, task) > 0 or T.count_changes(db, task.task_id, "asked: ") > 0)
         why = f"named as the suspect: {inc.why}"
         if asked:
             why += f", and {DU._name(db, svc.member_id)} asked around {inc.place}"

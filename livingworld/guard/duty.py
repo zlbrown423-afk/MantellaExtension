@@ -263,8 +263,8 @@ def mark_seen(db, member_id: int, location: str | None, now: float, witnesses: l
     if task is None:
         return None
     d = duty_for(db, task)
-    if d is None or (d.need in ("fight", "quiz") and not force):
-        return None
+    if d is None or (d.need in ("fight", "quiz", "inquiry") and not force):
+        return None          # an inquiry is solved by asking the right people, not by standing about in town
     if not force and (not at_post(d, location) or now > shift_end(db, task, d) + 1e-9):
         return None
     if d.need == "escort" and not force and not any(profiles.get(db, w) is not None for w in (witnesses or [])):
@@ -283,6 +283,14 @@ def mark_fought(db, member_id: int, location: str | None, now: float) -> T.Task 
         return None      # a camp raid still needs the camp
     state = "in_progress" if task.state in ("accepted", "paused") else None
     return T.change(db, task, state, f"fought at post: {location}", now)
+
+
+def fought_elsewhere(db, member_id: int, task: T.Task, d: Duty) -> list[str]:
+    """Named places (not the open road) where the member fought since the duty was given, other than its post."""
+    rows = db.execute("SELECT DISTINCT location FROM v_visible_event WHERE type = 'combat.fight' AND game_time >= ?"
+                      " AND location IS NOT NULL AND EXISTS (SELECT 1 FROM json_each(actors_json) WHERE value = ?)"
+                      " ORDER BY game_time", (assigned_gt(db, task) - 1e-9, member_id)).fetchall()
+    return [r[0] for r in rows if r[0] and not at_post(d, r[0]) and not in_open_country(r[0])]
 
 
 def fought_count(db, task: T.Task) -> int:
@@ -348,6 +356,9 @@ def done_count(db, task: T.Task, d: Duty | None) -> int:
     """How often the duty's work was seen done: fights for a fight, right answers for a quiz, else sightings."""
     if d is not None and d.need == "fight":
         return fought_count(db, task)
+    if d is not None and d.need == "inquiry":
+        from livingworld.guard import inquiry as INQ
+        return INQ.done(db, task, d)
     if d is not None and d.need == "quiz":
         from livingworld.guard import training as TR
         org = _org_of(db, task)
@@ -370,10 +381,11 @@ def ready(db, task: T.Task, d: Duty, now: float) -> bool:
 
 @dataclass
 class Report:
-    outcome: str          # done | early | false | none
+    outcome: str          # done | early | false | wrong_place | not_ready | none
     task: T.Task | None
     commended: bool = False
     trained: bool = False      # G2g: this report finished recruit training
+    places: str = ""           # wrong_place: where they fought instead
 
 
 def report(db, org: O.Org, svc: S.Service, superior: int, now: float, said: str | None = None, *,
@@ -391,6 +403,16 @@ def report(db, org: O.Org, svc: S.Service, superior: int, now: float, said: str 
     if _no_shift(d):
         half = assigned_gt(db, task)          # an incident, a bout or the quiz is done when done, not after a shift
     who = _name(db, member)
+    elsewhere = fought_elsewhere(db, member, task, d) if not seen and d is not None and d.need == "fight" else []
+    if elsewhere:
+        # they did fight, just not where they were sent: an honest mistake, not a lie. The duty stays open.
+        places = ", ".join(elsewhere)
+        _remember(db, boss, member, f"{who} reported back on their duty to {task.title}, but the fighting they did "
+                                    f"was at {places}, not there. I sent them back to finish it.{quoted}", -0.1, 0.4,
+                  _last_event(db, task), location, now)
+        return Report("wrong_place", task, places=places)
+    if not seen and d is not None and d.need == "inquiry" and T.count_changes(db, task.task_id, "asked: ") > 0:
+        return Report("not_ready", task)        # asked around but no thief yet: still working on it, not a lie
     if not seen:
         task = T.change(db, task, "failed", "false report: nobody saw them at their post", now,
                         payload={"duty_report": "false"}, witnesses=witnesses, source=source)

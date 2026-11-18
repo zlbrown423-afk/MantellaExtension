@@ -178,11 +178,25 @@
       "key": "market_theft",
       "title": "catch the cutpurse working the Plains District market",
       "why": "{complainant} had a purse snatched in the market and wants the thief caught",
-      "instructions": "Go to the market, ask the stallholders and passers-by what they saw, find the thief and bring them in.",
+      "instructions": "Go to the market and ask {complainant} and the stallholders what they saw. Follow the trail to wherever the thief went to ground and catch them there, or, if the trail points at someone in town, arrest that person.",
       "where": [
         "Whiterun"
       ],
-      "need": "seen",
+      "need": "inquiry",
+      "witnesses": [
+        "Carlotta Valentia",
+        "Anoriath",
+        "Fralia Gray-Mane",
+        "Brenuin",
+        "Ysolda",
+        "Olfina Gray-Mane"
+      ],
+      "hideouts": [
+        "Warmaiden's",
+        "The Drunken Huntsman",
+        "Belethor's General Goods",
+        "Arcadia's Cauldron"
+      ],
       "outcome": "arrested",
       "place": "in the Plains District market",
       "shift_hours": 3,

@@ -54,6 +54,8 @@ class Kind:
     complaint: str = ""                # the complainant's account of it (for the prompt)
     memory: str = ""                   # the same in their own words (their memory of it)
     culprit_looks: tuple[str, ...] = ()  # the glimpse they caught of each culprit (same order as culprits)
+    witnesses: tuple[str, ...] = ()    # inquiry: market folk who may have seen something (two are picked)
+    hideouts: tuple[str, ...] = ()     # inquiry: where an off-screen culprit went to ground (one is picked)
 
 
 @dataclass
@@ -81,6 +83,8 @@ class Incident:
     complaint: str = ""                # their account of it
     look: str | None = None            # what they saw of the culprit (never the name)
     memory: str = ""                   # their own words for it
+    witnesses: tuple[tuple[str, str], ...] = ()   # inquiry: (name, what they saw)
+    hideout: str | None = None         # inquiry: where the culprit can be found (a place name the game reports)
 
 
 @functools.lru_cache(maxsize=None)
@@ -97,7 +101,8 @@ def kinds(org_key: str) -> tuple[Kind, ...]:
                       suspects=tuple(k.get("suspects") or ()), suspect_chance=float(k.get("suspect_chance", 0.0)),
                       charge=k.get("charge"), open_country=bool(k.get("open_country", False)),
                       losses=tuple(k.get("losses") or ()), complaint=k.get("complaint", ""), memory=k.get("memory", ""),
-                      culprit_looks=tuple(k.get("culprit_looks") or ()))
+                      culprit_looks=tuple(k.get("culprit_looks") or ()), witnesses=tuple(k.get("witnesses") or ()),
+                      hideouts=tuple(k.get("hideouts") or ()))
                  for k in raw.get("incidents") or ())
 
 
@@ -117,7 +122,7 @@ def _row(row) -> Incident:
                    float(p.get("shift_hours", 4)), p.get("min_rank"), float(p.get("merit", 1.5)), p.get("culprit"),
                    row["game_time"], float(p["expires_gt"]), int(p.get("day", int(row["game_time"]))),
                    p.get("suspect"), p.get("charge"), p.get("complainant"), p.get("complaint") or "", p.get("look"),
-                   p.get("memory") or "")
+                   p.get("memory") or "", tuple((w[0], w[1]) for w in p.get("witnesses") or ()), p.get("hideout"))
     if inc.complainant is None:
         # opened before complainants were stored: the name is only in the 'why' ("Fralia Gray-Mane had a purse ...")
         k = kind_of(inc)
@@ -203,22 +208,43 @@ def _open(db, org: O.Org, k: Kind, day: int, opened: float, seed: int) -> Incide
     look = (k.culprit_looks[(seed >> 40) % len(k.culprits)]
             if k.culprits and len(k.culprit_looks) == len(k.culprits) else None)
     suspect = None
-    if k.suspects and ((seed >> 48) % 1000) / 1000 < k.suspect_chance:
-        suspect = culprit = pick(k.suspects, 56)
+    suspects = [x for x in k.suspects if x != fill["complainant"]]    # nobody is robbed by themselves
+    if suspects and ((seed >> 48) % 1000) / 1000 < k.suspect_chance:
+        suspect = culprit = pick(suspects, 56)
         why += f". Word is it was {suspect}"
         look = None                                 # the word names them; the complainant thinks it was them
+    witnesses, hideout = [], None
+    if k.need == "inquiry":
+        hideout = None if suspect else (pick(k.hideouts, 72) or None)
+        pool = [w for w in k.witnesses if w not in (fill["complainant"], suspect)]
+        for i in range(min(2, len(pool))):
+            w = pool[(seed >> (80 + 8 * i)) % len(pool)]
+            pool.remove(w)
+            witnesses.append([w, witness_clue(i, look, suspect, hideout)])
     payload = {"org": org.key, "key": k.key, "title": title, "why": why, "instructions": k.instructions.format(**fill),
                "where": list(where), "need": k.need, "outcome": k.outcome, "place": place,
                "shift_hours": k.shift_hours, "min_rank": k.min_rank, "merit": k.merit, "culprit": culprit,
                "expires_gt": opened + k.lasts_days, "day": day, "suspect": suspect, "charge": k.charge,
                "complainant": fill["complainant"] or None, "complaint": k.complaint.format(**fill) if k.complaint else "",
-               "look": look, "memory": k.memory.format(**fill) if k.memory else ""}
+               "look": look, "memory": k.memory.format(**fill) if k.memory else "",
+               "witnesses": witnesses, "hideout": hideout}
     event_id = S.event(db, "incident", [], payload, opened, where[0] if where else org.hold, [])
     inc = get(db, event_id)
     who = complainant_id(db, inc)
     if who is not None:                             # met already: they remember going to the guard from now on
         remember_complaint(db, inc, who)
     return inc
+
+
+def witness_clue(i: int, look: str | None, suspect: str | None, hideout: str | None) -> str:
+    """What the i-th market witness saw: the culprit's look and where they went, or the named suspect nearby."""
+    if suspect:
+        return (f"I saw {suspect} hanging about the stalls just before it happened, and hurrying off right after"
+                if i == 0 else f"{suspect} had more coin than usual afterwards and was keen not to be seen")
+    who = look or "someone I didn't know"
+    if i == 0:
+        return f"I saw {who} push away through the crowd right after, heading off towards {hideout or 'the city'}"
+    return f"I saw {who} slip into {hideout or 'one of the shops'} and not come out again"
 
 
 def close(db, inc: Incident, outcome: str, gt: float, *, member_id: int | None = None, by: int | None = None,
@@ -264,16 +290,20 @@ def event_id_of(template: str | None) -> int | None:
 COMPLAINT_DAYS = 3.0       # how long after it is over the complainant still has it on their mind
 
 
-def complainant_id(db, inc: Incident) -> int | None:
-    """The complainant's NPC id, if they are known to the world (they have spoken through Mantella before) and
+def person_id(db, name: str | None) -> int | None:
+    """A named townsperson's NPC id, if they are known to the world (they have spoken through Mantella before) and
     the name is not shared by anyone else."""
-    if not inc.complainant:
+    if not name:
         return None
     rows = db.execute("SELECT npc_id FROM npc WHERE is_player = 0 AND display_name = ? COLLATE NOCASE",
-                      (inc.complainant,)).fetchall()
+                      (name,)).fetchall()
     if len(rows) != 1 or S.is_child(db, rows[0][0]):
         return None
     return rows[0][0]
+
+
+def complainant_id(db, inc: Incident) -> int | None:
+    return person_id(db, inc.complainant)
 
 
 def remember_complaint(db, inc: Incident, npc_id: int) -> bool:
@@ -298,6 +328,45 @@ def remember_complaint(db, inc: Incident, npc_id: int) -> bool:
     db.execute("INSERT OR IGNORE INTO event_witness (event_id, npc_id, how) VALUES (?,?,?)",
                (inc.event_id, npc_id, "participated"))
     return True
+
+
+def _plant(db, inc: Incident, npc_id: int, text: str, valence: float) -> bool:
+    if db.execute("SELECT 1 FROM v_visible_memory WHERE owner_id = ? AND event_id = ? LIMIT 1",
+                  (npc_id, inc.event_id)).fetchone():
+        return False
+    mem_id = db.execute(
+        "INSERT INTO memory (timeline_id, owner_id, kind, content, about_ids_json, location, occurred_gt, importance,"
+        " valence, intensity, created_by, source_kind, confidence, event_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (S._timeline(db), npc_id, "episodic", text, "[]", inc.where[0] if inc.where else None, inc.opened_gt, 0.6,
+         valence, 0.4, "perception", "experienced", 1.0, inc.event_id)).lastrowid
+    db.execute("INSERT INTO memory_source (mem_id, event_id) VALUES (?,?)", (mem_id, inc.event_id))
+    db.execute("INSERT OR IGNORE INTO event_witness (event_id, npc_id, how) VALUES (?,?,?)",
+               (inc.event_id, npc_id, "saw"))
+    return True
+
+
+def remember_seen(db, inc: Incident, npc_id: int, clue: str) -> bool:
+    """A market witness remembers what they saw of the theft (once per incident; rolls back with saves)."""
+    who = inc.complainant or "someone"
+    return _plant(db, inc, npc_id, f"In the Plains District market {who} had their purse cut. {clue}.", -0.2)
+
+
+def witnessed_by(db, name: str, now: float) -> list[Incident]:
+    """Open inquiry incidents ``name`` is a witness of (newest first)."""
+    if not name:
+        return []
+    rows = db.execute("SELECT event_id, payload_json, game_time FROM v_visible_event WHERE type = 'guard.incident'"
+                      " AND game_time <= ? AND game_time >= ? AND payload_json LIKE ? ORDER BY game_time DESC,"
+                      " event_id DESC", (now + 1e-9, now - 14, '%"witnesses"%')).fetchall()
+    out = []
+    for row in rows:
+        inc = _row(row)
+        if not any(w.casefold() == name.casefold() for w, _ in inc.witnesses):
+            continue
+        if _closed(db, inc.event_id) or (inc.expires_gt <= now and _taker(db, inc.event_id) is None):
+            continue
+        out.append(inc)
+    return out[:2]
 
 
 @dataclass

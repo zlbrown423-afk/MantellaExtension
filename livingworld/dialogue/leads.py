@@ -142,6 +142,8 @@ _NOT_NAMES = hearing._COMMON | {
     "should", "must", "on", "in", "at", "to", "for", "from", "of", "by", "with", "as", "up", "down", "out",
     "off", "into", "near", "far", "after", "still", "yet", "all", "every", "each", "most", "many", "much",
     "jarl", "thane", "housecarl", "guard", "guards", "septims", "skyrim", "dragonborn",
+    "things", "thing", "everything", "nothing", "something", "anything", "everyone", "nobody", "somebody",
+    "times", "life", "work", "business", "today", "tonight", "tomorrow", "yesterday",
 }
 _NAME_RUN = re.compile(r"[A-Z][A-Za-z'\-]+(?:\s+(?:and|of|the)\s+[A-Z][A-Za-z'\-]+|\s+[A-Z][A-Za-z'\-]+)*")
 

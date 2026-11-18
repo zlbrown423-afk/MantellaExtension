@@ -23,7 +23,7 @@ from livingworld.memory import backfill
 from livingworld.memory import summary_timeline
 from livingworld.memory import settings as memory_settings
 from livingworld.memory.recall import mark_rehearsed_rows, recall_for
-from livingworld.dialogue import context_prep
+from livingworld.dialogue import debug_lines, context_prep
 from livingworld import mood as moods
 from livingworld.bodylang import (adult_gestures_enabled, body_language_enabled, conv_anim_enabled, gesture_notices,
                                   gestures_enabled, handshake_enabled, salute_enabled)
@@ -145,6 +145,8 @@ KEY_DUTY_HUD_BOSS_PLUGIN = "mantella_lw_duty_hud_boss_plugin"
 KEY_DUTY_HUD_OUTCOME = "mantella_lw_duty_hud_outcome"    # string, with task 0: 'done' | 'failed' | ''
 KEY_DUTY_HUD_LAST = "mantella_lw_duty_hud_last"          # int, with task 0: the duty that outcome is about
 KEY_DUTY_HUD_EVERY = "mantella_lw_duty_hud_every"        # float: real seconds between reminders; 0 = only on change
+KEY_DUTY_HUD_TARGET_ID = "mantella_lw_duty_hud_target_id"  # int: map marker of the duty's place (bandit camp), 0 = none
+KEY_DUTY_HUD_TARGET_PLUGIN = "mantella_lw_duty_hud_target_plugin"
 # Sent by the Living World build of Mantella-Spell (guard careers): per actor, and in the context
 KEY_IS_GUARD = "mantella_lw_is_guard"            # actor: Actor.IsGuard()
 KEY_CRIME_FACTION = "mantella_lw_crime_faction"  # actor: form ID of Actor.GetCrimeFaction()
@@ -654,11 +656,13 @@ class LivingWorld:
         if not player:
             return
         npc_id = self._npc_ids.get(player.ref_id) or self._register(player, context.game_days)
-        ConversationLog(self.store).append(self.conv_id, npc_id, text.strip(), None, context.game_days)
-        self._player_said = text.strip()
-        if self.task_words:
+        hidden = debug_lines.is_debug(text)      # a test command: run it below, but nobody remembers it
+        if not hidden:
+            ConversationLog(self.store).append(self.conv_id, npc_id, text.strip(), None, context.game_days)
+            self._player_said = text.strip()
+        if self.task_words and not hidden:
             self._help_offered = task_words.player_offers(text, self._npc_last)
-        if self.leads:
+        if self.leads and not hidden:
             self._lead_ask = None
             self._lead_learned = set()
             if hearing.is_question(text) and not player_leads.shortcut(text):
@@ -680,7 +684,7 @@ class LivingWorld:
                 result = self.personality.debug(db, text, present, npc_id, context.game_days)
             if result:
                 logger.log(23, f"Living World personality test command: {result}")
-        if self.guard:
+        if self.guard and not hidden:
             scene = self._guard_scene()
             if scene is not None and self._guard_for(self.store).player_spoke(scene):
                 logger.log(23, "Living World guard: the player answered someone who came over on shift")
@@ -689,7 +693,7 @@ class LivingWorld:
             result = self._guard_for(self.store).debug(text, scene) if scene else None
             if result:
                 logger.log(23, f"Living World guard test command: {result}")
-        if self.squad:
+        if self.squad and not hidden:
             self._squad_player(text.strip(), npc_id, context)
 
     def _hygiene_debug(self, text: str, player_id: int, context: Any) -> None:
@@ -1209,9 +1213,10 @@ class LivingWorld:
                                  (npc_id, player_id)).fetchone()
                 knows = bool(rel and rel[0] >= 0.1)
                 reg = uniform.regard(db, npc_id, player_id)
+                former = bool(member and u.org and guard_store.ended(db, player_id, u.org) is not None)
             att = uniform.attitude(u, name, row[0] if row else None, location)
             return uniform.lines(name, player_name, u, serves=serves, is_member=member, knows_player=knows,
-                                 att=att, reg=reg)
+                                 att=att, reg=reg, former=former)
         except Exception:
             self.errors += 1
             logger.exception("Living World: could not add uniform lines; leaving them out")
@@ -1675,7 +1680,8 @@ class LivingWorld:
                 KEY_DUTY_HUD_READY: obj.ready_at, KEY_DUTY_HUD_REPORT_BY: obj.report_by, KEY_DUTY_HUD_SEEN: obj.seen,
                 KEY_DUTY_HUD_BOSS: obj.boss, KEY_DUTY_HUD_BOSS_ID: obj.boss_ref, KEY_DUTY_HUD_BOSS_PLUGIN: obj.boss_plugin,
                 KEY_DUTY_HUD_OUTCOME: obj.outcome, KEY_DUTY_HUD_LAST: obj.last_task,
-                KEY_DUTY_HUD_EVERY: duty_hud.every_seconds()}
+                KEY_DUTY_HUD_EVERY: duty_hud.every_seconds(),
+                KEY_DUTY_HUD_TARGET_ID: obj.target_ref, KEY_DUTY_HUD_TARGET_PLUGIN: obj.target_plugin}
 
     def start_reply_keys(self) -> dict[str, Any]:
         """Extra keys for the conversation start reply."""

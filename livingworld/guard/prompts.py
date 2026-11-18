@@ -78,6 +78,33 @@ def recruit_lines(name: str, player: str, d: R.Decision, recruiters: list[str], 
             f"their own way and may say what would change their mind. Do not use {ENLIST_KEY}."]
 
 
+def ended_line(name: str, player: str, org: O.Org, info: dict, now: float, *, by_me: bool, by_name: str | None) -> str:
+    """The player used to serve in ``org`` and was dismissed (or left): a member of it knows, and the one who
+    dismissed them says so plainly when the player still talks about shifts or duties."""
+    from livingworld.memory.recall import time_ago
+    ago = time_ago(max(0.0, now - info["gt"]))
+    status = info["status"]
+    if status == "dismissed":
+        why = ""
+        if info.get("reprimands"):
+            last = info["reprimands"][-1]
+            why = (f" The probation had already been extended after a reprimand, and then came another one ({last})."
+                   if "extended" in (info.get("reason") or "") else f" The last reprimand was for this: {last}.")
+        who = name if by_me else (by_name or "the commander")
+        out = (f"{player} used to serve in {org.name}, but {who} dismissed them {ago}.{why} {player} no longer serves: no shifts, no duties, no wages, no barracks bunk, and no right "
+               f"to wear the uniform.")
+        if by_me:
+            out += (f" {player} may not have heard it in person yet. If {player} reports in, asks about a shift or a duty, "
+                    f"or acts like one of the guard, {name} tells them plainly that they were dismissed and why, and "
+                    f"never hands them a shift or a duty.")
+        else:
+            out += f" If {player} asks about a shift or a duty, {name} tells them they are no longer one of the guard."
+        return out
+    left = {"discharged": "was discharged", "resigned": "resigned"}.get(status, "left")
+    return (f"{player} used to serve in {org.name} and {left} {ago}. {player} no longer serves and has no shifts or "
+            f"duties.")
+
+
 def other_org_line(name: str, player: str, org: O.Org, svc: S.Service) -> str:
     return (f"{player} serves in {org.name} as {org.a_title(svc.rank_key)}. That rank carries no authority with "
             f"{name}'s own guard.")
@@ -168,6 +195,10 @@ def complaint_line(name: str, player: str, c, *, player_on_it: bool, player_deal
             out += (f" {player} is the guard sent to deal with it: {name} recognises that this is about the "
                     f"complaint, is glad someone has come, and readily tells {player} what happened, what was lost "
                     f"and what they saw, to help find the culprit.")
+            others = [w for w, _ in getattr(inc, "witnesses", ())]
+            if others:
+                out += (f" {name} also says {' and '.join(others)} {'was' if len(others) == 1 else 'were'} nearby and "
+                        f"may have seen more.")
         else:
             out += f" Nobody has been caught yet; {name} is still waiting on the guard and is impatient about it."
     elif c.state in ("arrested", "cleared"):
@@ -250,6 +281,11 @@ def spar_line(name: str, player: str) -> str:
 
 def report_note(name: str, player: str, title: str, outcome: str, trained: bool, missing: str | None) -> str:
     """G2g: the player said they are reporting back; the guard's rules already judged it."""
+    if outcome == "wrong_place":
+        return (f"{player} says they dealt with their duty to {title}, but the guard's record shows the fighting was at "
+                f"{missing}, not there. {name} says plainly it was the wrong place, with no reprimand since it was an "
+                f"honest mistake, and sends {player} back to finish the real job. Do not begin the reply with "
+                f"'{REPORT_KEY}:'.")
     if outcome == "not_ready":
         return (f"{player} says they are reporting back on their duty to {title}, but the guard's record shows it is "
                 f"not done yet: {missing}. {name} says so plainly and tells {player} what is still to do; no "
@@ -288,7 +324,9 @@ def reports_line(name: str, player: str, past: list[tuple[str, str]]) -> str:
 
 def duty_line(name: str, player: str, task, d, shift_end: float, now: float, *, new: bool, seen: bool) -> str:
     if d.incident_id is not None:
-        how = ("fighting the bandits there" if d.need == "fight" else "going there and dealing with it")
+        how = {"fight": "fighting the bandits there",
+               "inquiry": "asking the people who saw it, then catching the thief where the trail leads (or arresting "
+                          "the one it points at)"}.get(d.need, "going there and dealing with it")
         head = (f"{name} is sending {player} to deal with trouble: {d.title}. Why: {d.why}. What to do: "
                 f"{d.instructions} There is no set shift; it is done by {how}." if new else
                 f"{name} sent {player} to deal with trouble: {d.title}." +

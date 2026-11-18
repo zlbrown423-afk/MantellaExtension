@@ -109,6 +109,14 @@ Conversation histories, config.ini, and logging.log available in:
         logger.addHandler(console_handler)
         logger.addHandler(file_handler)
 
+        # LIVINGWORLD PATCH: the Living World modules that log as "livingworld.*" (audio v2, trips, touch, squad...)
+        # had no handler, so their INFO lines never reached the console or logging.log
+        lw_logger = logging.getLogger("livingworld")
+        lw_logger.propagate = False
+        lw_logger.setLevel(logging_level)
+        lw_logger.addHandler(console_handler)
+        lw_logger.addHandler(file_handler)
+
         # custom levels
         logging.addLevelName(21, "INFO")
         logging.addLevelName(22, "INFO")
