@@ -16,6 +16,7 @@ import queue
 import threading
 from livingworld.perf.turn_timeline import TURN, SPEECH, PAUSE # LIVINGWORLD PATCH: turn timing
 from livingworld.audio import settings as lw_audio # LIVINGWORLD PATCH: mic capture layer (MANTELLA_LW_AUDIO_V2)
+from livingworld.audio import prompt_echo # LIVINGWORLD PATCH: drop Whisper's echo of the mic hint
 import time
 import os
 import wave
@@ -239,6 +240,11 @@ If you would prefer to run speech-to-text locally, please ensure the `Speech-to-
             transcription = self.moonshine_transcribe(audio)
         else:
             transcription = self.whisper_transcribe(audio, self.prompt)
+            if transcription:  # LIVINGWORLD PATCH: Whisper writes its hint back out on silence/noise
+                echo_free = prompt_echo.strip_prompt_echo(transcription, self.prompt)
+                if echo_free != transcription.strip():
+                    logger.log(self.loglevel, f'Dropped Whisper echo of the mic hint: "{transcription.strip()}" -> "{echo_free}"')
+                    transcription = echo_free
 
         self.transcription_times.append((time.time() - self._speech_end_time))
         if (self.proactive_mic_mode) and (len(self.transcription_times) % 5 == 0):
