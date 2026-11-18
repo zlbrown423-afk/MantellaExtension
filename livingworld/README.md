@@ -1111,3 +1111,30 @@ Also in this change, whatever the flag: the saved mic WAV and the Whisper upload
   says whose detail a fact is ("Hoda, the barkeeper" is Hoda's job).
 * `livingworld.*` loggers now reach Mantella's console and logging.log (the audio v2 "capturing" line, trips,
   touch, squad and others were silently dropped).
+
+## Tone of voice: the tone wheel, judged against the live voice (`livingworld/voice/tone.py`, `live.py`)
+
+The player picks the tone they mean on the **tone wheel** (LWToneWheel.esp in Mantella-Spell: eight lesser powers
+`Tone: Friendly / Polite / Flirty / Stern / Threatening / Sarcastic / Pleading / Neutral` for the Spell Wheel).
+The pick reaches the server as its own request (`mantella_lw_tone_set`, with the player's Speech skill), answered
+at once outside the conversation lock, because it arrives while a player input request waits for speech.
+
+Each spoken line is then measured from the capture layer's `UtteranceAudio` (needs `MANTELLA_LW_AUDIO_V2=1`) on a
+worker thread: loudness, pitch median and range, longest pause / voiced share (hesitation) and speaking rate from
+the transcript. Values are turned into z-scores against a **rolling in-game baseline** (the last 60 lines on this
+mic, saved as numbers in `data/audio/baseline/<mic>.ingame.json`), so loudness only ever counts relative to the
+player's recent lines: the Steam Link mic has a noise gate, and Voice Lab ran at another gain. Until 6 lines are
+in, the Voice Lab baseline stands in for the level-free measures only. Measures Voice Lab validation marked
+`dropped` for this player (spectral tilt, acoustic rate) are not used. No audio is kept.
+
+z-scores become plain cues (louder / quieter / shouting / whisper, higher / lower pitch, lively / flat, hesitant,
+rushed / slow, steady). The cues are scored against the picked tone (`FIT` table; Speech skill forgives small
+slips, up to +0.8 at 100) into convincing / fits / unreadable / unconvincing / clashes, and the NPCs get a note:
+"[Tone of voice] Zachary is trying to sound threatening. How it came across: hesitant, with long pauses, pitch
+higher than usual. The voice works against it: it falters: it sounds like a bluff." The HUD shows
+`[Tone] Threatening: clashes (hesitant, higher pitch)` with the `[Mic]` line (same reply keys, also when the
+speech HUD is off). With no tone picked, a striking delivery (shouting, whispering, faltering) still gets a short
+note. Typed lines with a tone picked: the NPCs go by the words. The pick ends with the conversation (a pick made
+before talking waits up to ten minutes). Delivery never feeds consent.
+
+Switches: `MANTELLA_LW_TONE=0` (all off), `MANTELLA_LW_TONE_HUD=0`, `MANTELLA_LW_TONE_UNPICKED=0`.

@@ -211,7 +211,17 @@ class GameStateManager:
         heard = talk.pop_lw_heard() if talk else None
         if heard:
             reply.update(self.__living_world.asr_hud_keys(heard) or {})
+        tone_lines = self.__living_world.tone_hud_lines() # LIVINGWORLD PATCH: how the line came across vs the tone picked
+        if tone_lines: # LIVINGWORLD PATCH: shown with the [Mic] lines (same keys), even with the speech HUD off
+            from livingworld.dialogue import asr_hud # LIVINGWORLD PATCH
+            lines = list(reply.get(asr_hud.KEY_HEARD) or []) + tone_lines # LIVINGWORLD PATCH
+            reply[asr_hud.KEY_HEARD] = lines # LIVINGWORLD PATCH
+            reply.setdefault(asr_hud.KEY_SHOWS, asr_hud.shows_for(asr_hud.display_seconds())) # LIVINGWORLD PATCH
+            reply.setdefault(asr_hud.KEY_GAP, asr_hud.GAP_SECONDS) # LIVINGWORLD PATCH
         return reply
+
+    def living_world_tone_set(self, input_json: dict[str, Any]) -> dict[str, Any]: # LIVINGWORLD PATCH: the tone wheel (never waits on a conversation)
+        return self.__living_world.tone_set(input_json) # LIVINGWORLD PATCH
 
     def __player_input(self, input_json: dict[str, Any]) -> dict[str, Any]: # LIVINGWORLD PATCH: was player_input
         if(not self.__talk ):
