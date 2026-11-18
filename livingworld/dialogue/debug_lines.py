@@ -12,7 +12,10 @@ re-in-state"). :func:`command_text` turns such a line back into the plain typed 
   word names a command family (guard, face, profile, max dirt, clean, filthy) AND the whole line then parses as a
   known command, so ordinary speech that happens to start with "the bug" is left alone;
 * hyphens and spaces inside command words are closed up ("re-in-state", "re in state" -> "reinstate",
-  "pro mote" -> "promote"), only where the joined word is a known command word.
+  "pro mote" -> "promote"), only where the joined word is a known command word;
+* the word right after "guard" is read as "thane" when it sounds like it ("debug guard bain whiterun", "fien",
+  "bane", "fain", "fine", "thain"...: user 2026-11-18, "thane" never registers). Only in that one spot, so the
+  same words anywhere else are left as said.
 
 Off with ``MANTELLA_LW_DEBUG_FUZZY=0`` (only lines typed or heard as "debug ..." count, word for word as before).
 """
@@ -36,6 +39,11 @@ _PREFIXES = (("debug",), ("debugg",), ("debuggy",), ("debugs",), ("debugged",), 
 # The word right after the prefix must start one of the command families, so "the bug bit me" is speech.
 _FAMILIES = {"guard", "face", "profile", "max", "maximum", "clean", "filthy"}
 _ALIASES = {"guards": "guard", "gard": "guard", "garde": "guard"}
+# How speech recognition writes "thane" (user 2026-11-18: "bain", "fien"). Read as "thane" only as the guard verb.
+_THANE_SOUNDS = {"bain", "bane", "baine", "bayne", "bein", "fien", "fein", "feign", "fain", "fane", "fayne",
+                 "fine", "thain", "thaine", "thayne", "thein", "theyne", "thine", "thane", "thanes", "thains",
+                 "stain", "stane", "sane", "sain", "vein", "vane", "vain", "thin", "than", "then", "fanes",
+                 "spain", "spane", "spains", "pain", "paine", "payne", "dane", "dain", "fame", "feins", "fains", "bains", "banes"}
 _MAX_JOIN = 4                 # "re in state" is three pieces; four covers "pro ba tion"
 
 
@@ -77,6 +85,11 @@ def _join_pieces(words: list[str], vocab: set[str]) -> list[str]:
     return out
 
 
+def _has_verb(words: list[str]) -> bool:
+    from livingworld.guard import debug as guard_debug
+    return any(w in guard_debug.COMMANDS for w in words)
+
+
 def _parses(line: str) -> bool:
     """True when ``line`` is a known test command (guard, hygiene, face or profile)."""
     from livingworld.guard import debug as guard_debug
@@ -104,6 +117,8 @@ def command_text(text: str | None) -> str | None:
         return text if exact else None
     vocab = _vocabulary()
     rest = _join_pieces([_ALIASES.get(w, w) for w in words[len(prefix):]], vocab)
+    if len(rest) > 1 and rest[0] == "guard" and rest[1] in _THANE_SOUNDS and not _has_verb(rest[2:]):
+        rest[1] = "thane"       # "debug guard then report" keeps its own verb
     line = " ".join(["debug", *rest])
     if exact:   # unchanged words keep the original line (names keep their case); a repaired one must parse
         return text if rest == words[len(prefix):] else (line if _parses(line) else text)

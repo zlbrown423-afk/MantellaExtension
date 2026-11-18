@@ -99,3 +99,44 @@ def test_misheard_reinstate_runs_and_is_hidden(tmp_path):
     assert "bug" not in said and "state" not in said
     seen = " ".join(str(m.get("content")) for c in llm.calls for m in c.messages)
     assert "Re-in-state" not in seen and "The Bug" not in seen
+
+
+def test_misheard_thane_is_read_as_thane():
+    """User 2026-11-18: "thane" never registers; it is heard as "bain" or "fien" (and similar)."""
+    for heard in ("debug guard bain whiterun", "Debug guard fien whiterun.", "debug guard bane white run",
+                  "the bug guard fine whiterun", "Debug guard, thain, Whiterun", "debug guard fain",
+                  "de bug guard thein white run", "debug guard bain", "debug guard spain whiterun",
+                  "Debug guard Spain, White Run.", "debug guard fain whiterun"):
+        got = debug_lines.command_text(heard)
+        assert got is not None and got.startswith("debug guard thane"), (heard, got)
+    assert debug_lines.command_text("debug guard bain whiterun") == "debug guard thane whiterun"
+    assert debug_lines.command_text("debug guard thane whiterun") == "debug guard thane whiterun"
+
+
+def test_thane_sounds_only_count_right_after_debug_guard():
+    assert debug_lines.command_text("Bain is a fine name for a dog") is None
+    assert debug_lines.command_text("the bug bit me, it was fine") is None
+    assert debug_lines.command_text("the guard was fine in Whiterun") is None
+    # a real verb later in the line wins: "then" is just a word here
+    assert debug_lines.command_text("debug guard then report") == "debug guard then report"
+    assert debug_lines.command_text("the bug guard fine report") == "debug guard fine report"
+
+
+def test_thane_sounds_switched_off(monkeypatch):
+    monkeypatch.setenv(debug_lines.FUZZY_ENV, "0")
+    assert debug_lines.command_text("debug guard bain whiterun") == "debug guard bain whiterun"
+    assert debug_lines.command_text("the bug guard bain whiterun") is None
+
+
+def test_heard_bain_makes_the_player_thane(tmp_path):
+    enlisted(tmp_path)
+    llm = ScriptedLLM(replies=["Hm."])
+    with HeadlessSession(str(tmp_path), llm) as s:
+        s.start([PLAYER, caius()], location="Whiterun", game_days=DAY + 0.2)
+        s.continue_until_player_turn()
+        s.say("Debug guard bain white run.")
+        s.end(game_days=DAY + 0.21)
+        LivingWorld.latest.wait_for_jobs()
+    db = open_db(tmp_path)
+    from livingworld.guard import store as GS
+    assert GS.last_event_gt(db, "thane", npc_id(db, "Torvar"), "whiterun_guard") is not None
