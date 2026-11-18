@@ -315,6 +315,16 @@ now sends each person's sex on attire records.
 Migrations are now applied by version number present, not by "above the highest", so feature branches
 (005 romance, 006 hygiene) can merge in either order.
 
+## Whisper echoing the mic hint
+
+Before each player turn Mantella hands Whisper a hint ("This is a conversation with Hulda in The Bannered
+Mare.") so names are spelled right. On breath, room noise or a click Whisper often writes that hint back out
+as if the player said it, which then showed in the log and `[Mic]` HUD and went to the NPC as the player's
+line. `Transcriber._transcribe` now runs Whisper's text through `audio/prompt_echo.py`: a sentence that
+starts with the hint's first five words ("this is a conversation with") is dropped, real speech after it is
+kept, and an echo with nothing else counts as nothing heard. Logged as `Dropped Whisper echo of the mic hint`.
+The hint itself is unchanged and was never part of the NPCs' prompt. Off with `set MANTELLA_LW_PROMPT_ECHO=0`.
+
 ## What the mic heard (raw speech recognition HUD)
 
 On with `MANTELLA_LIVING_WORLD=1`. Switch off with `set MANTELLA_LW_ASR_HUD=0`. How long the line stays
