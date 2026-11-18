@@ -1100,6 +1100,11 @@ Also in this change, whatever the flag: the saved mic WAV and the Whisper upload
 * **"debug ..." lines** (`dialogue/debug_lines.py`): the command still runs, but the NPC is shown a neutral stand-in,
   and the line stays out of the conversation log (memories, facts, leads, diaries), task/lead/squad hooks and
   Mantella's summary. Off with `MANTELLA_LW_HIDE_DEBUG=0`.
+* **Misheard test commands** (`debug_lines.command_text`): speech recognition's "The Bug Guard Reinstate" or
+  "Debug guard re-in-state" is read as "debug guard reinstate". Misheard "debug" ("the bug", "de bug", "debugg",
+  "d bug"...) counts only when the next word starts a command family (guard, face, profile, max, clean, filthy)
+  and the whole line parses as a known command; split or hyphenated command words are closed up only into known
+  command words. The server log says "heard '...' as the test command '...'". Off with `MANTELLA_LW_DEBUG_FUZZY=0`.
 * Heard-from-the-teller lines swap the name the sentence actually starts with for "they" ("theypped by" fixed);
   arrests and cleared camps no longer name the superior as the object ("arrested me Mikael"); everyday words that
   open a sentence ("Things", "Everything") are not leads; yes/no fact values are dropped and the extraction prompt

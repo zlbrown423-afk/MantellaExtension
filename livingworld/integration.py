@@ -657,6 +657,9 @@ class LivingWorld:
             return
         npc_id = self._npc_ids.get(player.ref_id) or self._register(player, context.game_days)
         hidden = debug_lines.is_debug(text)      # a test command: run it below, but nobody remembers it
+        command = debug_lines.command_text(text) or text   # misheard "the bug guard re-in-state" -> "debug guard reinstate"
+        if command != text:
+            logger.log(23, f"Living World: heard '{text.strip()}' as the test command '{command}'")
         if not hidden:
             ConversationLog(self.store).append(self.conv_id, npc_id, text.strip(), None, context.game_days)
             self._player_said = text.strip()
@@ -670,18 +673,18 @@ class LivingWorld:
                 names = [c.name for c in context.npcs_in_conversation.get_all_characters() if not c.is_player_character]
                 self._learn_leads(player_leads.from_player(text, names), context.game_days)
         if self.hygiene_debug:
-            self._hygiene_debug(text, npc_id, context)
+            self._hygiene_debug(command, npc_id, context)
         if self.face_test:
-            face = face_test.parse(text)
+            face = face_test.parse(command)
             if face is not None:
                 names = [c.name for c in context.npcs_in_conversation.get_all_characters() if not c.is_player_character]
-                self._face_to_send = face_test.wire(face_test.target(text, names), *face)
+                self._face_to_send = face_test.wire(face_test.target(command, names), *face)
                 logger.log(23, f"Living World: face test command, sending '{self._face_to_send}' with the next line")
         if self.personality is not None:
             present = {self._npc_ids.get(c.ref_id) or self._register(c, context.game_days): c.name
                        for c in context.npcs_in_conversation.get_all_characters() if not c.is_player_character}
             with self.store.transaction() as db:
-                result = self.personality.debug(db, text, present, npc_id, context.game_days)
+                result = self.personality.debug(db, command, present, npc_id, context.game_days)
             if result:
                 logger.log(23, f"Living World personality test command: {result}")
         if self.guard and not hidden:
@@ -690,7 +693,7 @@ class LivingWorld:
                 logger.log(23, "Living World guard: the player answered someone who came over on shift")
         if self.guard_debug:
             scene = self._guard_scene()
-            result = self._guard_for(self.store).debug(text, scene) if scene else None
+            result = self._guard_for(self.store).debug(command, scene) if scene else None
             if result:
                 logger.log(23, f"Living World guard test command: {result}")
         if self.squad and not hidden:
