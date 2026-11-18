@@ -33,6 +33,7 @@ from livingworld.bodylang.service import BodyLanguage
 from livingworld.dialogue import asr_hud, hearing, leads as player_leads
 from livingworld.dialogue import joins, place, promises, trips, undress_words
 from livingworld.dialogue import private_notes
+from livingworld.voice import tone as voice_tone
 from livingworld.squad import squad_enabled, service as squad_service, words as squad_words
 from livingworld import fog
 from livingworld.continuity import continuity_enabled, service as continuity
@@ -229,6 +230,10 @@ class LivingWorld:
         self._undress: undress_words.UndressPlanner | None = None   # this conversation's undress question and the player's yes
         self.hearing = enabled and hearing.hearing_enabled()   # catch misheard speech (MANTELLA_LW_HEARING=0 turns off)
         self.asr_hud = enabled and asr_hud.enabled()   # show what speech recognition heard (MANTELLA_LW_ASR_HUD=0 turns off)
+        self.tone = enabled and voice_tone.enabled()   # tone wheel + NPCs judging the voice (MANTELLA_LW_TONE=0 off)
+        self._tone_state = None      # livingworld.voice.live.ToneState, made on first use
+        self._live_voice = None      # livingworld.voice.live.LiveVoice while the capture layer (AUDIO_V2) is on
+        self._tone_hud: list[str] = []   # [Tone] lines for the next reply to the game
         self.leads = enabled and player_leads.leads_enabled()  # ask about a lead without its name (MANTELLA_LW_LEADS=0 turns off)
         self._lead_ask: str | None = None           # the player's last line, while it asks after someone
         self._lead_learned: set[str] = set()        # names learned from that line and its answers
@@ -713,6 +718,10 @@ class LivingWorld:
 
     @_never_raises
     def conversation_ended(self, game_days: float | None, context: Any | None = None) -> None:
+        if self._tone_state is not None:
+            self._tone_state.clear()     # a picked tone lasts one conversation
+            if self._live_voice is not None:
+                self._live_voice.flush()
         if self.conv_id is None:
             return
         if game_days is None and context is not None:
@@ -997,6 +1006,88 @@ class LivingWorld:
         if not self.asr_hud or not heard:
             return {}
         return asr_hud.hud_keys(heard)
+
+    # tone of voice (livingworld/voice/tone.py, live.py) -------------------------------------------------------
+    def _tone_parts(self):
+        """(ToneState, LiveVoice or None). The voice is only measured with the capture layer on (AUDIO_V2)."""
+        from livingworld.voice.live import LiveVoice, ToneState
+        if self._tone_state is None:
+            self._tone_state = ToneState()
+            from livingworld.audio import settings as audio_settings
+            if audio_settings.enabled() and LivingWorld.start_workers:
+                try:
+                    self._live_voice = LiveVoice(audio_settings.audio_root(self.save_folder))
+                    logger.log(23, "Living World: tone of voice is measured from the microphone")
+                except Exception:
+                    logger.exception("Living World: could not start the voice measurements; tone goes by words only")
+            elif not audio_settings.enabled():
+                logger.log(23, "Living World: tone wheel on, but the voice is not measured (MANTELLA_LW_AUDIO_V2 is off)")
+        return self._tone_state, self._live_voice
+
+    def tone_set(self, request: dict[str, Any]) -> dict[str, Any]:
+        """The player picked a tone on the tone wheel. Handled outside the conversation lock (it arrives while a
+        player input request waits for speech). The reply type is the harmless init-completed one, so any game
+        script that sees the reply ignores it."""
+        reply: dict[str, Any] = {comm_consts.KEY_REPLYTYPE: comm_consts.KEY_REPLYTTYPE_INITCOMPLETED}
+        try:
+            if not self.tone:
+                return reply
+            picked = voice_tone.normalize(str(request.get(voice_tone.KEY_TONE, "")))
+            if picked is None:
+                logger.warning(f"Living World: unknown tone '{request.get(voice_tone.KEY_TONE)}' from the tone wheel")
+                return reply
+            skill = request.get(voice_tone.KEY_SPEECH)
+            try:
+                skill = float(skill) if skill is not None else None
+            except (TypeError, ValueError):
+                skill = None
+            state, _ = self._tone_parts()
+            state.set(picked, skill)
+            logger.log(23, f"Living World: tone picked: {picked}" + (f" (Speech {skill:.0f})" if skill is not None else ""))
+            reply[voice_tone.KEY_TONE] = picked
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not take the tone wheel pick; carrying on")
+        return reply
+
+    @_never_raises
+    def tone_notes(self, text: str, context: Any, from_mic: bool = True) -> list[str]:
+        """Notes for the NPCs on how the player's last line sounded against the tone they picked."""
+        if not self.tone or context is None or not text:
+            return []
+        state, voice = self._tone_parts()
+        picked = state.current()
+        player = context.npcs_in_conversation.get_player_character()
+        player_name = player.name if player else "The player"
+        reading = voice.reading_for(text) if (voice is not None and from_mic) else None
+        cues = reading.cues if reading is not None else None
+        notes: list[str] = []
+        if picked:
+            state.touch()
+            if not from_mic:
+                why = "typed, not spoken"
+            elif voice is None:
+                why = "voice measurement off"
+            elif reading is None:
+                why = "no measurement for this line"
+            else:
+                why = reading.why
+            j = voice_tone.judge(picked, cues, state.speech_skill, why)
+            notes.append(voice_tone.note_text(player_name, j))
+            if voice_tone.hud_enabled():
+                self._tone_hud.append(voice_tone.hud_line(j))
+            logger.log(23, f"Living World tone: {picked} -> {j.verdict} (score {j.score}, cues "
+                           f"{[c.key for c in (j.cues or [])]}{', ' + j.why_unmeasured if j.why_unmeasured else ''})")
+        elif cues and voice_tone.unpicked_enabled():
+            note = voice_tone.unpicked_note(player_name, cues)
+            if note:
+                notes.append(note)
+                logger.log(23, f"Living World tone (none picked): {[c.key for c in cues]}")
+        return notes
+
+    def tone_hud_lines(self) -> list[str]:
+        lines, self._tone_hud = self._tone_hud, []
+        return lines
 
     @_never_raises
     def hearing_note(self, text: str, context: Any) -> str | None:

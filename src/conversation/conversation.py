@@ -325,6 +325,10 @@ class Conversation:
             hearing_note = living_world.hearing_note(player_text, self.__context) if living_world is not None else None # LIVINGWORLD PATCH
             if hearing_note: # LIVINGWORLD PATCH
                 new_message.add_event([hearing_note]) # LIVINGWORLD PATCH
+            if living_world is not None and not lw_debug_lines.is_debug(player_text) and player_text != self.__silence_auto_response_message: # LIVINGWORLD PATCH: tone of voice vs the tone picked on the wheel
+                tone_notes = living_world.tone_notes(player_text, self.__context, from_mic=self.__lw_heard is not None) # LIVINGWORLD PATCH
+                if tone_notes: # LIVINGWORLD PATCH
+                    new_message.add_event(tone_notes) # LIVINGWORLD PATCH
             guard_notes = living_world.guard_notes(player_text, self.__context) if living_world is not None else None # LIVINGWORLD PATCH: G2f arrests
             if guard_notes: # LIVINGWORLD PATCH
                 new_message.add_event(guard_notes) # LIVINGWORLD PATCH

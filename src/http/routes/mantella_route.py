@@ -24,6 +24,7 @@ from starlette.concurrency import run_in_threadpool  # LIVINGWORLD PATCH
 from livingworld.harness.recorder import TrafficRecorder  # LIVINGWORLD PATCH: optional traffic recording
 from livingworld.perf.stats import STATS as PERF  # LIVINGWORLD PATCH: request timing
 from livingworld.diary import REQUEST_READ as LW_DIARY_READ  # LIVINGWORLD PATCH: NPC diaries
+from livingworld.voice.tone import REQUEST_SET as LW_TONE_SET  # LIVINGWORLD PATCH: tone wheel
 
 logger = utils.get_logger()
 
@@ -122,6 +123,9 @@ class mantella_route(routeable):
                 if request_type == LW_DIARY_READ:  # LIVINGWORLD PATCH: opening a diary only reads the store; it never
                     # waits behind a conversation request (one waiting for speech can block for minutes)
                     return await run_in_threadpool(self.__game.living_world_diary_read, received_json)
+                if request_type == LW_TONE_SET:  # LIVINGWORLD PATCH: a tone wheel pick arrives while a player input
+                    # request waits for the player to speak, so it must not queue behind it
+                    return await run_in_threadpool(self.__game.living_world_tone_set, received_json)
                 # LIVINGWORLD PATCH: requests are handled off the event loop, one at a time. A player input request
                 # can block for minutes waiting for speech; handled on the loop it also blocked the game's end request,
                 # so walking away or the end spell did nothing until the player spoke again. See __handle_request.
