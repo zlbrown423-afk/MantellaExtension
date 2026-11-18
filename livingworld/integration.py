@@ -1086,7 +1086,8 @@ class LivingWorld:
         return notes
 
     def tone_hud_lines(self) -> list[str]:
-        lines, self._tone_hud = self._tone_hud, []
+        lines = getattr(self, "_tone_hud", None) or []
+        self._tone_hud = []
         return lines
 
     @_never_raises
