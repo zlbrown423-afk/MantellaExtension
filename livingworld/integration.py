@@ -33,6 +33,7 @@ from livingworld.bodylang.service import BodyLanguage
 from livingworld.dialogue import asr_hud, hearing, leads as player_leads
 from livingworld.dialogue import joins, place, promises, trips, undress_words
 from livingworld.dialogue import private_notes
+from livingworld.dialogue import turn_back
 from livingworld.voice import tone as voice_tone
 from livingworld.squad import squad_enabled, service as squad_service, words as squad_words
 from livingworld import fog
@@ -229,6 +230,8 @@ class LivingWorld:
         self.undress_prompt = enabled and undress_words.enabled()   # "taking off my tunic" -> yes/no -> Undress (MANTELLA_LW_UNDRESS_PROMPT=0 off)
         self._undress: undress_words.UndressPlanner | None = None   # this conversation's undress question and the player's yes
         self.hearing = enabled and hearing.hearing_enabled()   # catch misheard speech (MANTELLA_LW_HEARING=0 turns off)
+        self.turn_back = enabled and turn_back.enabled()   # fewer "How about you?" (MANTELLA_LW_TURN_BACK=0 turns off)
+        self._turn_back = turn_back.TurnBackTrimmer()   # who handed a question back, and when
         self.asr_hud = enabled and asr_hud.enabled()   # show what speech recognition heard (MANTELLA_LW_ASR_HUD=0 turns off)
         self.tone = enabled and voice_tone.enabled()   # tone wheel + NPCs judging the voice (MANTELLA_LW_TONE=0 off)
         self._tone_state = None      # livingworld.voice.live.ToneState, made on first use
@@ -901,6 +904,11 @@ class LivingWorld:
             if npcs:
                 rule = hearing.prompt_lines(npcs, player.name)
                 blocks.append(f"Hearing {player.name}:\n" + "\n".join(f"- {line}" for line in rule))
+        if self.turn_back and player is not None:
+            npcs = [c.name for c in characters if not c.is_player_character]
+            if npcs:
+                rule = turn_back.prompt_lines(npcs, player.name)
+                blocks.append(f"Talking with {player.name}:\n" + "\n".join(f"- {line}" for line in rule))
         return "\n\n".join(blocks)
 
     @_never_raises
@@ -2648,6 +2656,28 @@ class LivingWorld:
             except Exception:
                 self.errors += 1
                 logger.exception(f"Living World: side job record not stored: {rec[:200]}")
+
+    def reply_started(self) -> None:
+        """A new NPC reply is being generated (the hand-back check counts replies)."""
+        if self.turn_back:
+            self._turn_back.start_reply()
+
+    def trim_turn_back(self, content: Any) -> None:
+        """Cut a repeated bare "How about you?" off the end of an NPC's spoken line (dialogue/turn_back.py)."""
+        if not self.turn_back or getattr(content, "is_system_generated_sentence", True):
+            return
+        try:
+            speaker = content.speaker
+            if speaker is None or speaker.is_player_character:
+                return
+            text = content.text
+            kept = self._turn_back.trim(speaker.name, text)
+            if kept != text:
+                logger.log(23, f"Living World: {speaker.name} asked the question back again; cut {text[len(kept):].strip()!r}")
+                content.text = kept
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not check the line for a hand-back question; leaving it as it is")
 
     def voice_allowed(self, character: Any) -> bool:
         """False if this NPC's bound voice differs from the voice Mantella is about to use.

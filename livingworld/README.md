@@ -340,6 +340,16 @@ up: `set MANTELLA_LW_ASR_HUD_SECONDS=8` (1-60). Code: `dialogue/asr_hud.py`; nee
 This is what entered the system, not what an NPC believes it heard: per-NPC perception (misheard
 speech below) only adds notes for the NPCs and never changes this line.
 
+## Fewer "How about you?"
+
+On with `MANTELLA_LIVING_WORLD=1`. Switch off with `set MANTELLA_LW_TURN_BACK=0`. No extra AI call.
+Code: `dialogue/turn_back.py`.
+
+| Part | What it does |
+| --- | --- |
+| Rule | Each prompt asks the NPCs not to hand questions back ("How about you?", "And you?", "And yourself?"). Instead they react, give an opinion, add a detail, ask one specific question, or just stop. |
+| Trim | `ChatManager.generate_sentence` passes each spoken NPC line through `LivingWorld.trim_turn_back` before TTS. A bare hand-back at the end of a line (with an optional "friend", "traveler" or a name) is cut when the same NPC already kept one in their last 3 replies, or earlier in the same reply. Specific questions ("How about you, ever been to Solitude?", "How about you come with me?") are never cut, nor is a line that is all the NPC has said this reply. The cut text never reaches the voice or the conversation history. Logged as `asked the question back again; cut ...`. |
+
 ## Misheard speech
 
 On with `MANTELLA_LIVING_WORLD=1`. Switch off with `set MANTELLA_LW_HEARING=0`. No extra AI call.

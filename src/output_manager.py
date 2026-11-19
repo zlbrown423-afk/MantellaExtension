@@ -182,9 +182,11 @@ class ChatManager:
         """
 
         character_to_talk = content.speaker
+        living_world = getattr(self, "living_world", None) # LIVINGWORLD PATCH: refuse a line in the wrong voice
+        if living_world is not None and content.sentence_type == SentenceTypeEnum.SPEECH: # LIVINGWORLD PATCH: fewer "How about you?"
+            living_world.trim_turn_back(content) # LIVINGWORLD PATCH
         text = ' ' + content.text + ' '
 
-        living_world = getattr(self, "living_world", None) # LIVINGWORLD PATCH: refuse a line in the wrong voice
         if living_world is not None and content.text.strip() and not living_world.voice_allowed(character_to_talk): # LIVINGWORLD PATCH
             return Sentence(SentenceContent(character_to_talk, "", content.sentence_type, True), "", 0) # LIVINGWORLD PATCH
         
@@ -308,6 +310,8 @@ class ChatManager:
             first_sentence = True
             parsed_sentence: SentenceContent | None = None
             pending_sentence: SentenceContent | None = None
+            if getattr(self, "living_world", None) is not None: # LIVINGWORLD PATCH: count replies for the "How about you?" check
+                self.living_world.reply_started() # LIVINGWORLD PATCH
             self.__is_first_sentence = True
             self.__contains_player_character = characters.contains_player_character()
             is_multi_npc = characters.contains_multiple_npcs()
