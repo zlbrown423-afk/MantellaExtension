@@ -43,7 +43,7 @@ from livingworld.spatial import spatial_enabled, service as spatial_service
 from livingworld import diary
 from livingworld.diary import service as diaries
 from livingworld.fog import places as fog_places, service as fog_names
-from livingworld.perception import awareness
+from livingworld.perception import awareness, outfit as outfit_manager
 from livingworld.perception.intoxication import drink_state
 from livingworld.perception.pipeline import PerceptionPipeline
 from livingworld import touch
@@ -1802,6 +1802,7 @@ class LivingWorld:
         keys[intimate_scenes.KEY_INTIMACY_ON] = bool(self.intimacy)
         keys[confront.KEY_CONFRONT_ON] = bool(self.confront)
         keys[decency.KEY_DECENCY_ON] = bool(self.decency)
+        keys.update(outfit_manager.start_keys(self.enabled))   # followers dressed again after a door or a load
         keys[surrender.KEY_SURRENDER_ON] = bool(self.surrender)
         keys[side_jobs.KEY_JOBS_ON] = bool(self.side_jobs)
         keys[KEY_PEEK_ON] = bool(self.peek and self.body_language)

@@ -580,6 +580,27 @@ grabs and hits as before). Children are never part of any of it: not in a scene,
 Off switches: `MANTELLA_LW_CONFRONT=0`, `MANTELLA_LW_DECENCY=0`, `MANTELLA_LW_PEEK=0` (peek is also off with body
 language off). Each reaches the game with the conversation start reply.
 
+### Outfit manager: followers stay dressed through doors and loads (`perception/outfit.py`)
+
+Skyrim puts a follower back in her default outfit whenever her 3D loads again (a door, fast travel, a save
+load). Gear the player gave her comes off, and if her own outfit pieces were taken she walks out naked
+(Lydia leaving Breezehome). The game side (Mantella-Spell `MantellaRepository` `LwOutfit*`, on the regular
+2 s check) watches each adult follower (the vanilla follower quest's alias, plus player teammates PO3 finds
+nearby; up to 8), snapshots the playable armor she wears every 4 s while she is dressed and settled, and
+for 20 s after she or the player changes area (interior cell or worldspace, or a fast-travel jump), after
+her 3D loads again, after a load and after a dismissal, puts back on every snapshot piece she still owns.
+Still naked at the end of that window with nothing to put back: her base outfit is set again.
+
+A deliberate undress (the Undress action or the undress yes/no prompt, an OStim scene) is left alone while
+she stays where it happened; once she follows the player somewhere else the undress ends and she is
+dressed again. Each re-dress of a naked follower shows "Lydia put her gear back on.", traces
+`Mantella Living World outfit:` to Papyrus.0.log, and sends an attire record with `via=outfit` (the
+server closes her naked state, no new memories).
+
+Off switches: `MANTELLA_LW_OUTFIT_MANAGER=0` (whole manager), `MANTELLA_LW_OUTFIT_NOTICES=0` (keep it, no
+notification). The game keeps the last values it was sent (on by default), so a change takes effect from
+the next conversation.
+
 ### Surrender and the wingman (Salonia Carvain)
 
 | Piece | File | What it does |
