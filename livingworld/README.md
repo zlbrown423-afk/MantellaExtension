@@ -1179,3 +1179,36 @@ note. Typed lines with a tone picked: the NPCs go by the words. The pick ends wi
 before talking waits up to ten minutes). Delivery never feeds consent.
 
 Switches: `MANTELLA_LW_TONE=0` (all off), `MANTELLA_LW_TONE_HUD=0`, `MANTELLA_LW_TONE_UNPICKED=0`.
+
+## Territorial lordship L1: the Plains Wardens' charter (`livingworld/lordship/`, `livingworld/civic/`)
+
+Design doc 2026-11-20 (milestones L0-L7). **Off unless `MANTELLA_LW_LORDSHIP=1`.** Test commands follow
+`MANTELLA_LW_LORDSHIP_DEBUG` (on with lordship unless `0`).
+
+* **L0 civic core** (migration 027): `institution` (the Jarl's court, the Plains Wardens) and an append-only paper
+  `ledger_entry` (a balance is the sum of its entries; a transfer is two rows sharing a `transfer_key`). Never
+  touches gold in the player's inventory. Both on the save timeline.
+* **L1 the charter** (migration 028): `charter` (versioned terms, district, powers per `data/charter_terms.json`
+  level 1-5), `charter_change` (active, under review, suspended...), `compliance` (one row per term per 30-day
+  month), `influence_snapshot` (the seven measures, power, legitimacy, gap and band) and `official_stance`
+  (Balgruuf, Proventus, Irileth from `data/court.json`: weights for compliance, restraint, thrift, the Jarl's
+  standing and their own regard, shifted by `trusting`/`greedy` traits).
+* **Monthly reckoning** (`reckoning.py`, rules only): judge personnel cap, patrols and reports; pay the stipend
+  and allowance in full, half or not at all; take wages and feed; recompute measures; update stances; at most one
+  official move (Proventus withholds the next payment, Irileth urges a review, Balgruuf suspends, restores,
+  confirms or commends); missed terms cost the Jarl's trust. Caught up at conversation start, at most 24 months
+  per conversation. No outcome is scripted: `python -m livingworld.lordship.dev scenario all` shows loyal service,
+  overreach (review, then suspension), neglect (payments withheld) and reconciliation (charter restored).
+* **What the game can see.** A term is excused until the game says it counts that kind of fact
+  (`lordship.watching`) or one is reported. In L1 nothing in game reports yet (the L2 bridge reads the cavalry
+  mod), so in play the charter only exists through test commands.
+* **Prompts.** Balgruuf, Proventus and Irileth get the charter, last month's reckoning, their view with reasons
+  and any recent move. They may argue but agree no new terms (negotiation by words is L2).
+
+Test commands in conversation: `debug charter grant [level N]`, `debug charter watch`, `debug charter riders N`,
+`debug charter horses N`, `debug charter patrol [N]`, `debug charter report`, `debug charter month` (run the next
+reckoning now), `debug charter status`. Results go to the server log.
+
+In-game check (needs the game): with `MANTELLA_LW_LORDSHIP=1`, talk to Balgruuf, say `debug charter grant`, then
+`debug charter riders 20` and `debug charter month` twice; Proventus and Irileth should then speak of the
+Wardens growing past their charter, and Balgruuf of a review or suspension.
