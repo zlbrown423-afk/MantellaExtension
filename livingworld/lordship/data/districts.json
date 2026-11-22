@@ -1,0 +1,17 @@
+{
+  "_about": "Rural districts of a hold that a charter can place under a company's care. places = map marker names (livingworld/fog/data/map_markers.json, checked 2026-11-20); routes = ordered places a patrol rides through (used from L3); communities = social community keys whose view counts as that district's loyalty (none are seeded yet for the Western Plains, so loyalty reads as 'not yet known'). The Jarl always keeps the city, Dragonsreach and civil administration.",
+  "districts": [
+    {
+      "key": "western_plains",
+      "name": "the Western Plains",
+      "hold": "Whiterun",
+      "places": ["Pelagia Farm", "Chillfurrow Farm", "Battle-Born Farm", "Western Watchtower", "Whiterun Stables"],
+      "routes": {
+        "west_road": ["Whiterun Stables", "Pelagia Farm", "Western Watchtower", "Rorikstead"],
+        "farm_circuit": ["Whiterun Stables", "Battle-Born Farm", "Chillfurrow Farm", "Pelagia Farm"]
+      },
+      "communities": [],
+      "about": "the farms and roads west of Whiterun between the city walls, the Western Watchtower and the road to Rorikstead"
+    }
+  ]
+}

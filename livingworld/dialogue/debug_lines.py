@@ -37,7 +37,7 @@ _PREFIXES = (("debug",), ("debugg",), ("debuggy",), ("debugs",), ("debugged",), 
              ("de", "bug"), ("dee", "bug"), ("d", "bug"), ("the", "bug"), ("da", "bug"), ("duh", "bug"),
              ("de", "bugg"), ("the", "bugs"), ("de", "bugs"), ("deeb", "bug"))
 # The word right after the prefix must start one of the command families, so "the bug bit me" is speech.
-_FAMILIES = {"guard", "face", "profile", "max", "maximum", "clean", "filthy"}
+_FAMILIES = {"guard", "face", "profile", "max", "maximum", "clean", "filthy", "charter"}
 _ALIASES = {"guards": "guard", "gard": "guard", "garde": "guard"}
 # How speech recognition writes "thane" (user 2026-11-18: "bain", "fien"). Read as "thane" only as the guard verb.
 _THANE_SOUNDS = {"bain", "bane", "baine", "bayne", "bein", "fien", "fein", "feign", "fain", "fane", "fayne",
@@ -60,7 +60,9 @@ def _vocabulary() -> set[str]:
     from livingworld.guard import orgs as O
     from livingworld.personality import debug as personality_debug
     from livingworld.bodylang import face_test
+    from livingworld.lordship import debug as lordship_debug
     words = set(guard_debug.COMMANDS) | set(personality_debug.COMMANDS) | set(face_test.MOODS)
+    words |= set(lordship_debug.COMMANDS)
     words |= _FAMILIES | {"dirt", "dirty", "camp", "road", "brawl", "theft"}
     for o in O.orgs():
         words |= {o.hold.lower(), o.key.split("_")[0]} | {r.key for r in o.ranks}
@@ -96,8 +98,9 @@ def _parses(line: str) -> bool:
     from livingworld.hygiene import debug as hygiene_debug
     from livingworld.personality import debug as personality_debug
     from livingworld.bodylang import face_test
+    from livingworld.lordship import debug as lordship_debug
     return any(p(line) is not None for p in (guard_debug.parse, hygiene_debug.parse, face_test.parse,
-                                             personality_debug.parse))
+                                             personality_debug.parse, lordship_debug.parse))
 
 
 def command_text(text: str | None) -> str | None:

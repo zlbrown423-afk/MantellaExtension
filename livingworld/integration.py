@@ -36,6 +36,8 @@ from livingworld.dialogue import private_notes
 from livingworld.dialogue import turn_back
 from livingworld.voice import tone as voice_tone
 from livingworld.squad import squad_enabled, service as squad_service, words as squad_words
+from livingworld.lordship import lordship_debug_enabled, lordship_enabled
+from livingworld.lordship import debug as lordship_debug, prompts as lordship_prompts, reckoning as lordship_reckoning
 from livingworld import fog
 from livingworld.continuity import continuity_enabled, service as continuity
 from livingworld.continuity import resume as conv_resume
@@ -255,6 +257,9 @@ class LivingWorld:
         self._fine_sent: set[int] = set()           # lines whose PayFine was handled
         self._held_actions: dict[str, list[dict[str, Any]]] = {}   # speaker ref id -> actions from an action-only reply
         self.squad = enabled and squad_enabled()   # temporary squads (livingworld/squad); MANTELLA_LW_SQUAD=0 off
+        self.lordship = enabled and lordship_enabled()   # Plains Wardens charter (livingworld/lordship); OFF unless MANTELLA_LW_LORDSHIP=1
+        self.lordship_debug = enabled and lordship_debug_enabled()
+        self._lordship_refreshed: int | None = None     # conv_id whose monthly reckonings were caught up
         self._squad_notes: list[str] = []          # for the dialogue model with the player's next line
         self._squad_seen: tuple[int, str] | None = None   # (conversation, player line) already read for squad words
         self.asked_joins = enabled and joins.joins_enabled()   # only add people the player asked for (MANTELLA_LW_ASKED_JOINS=0 off)
@@ -706,6 +711,11 @@ class LivingWorld:
                 logger.log(23, f"Living World guard test command: {result}")
         if self.squad and not hidden:
             self._squad_player(text.strip(), npc_id, context)
+        if self.lordship_debug and hidden:
+            with self.store.transaction() as db:
+                result = lordship_debug.run(db, command, npc_id, context.game_days)
+            if result:
+                logger.log(23, f"Living World lordship test command: {result}")
 
     def _hygiene_debug(self, text: str, player_id: int, context: Any) -> None:
         from livingworld.hygiene import debug
@@ -824,6 +834,7 @@ class LivingWorld:
         self._refresh_social(now, list(present), player_id)
         self._refresh_guard()   # before work upkeep, which would expire duties without the reprimand
         self._refresh_work(now)
+        self._refresh_lordship(now)
         scene = self._scene(player_id, player.name if player else "the player", list(present))
         blocks = []
         for character in characters:
@@ -892,6 +903,11 @@ class LivingWorld:
             party = self._squad_lines(npc_id, character.name)
             if party:
                 blocks.append(f"The party, and {character.name}:\n" + "\n".join(f"- {line}" for line in party))
+            charter = self._lordship_lines(npc_id, character.name, player_id,
+                                           player.name if player is not None else "the player", now)
+            if charter:
+                blocks.append(f"The Plains Wardens' charter, and {character.name}:\n"
+                              + "\n".join(f"- {line}" for line in charter))
         if self.place and player is not None:
             npcs = [c.name for c in characters if not c.is_player_character]
             where = place.prompt_lines(getattr(self._context, "location", ""),
@@ -1389,6 +1405,34 @@ class LivingWorld:
         except Exception:
             self.errors += 1
             logger.exception("Living World: could not close the party at the end of the conversation; carrying on")
+
+    # ---- territorial lordship (livingworld/lordship) ----
+    def _refresh_lordship(self, now: float) -> None:
+        """Once per conversation: run every monthly charter reckoning that has fallen due."""
+        if not self.lordship or self.store is None or self._lordship_refreshed == self.conv_id:
+            return
+        self._lordship_refreshed = self.conv_id
+        try:
+            with self.store.transaction() as db:
+                result = lordship_reckoning.catch_up(db, now)
+            if result.periods:
+                logger.log(23, f"Living World lordship: reckoned {result.periods} month(s), paid {result.paid} gold"
+                               f"{'; ' + '; '.join(result.moves) if result.moves else ''}; charter {result.status}")
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: lordship reckoning failed; carrying on")
+
+    def _lordship_lines(self, npc_id: int, name: str, player_id: int | None, player_name: str, now: float) -> list[str]:
+        """For a court official: the charter, last month's reckoning and their own view of the Wardens."""
+        if not self.lordship or self.store is None:
+            return []
+        try:
+            with self.store.reading() as db:
+                return lordship_prompts.official_lines(db, npc_id, name, player_id, player_name, now)
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: lordship prompt lines failed; carrying on")
+            return []
 
     def _squad_lines(self, npc_id: int, name: str) -> list[str]:
         """For a member of the player's party (or someone just asked): who they walk with and how."""

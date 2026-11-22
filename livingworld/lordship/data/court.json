@@ -1,0 +1,23 @@
+{
+  "_about": "Officials who hold views about a chartered company, with what they care about. Matched in game by plugin + base form ID (verified 2026-11-20 against Mantella's skyrim_characters.csv). weights say how much each concern moves their view (they need not add up to 1): compliance = terms kept; restraint = the company stays within what its charter level allows (the power gap); thrift = the company does not cost the court more than agreed and stays solvent; standing = how the Jarl himself now regards the player; regard = their own feelings about the player (trust, affinity, respect). L1 has the three officials closest to the charter; Hrongar, the Battle-Borns, the Gray-Manes, Caius and the farmers join in L6.",
+  "officials": [
+    {
+      "key": "balgruuf", "name": "Balgruuf the Greater", "role": "Jarl of Whiterun, who granted the charter",
+      "plugin": "Skyrim.esm", "base_id": "0x00013BBD", "signs": true,
+      "weights": {"compliance": 0.35, "restraint": 0.3, "thrift": 0.05, "standing": 0.0, "regard": 0.3},
+      "cares": "order on his roads, his own authority, and Whiterun staying out of the war"
+    },
+    {
+      "key": "proventus", "name": "Proventus Avenicci", "role": "steward of Dragonsreach, who pays the stipend",
+      "plugin": "Skyrim.esm", "base_id": "0x00013BBA",
+      "weights": {"compliance": 0.35, "restraint": 0.1, "thrift": 0.35, "standing": 0.1, "regard": 0.1},
+      "cares": "the treasury, reports filed on time, and precedent"
+    },
+    {
+      "key": "irileth", "name": "Irileth", "role": "the Jarl's housecarl, who commands the hold's soldiers",
+      "plugin": "Skyrim.esm", "base_id": "0x00013BB8",
+      "weights": {"compliance": 0.2, "restraint": 0.55, "thrift": 0.0, "standing": 0.1, "regard": 0.15},
+      "cares": "the Jarl's safety and who commands armed riders in his hold"
+    }
+  ]
+}
