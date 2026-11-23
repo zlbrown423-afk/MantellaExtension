@@ -31,6 +31,7 @@ from livingworld.bodylang import (adult_gestures_enabled, body_language_enabled,
 from livingworld.bodylang import face_test
 from livingworld.bodylang.presence import gesture_group, is_passive_record, is_presence
 from livingworld.bodylang.service import BodyLanguage
+from livingworld.social import familiarity
 from livingworld.dialogue import asr_hud, hearing, leads as player_leads
 from livingworld.dialogue import joins, place, promises, trips, undress_words
 from livingworld.dialogue import private_notes
@@ -1332,7 +1333,7 @@ class LivingWorld:
                     f = self._guard_facts.get(next((c.ref_id for c in self._context.npcs_in_conversation
                                                     .get_all_characters() if self._npc_ids.get(c.ref_id) == npc_id), None))
                     member = bool(f and f.is_guard and uniform.hold_of(location) == u.hold)
-                rel = db.execute("SELECT familiarity FROM relationship WHERE from_id = ? AND to_id = ?",
+                rel = db.execute("SELECT familiarity FROM v_relationship WHERE from_id = ? AND to_id = ?",
                                  (npc_id, player_id)).fetchone()
                 knows = bool(rel and rel[0] >= 0.1)
                 reg = uniform.regard(db, npc_id, player_id)
@@ -2802,6 +2803,14 @@ class LivingWorld:
             except Exception:
                 self.errors += 1
                 logger.exception("Living World: could not queue the memory backfill; carrying on")
+            try:   # a change row with a dimension v_relationship does not read would vanish without a word
+                from livingworld.social.relationship_dims import unknown_dimensions
+                with store.reading() as db:
+                    unknown = unknown_dimensions(db)
+                if unknown:
+                    logger.warning(f"Living World: relationship changes use dimensions nothing reads: {unknown}")
+            except Exception:
+                logger.exception("Living World: could not check relationship dimensions; carrying on")
             if self.start_workers:
                 worker.start()
             self._usage_store = store
@@ -2858,6 +2867,16 @@ class LivingWorld:
                 self.errors += 1
                 logger.exception("Living World: could not mark a side job as reported; carrying on")
         ConversationLog(self.store).close(self.conv_id, game_days)
+        if familiarity.enabled():
+            try:
+                with self.store.transaction() as db:
+                    player = db.execute("SELECT npc_id FROM npc WHERE is_player = 1").fetchone()
+                    grew = familiarity.after_talk(db, self.conv_id, player[0]) if player else {}
+                if grew:
+                    logger.log(23, f"Living World: familiarity after the talk: {grew}")
+            except Exception:
+                self.errors += 1
+                logger.exception("Living World: could not add familiarity after the talk; carrying on")
         if self.personality is not None:
             try:
                 with self.store.transaction() as db:

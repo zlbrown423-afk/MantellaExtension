@@ -50,8 +50,8 @@ RECALL_SOURCES = frozenset({
     "npc", "conversation", "participant", "utterance", "world_event", "knowledge", "memory",
     "rumor", "belief", "claim", "relationship", "relationship_change", "standing_change", "name_known",
     "romance_bond_change", "community", "membership", "community_stance", "timeline", "timeline_scope", "game_load",
-    "conversation_resume", "fade_clock",
-    "v_known_facts", "v_visible_memory", "v_timeline_scope", "v_timeline_scope_walk", "v_relationship", "v_claim_knowledge", "v_belief",
+    "conversation_resume", "fade_clock", "utterance_correction",
+    "v_utterance", "v_known_facts", "v_visible_memory", "v_timeline_scope", "v_timeline_scope_walk", "v_relationship", "v_claim_knowledge", "v_belief",
     "v_standing", "v_name_known", "v_romance_bond", "v_community_reputation", "v_faction_reputation",
 })
 # Written for the conversation in progress; recall reads them only for other conversations (recap) or in ways

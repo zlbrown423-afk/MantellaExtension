@@ -186,7 +186,7 @@ class Extractor:
     # ---- reading the conversation ----
     def lines(self, conv_id: int) -> list[Line]:
         rows = self.store.query(
-            "SELECT u.seq, u.utt_id, u.speaker_id, n.display_name, u.text FROM utterance u"
+            "SELECT u.seq, u.utt_id, u.speaker_id, n.display_name, u.text FROM v_utterance u"
             " JOIN npc n ON n.npc_id = u.speaker_id WHERE u.conv_id = ? ORDER BY u.seq", (conv_id,))
         return [Line(*row) for row in rows]
 
