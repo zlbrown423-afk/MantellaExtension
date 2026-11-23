@@ -57,5 +57,7 @@ class ConversationLog:
 
     def close(self, conv_id: int, game_time: float) -> None:
         with self.store.transaction() as db:
-            db.execute("UPDATE conversation SET ended_gt = ? WHERE conv_id = ? AND ended_gt IS NULL",
-                       (game_time, conv_id))
+            # never before the conversation's own start or last line: a load can hand back an earlier clock
+            db.execute("UPDATE conversation SET ended_gt = MAX(?, started_gt,"
+                       " COALESCE((SELECT MAX(u.game_time) FROM utterance u WHERE u.conv_id = conversation.conv_id),"
+                       " started_gt)) WHERE conv_id = ? AND ended_gt IS NULL", (game_time, conv_id))
