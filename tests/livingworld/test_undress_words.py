@@ -185,3 +185,93 @@ def test_switched_off(living_world_on, monkeypatch, tmp_path):
     _, second, keys, _ = _dip(tmp_path, "Yes.")
     assert not any(a.get("identifier") == UNDRESS for line in second for a in line.actions)
     assert not any("tunic" in h for k in keys for h in (k.get(KEY_HINTS) or []))
+
+
+# ---- dressing from words (2026-11-21: Lydia said she would get dressed and stayed naked) ----------------
+
+from livingworld.actions import DRESS  # noqa: E402
+from livingworld.dialogue.undress_words import DressWatcher, agrees, asked_to_dress, npc_dresses  # noqa: E402
+
+
+@pytest.mark.parametrize("line", [
+    "Of course, Zachary. I'll get dressed now.",       # Lydia, 2026-11-21
+    "Let me put my clothes on.",
+    "I'll put my tunic back on.",
+    "I'll put on my boots.",
+    "Give me a moment to dress.",
+    "Let me get dressed, if you don't mind.",
+])
+def test_getting_dressed_now(line):
+    assert npc_dresses(line)
+
+
+@pytest.mark.parametrize("line", [
+    "I won't get dressed.",
+    "I'll get dressed later.",
+    "Should I get dressed?",
+    "I'll get dressed once we're home.",
+    "I'll take off my tunic.",
+    "I'll dress your wounds.",
+])
+def test_not_getting_dressed_now(line):
+    assert not npc_dresses(line)
+
+
+def test_asked_and_agreed():
+    assert asked_to_dress("Lydia, will you put your clothes on, please?")
+    assert asked_to_dress("Would you mind to put on your clothes, though?")
+    assert not asked_to_dress("Take your clothes off.")
+    assert agrees("I suppose I should. It's best to be decent before stepping out. Give me a moment.")
+    assert not agrees("Of course not.") and not agrees("No, I'd rather not.")
+
+
+def test_dress_watcher_adds_dress_once():
+    w = DressWatcher([DRESS])
+    line: list = []
+    assert w.keep("Lydia", "Of course, Zachary. I'll get dressed now.", line) == [DRESS]
+    assert line == [{"identifier": DRESS, "arguments": {"source": "Lydia"}}]
+    again: list = []
+    assert w.keep("Lydia", "Let me put my clothes on.", again) == [] and again == []
+
+
+def test_dress_watcher_answers_the_players_ask_on_the_first_line_only():
+    w = DressWatcher([DRESS], player_said="Would you mind to put on your clothes, though?")
+    line: list = []
+    w.keep("Lydia", "I suppose I should. It's best to be decent before stepping out.", line)
+    assert line == [{"identifier": DRESS, "arguments": {"source": "Lydia"}}]
+    w2 = DressWatcher([DRESS], player_said="Put your clothes on.")
+    first: list = []
+    second: list = []
+    w2.keep("Lydia", "Hmm.", first)
+    w2.keep("Elyse Marrow", "Of course.", second)
+    assert first == [] and second == []
+
+
+def test_dress_watcher_leaves_a_called_dress_and_a_missing_action_alone():
+    called = [{"identifier": DRESS, "arguments": {"source": "Lydia"}}]
+    assert DressWatcher([DRESS]).keep("Lydia", "I'll get dressed now.", called) == [] and len(called) == 1
+    none: list = []
+    assert DressWatcher([]).keep("Lydia", "I'll get dressed now.", none) == [] and none == []
+
+
+def test_in_game_flow_dress_from_words(living_world_on, tmp_path):
+    llm = ScriptedLLM(rules=[when_player_says("clothes", "Of course, Zachary. I'll get dressed now.")],
+                      replies=["Hm."])
+    with HeadlessSession(str(tmp_path), llm, settings={"disabled_actions": ""}) as s:
+        s.start([PLAYER, actors.gerdur()], location="Whiterun", game_days=3.5)
+        s.continue_until_player_turn()
+        lines = s.say("Gerdur, will you put your clothes on, please?")
+        s.end(game_days=3.51)
+    assert {"identifier": DRESS, "arguments": {"source": "Gerdur"}} in [a for line in lines for a in line.actions]
+
+
+def test_dress_words_switch_off(living_world_on, monkeypatch, tmp_path):
+    monkeypatch.setenv(U.DRESS_ENV, "0")
+    llm = ScriptedLLM(rules=[when_player_says("clothes", "Of course, Zachary. I'll get dressed now.")],
+                      replies=["Hm."])
+    with HeadlessSession(str(tmp_path), llm, settings={"disabled_actions": ""}) as s:
+        s.start([PLAYER, actors.gerdur()], location="Whiterun", game_days=3.5)
+        s.continue_until_player_turn()
+        lines = s.say("Gerdur, will you put your clothes on, please?")
+        s.end(game_days=3.51)
+    assert not any(a.get("identifier") == DRESS for line in lines for a in line.actions)

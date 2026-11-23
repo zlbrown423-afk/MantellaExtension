@@ -2499,6 +2499,11 @@ class LivingWorld:
             also.append(undress_words.UndressWatcher(self._undress, {getattr(a, "identifier", None) for a in actions}
                                                      | set(FunctionManager._actions.keys()),
                                                      gate=self._undress_gate, pronoun_of=self._undress_pronoun))
+        if self.enabled and undress_words.dress_words_enabled():
+            from src.actions.function_manager import FunctionManager
+            also.append(undress_words.DressWatcher({getattr(a, "identifier", None) for a in actions}
+                                                   | set(FunctionManager._actions.keys()),
+                                                   player_said or self._player_said))   # "I'll get dressed now" -> Dress
         if self._desk is not None:
             from src.actions.function_manager import FunctionManager
             also.append(side_jobs.TravelWatcher(self._desk, FunctionManager._actions.keys()))

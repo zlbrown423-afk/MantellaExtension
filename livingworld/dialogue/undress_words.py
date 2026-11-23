@@ -35,7 +35,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
 
-from livingworld.actions import UNDRESS
+from livingworld.actions import DRESS, UNDRESS
 
 ENV = "MANTELLA_LW_UNDRESS_PROMPT"
 _OFF = {"0", "false", "no", "off"}
@@ -320,3 +320,98 @@ class UndressWatcher:
             return [UNDRESS]
         self.planner.npc_said(speaker_name, text, True, self.gate, self.pronoun_of(speaker_name))
         return []
+
+
+# ---------------------------------------------------------------- dressing from words
+
+# Putting clothes on needs nobody's yes: an NPC who says she is getting dressed now ("I'll get dressed now",
+# "let me put my clothes on", "give me a moment to dress") gets ``Dress`` on that line when the reply did not
+# call it. 2026-11-21: Lydia said "Of course, Zachary. I'll get dressed now." twice and stayed naked.
+# Off with ``MANTELLA_LW_DRESS_WORDS=0``.
+DRESS_ENV = "MANTELLA_LW_DRESS_WORDS"
+
+_DRESS_LEAD = _LEAD[:-1] + r"|\bgive\s+me\s+a\s+(?:moment|minute|second)\b|\bi\s+should\b|\bi\s+suppose\s+i\s+should\b)"
+_DRESSING = re.compile(
+    _DRESS_LEAD + _GAP + r"(?:"
+    r"\b(?:get|getting)\s+dressed\b"
+    r"|\bdress(?:ing)?\b(?!\s+(?:you|him|her|them))"
+    r"|\b(?:put|putting|pull|pulling|slip|slipping|get|getting)\s+(?:my\s+|some\s+|the\s+)?(?:\w+\s+)?(?:" + _ITEM
+    + r")\s+(?:back\s+)?on\b"
+    r"|\b(?:put|putting|pull|pulling|slip|slipping|get|getting)\s+(?:back\s+)?on\s+(?:my\s+|some\s+|the\s+)?(?:\w+\s+)?(?:"
+    + _ITEM + r")\b"
+    r"|\bcover\s+(?:myself\s+)?up\b"
+    r")", re.IGNORECASE)
+_DRESS_NOT = re.compile(r"\b(?:not|never|later|tomorrow|tonight|someday|once|when|after|if|unless|before|maybe|perhaps"
+                        r"|could|would|cannot)\b|n't\b", re.IGNORECASE)
+
+# The player asks the NPC to get dressed, and her answer agrees: "Of course." / "I suppose I should."
+_ASK_DRESS = re.compile(r"\b(?:put|get|pull|slip)\s+(?:your\s+|some\s+)?(?:\w+\s+)?(?:" + _ITEM + r")\s+(?:back\s+)?on\b"
+                        r"|\b(?:put|get|pull|slip)\s+(?:back\s+)?on\s+(?:your\s+|some\s+)?(?:\w+\s+)?(?:" + _ITEM + r")\b"
+                        r"|\bget\s+dressed\b|\bdress\s+(?:yourself|up|again)\b|\bcover\s+(?:yourself\s+)?up\b"
+                        r"|^\W*(?:\w+,\s*)?dress\b", re.IGNORECASE)
+_AGREE = re.compile(r"^\W*(?:\w+\W+){0,3}?(?:of\s+course|yes|yeah|aye|sure|alright|all\s+right|ok(?:ay)?|fine|very\s+well"
+                    r"|as\s+you\s+wish|right\s+away|certainly|i\s+suppose\s+i\s+should|you'?re\s+right|good\s+idea"
+                    r"|give\s+me\s+a\s+(?:moment|minute|second))\b", re.IGNORECASE)
+_REFUSE = re.compile(r"\b(?:no|not|never|rather\s+not|won't|will\s+not|can't|cannot|don't\s+want|later|why\s+should)\b",
+                     re.IGNORECASE)
+
+
+def asked_to_dress(player_text: str | None) -> bool:
+    return bool(player_text) and bool(_ASK_DRESS.search(_clean(player_text)))
+
+
+def agrees(text: str) -> bool:
+    """The NPC's answer starts by agreeing and its first sentence does not refuse."""
+    text = _clean(text)
+    first = re.split(r"[.!?]", text, maxsplit=1)[0]
+    return bool(_AGREE.search(text)) and not _REFUSE.search(first)
+
+
+def dress_words_enabled() -> bool:
+    return os.environ.get(DRESS_ENV, "").strip().lower() not in _OFF
+
+
+def npc_dresses(text: str) -> bool:
+    """This NPC sentence says she is putting her clothes on now."""
+    text = _clean(text)
+    if not text or text.endswith("?"):
+        return False
+    for match in _DRESSING.finditer(text):
+        start = max(0, match.start() - 30)
+        clause = re.split(r"[.!?;]", text[start:], maxsplit=1)[0]
+        lead = match.start() - start
+        rest = _POLITE.sub("", clause[lead:])
+        if _DRESS_NOT.search(rest) or re.search(r"\b(?:not|never|n't)\b", clause[:lead], re.IGNORECASE):
+            continue
+        return True
+    return False
+
+
+class DressWatcher:
+    """One per reply, beside ``UndressWatcher``: ``Dress`` for an NPC who says she is getting dressed now."""
+
+    def __init__(self, offered: Iterable[str], player_said: str | None = None):
+        self.can_dress = DRESS in set(offered)
+        self.asked = asked_to_dress(player_said)   # "Lydia, will you put your clothes on, please?"
+        self._done: set[str] = set()
+        self._first = True   # only the reply's first line answers the player
+
+    def note_actions(self, actions: Iterable[Any]) -> None:
+        for action in actions:
+            if isinstance(action, dict) and action.get("identifier") == DRESS:
+                source = (action.get("arguments") or {}).get("source")
+                self._done.update(source if isinstance(source, list) else [source])
+
+    def keep(self, speaker_name: str, text: str, sentence_actions: list) -> list[str]:
+        self.note_actions(sentence_actions)
+        if not self.can_dress or speaker_name in self._done:
+            self._first = False
+            return []
+        answering = self.asked and self._first
+        self._first = False
+        if not (npc_dresses(text) or (answering and agrees(text))):
+            return []
+        self._done.add(speaker_name)
+        sentence_actions.append({"identifier": DRESS, "arguments": {"source": speaker_name}})
+        logger.log(23, f"Living World dress: {speaker_name} said she is getting dressed; Dress on her line")
+        return [DRESS]
