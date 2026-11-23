@@ -347,8 +347,8 @@ Code: `dialogue/turn_back.py`.
 
 | Part | What it does |
 | --- | --- |
-| Rule | Each prompt asks the NPCs not to hand questions back ("How about you?", "And you?", "And yourself?"). Instead they react, give an opinion, add a detail, ask one specific question, or just stop. |
-| Trim | `ChatManager.generate_sentence` passes each spoken NPC line through `LivingWorld.trim_turn_back` before TTS. A bare hand-back at the end of a line (with an optional "friend", "traveler" or a name) is cut when the same NPC already kept one in their last 3 replies, or earlier in the same reply. Specific questions ("How about you, ever been to Solitude?", "How about you come with me?") are never cut, nor is a line that is all the NPC has said this reply. The cut text never reaches the voice or the conversation history. Logged as `asked the question back again; cut ...`. |
+| Rule | Each prompt tells the NPCs never to hand questions back ("What about you?", "And you?", "And yourself?"): said flatly it sounds cold. Instead they react, give an opinion, add a detail, ask one warm, specific question, or just stop. |
+| Rephrase / trim | `ChatManager.generate_sentence` passes each spoken NPC line through `LivingWorld.trim_turn_back` before TTS. A bare hand-back at the end of a line (with an optional "friend", "traveler" or a name) never reaches the voice as is. The first one from an NPC in a while is reworded into a warmer question ("How have you been keeping?", "How's the road been treating you?"...), and one the same NPC repeats within their next 3 replies, or in the same reply, is cut. Specific questions ("How about you, ever been to Solitude?", "How about you come with me?") are never touched, and a line is never cut to nothing when it is all the NPC has said this reply (it is reworded instead). The changed text is what the voice and the conversation history get. Logged as `handed the question back; '...' -> '...'`. |
 
 ## Misheard speech
 
