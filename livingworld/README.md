@@ -597,6 +597,16 @@ dressed again. Each re-dress of a naked follower shows "Lydia put her gear back 
 `Mantella Living World outfit:` to Papyrus.0.log, and sends an attire record with `via=outfit` (the
 server closes her naked state, no new memories).
 
+Followers from Mantella's own Follow action (`giafac_following`) count too. A follower sent home stays
+watched (household), and Lydia is watched whenever she is in the player's cell: when the player comes home
+or loads, an undress from before the player left is over and a bare housecarl is dressed from her own
+things. The Dress action uses the snapshot, then what she carries, and her base outfit only if still bare.
+
+Dress from words (`dialogue/undress_words.py` `DressWatcher`): an NPC who says she is getting dressed now
+("I'll get dressed now", "let me put my clothes on"), or whose first line agrees when the player has just
+asked her to put her clothes on, gets `Dress` on that line when the reply did not call it (2026-11-21:
+Lydia promised twice and stayed naked). Off: `MANTELLA_LW_DRESS_WORDS=0`.
+
 Off switches: `MANTELLA_LW_OUTFIT_MANAGER=0` (whole manager), `MANTELLA_LW_OUTFIT_NOTICES=0` (keep it, no
 notification). The game keeps the last values it was sent (on by default), so a change takes effect from
 the next conversation.
