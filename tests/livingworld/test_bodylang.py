@@ -15,7 +15,8 @@ from livingworld.harness import actors, bodysim
 from livingworld.harness.perception import KEY_EVENTS, presence
 from livingworld.harness.scripted_llm import ScriptedLLM
 from livingworld.harness.session import HeadlessSession
-from livingworld.integration import ENV_VAR, KEY_BODY, KEY_BODY_ON, KEY_CONV_ANIM_ON, KEY_GESTURES_ON, KEY_MOOD, LivingWorld
+from livingworld.integration import (ENV_VAR, KEY_BODY, KEY_BODY_ON, KEY_CONV_ANIM_ON, KEY_GESTURES_ON, KEY_MOOD,
+                                    KEY_PASSIVE_BODY_ON, LivingWorld)
 from livingworld.perception.records import BadRecord
 from src.http.communication_constants import communication_constants as comm_consts
 
@@ -26,6 +27,7 @@ PLAYER = actors.player("Torvar")
 def living_world_inline(monkeypatch):
     monkeypatch.setenv(ENV_VAR, "1")
     monkeypatch.setenv("MANTELLA_LW_TASKS", "0")
+    monkeypatch.setenv("MANTELLA_LW_PASSIVE_BODY", "1")   # most tests here drive crowding; the off tests clear it
     monkeypatch.setattr(LivingWorld, "start_workers", False)
 
 
@@ -275,6 +277,51 @@ def test_conversation_states_switch_off_alone(tmp_path, monkeypatch):
     llm, start, *_ = talk(tmp_path, [rec])
     assert start[KEY_CONV_ANIM_ON] is False and start[KEY_BODY_ON] is True
     assert "stood very close" in llm.dialogue_calls[0].system_prompt     # the rest of body language stays on
+
+
+# ---- passive perception switch (MANTELLA_LW_PASSIVE_BODY, off unless 1) ----
+@pytest.mark.parametrize("value", [None, "0"])
+def test_passive_perception_off_drops_crowding_and_keeps_the_rest(tmp_path, monkeypatch, value):
+    if value is None:
+        monkeypatch.delenv("MANTELLA_LW_PASSIVE_BODY", raising=False)   # the default: off
+    else:
+        monkeypatch.setenv("MANTELLA_LW_PASSIVE_BODY", value)
+    records = [presence(actors.gerdur(), "approach", 3.499),
+               presence(actors.gerdur(), "crowd", 3.4995, distance_m=0.6, seconds=5.0, count=3),
+               presence(actors.gerdur(), "backed_off", 3.4996, distance_m=1.4),
+               presence(actors.gerdur(), "stare", 3.4997, distance_m=0.9, seconds=6.0),
+               presence(actors.gerdur(), "wave", 3.4998),
+               presence(actors.gerdur(), "weapon", 3.4999, distance_m=2.0)]
+    llm, start, first, later = talk(tmp_path, records, replies=["Hm.", "Well?"], more=["Hello."])
+    assert start[KEY_PASSIVE_BODY_ON] is False and start[KEY_BODY_ON] is True and start[KEY_CONV_ANIM_ON] is True
+    everything = json.dumps([c.system_prompt for c in llm.dialogue_calls]) + json.dumps(llm.dialogue_calls[-1].messages)
+    for passive_words in ("stood very close", "walked straight up", "backed away", "stared", "kept looking"):
+        assert passive_words not in everything
+    assert "waved" in everything                                   # gestures are separate
+    assert "weapon" in everything.lower()                          # threats are separate
+    db = sqlite3.connect(tmp_path / "data" / "livingworld" / "HeadlessTest.sqlite")
+    (mood_json,) = db.execute("SELECT e.mood_json FROM emotion_state e JOIN npc n USING (npc_id)"
+                              " WHERE n.display_name = 'Gerdur'").fetchone()
+    body = json.loads(mood_json).get("body", {})
+    assert not body.get("crowded") and not body.get("unease")   # (the drawn weapon may still irritate her)
+
+
+def test_passive_perception_on_tells_the_game(tmp_path):
+    llm, start, *_ = talk(tmp_path, [presence(actors.gerdur(), "crowd", 3.4995, distance_m=0.6, seconds=5.0)])
+    assert start[KEY_PASSIVE_BODY_ON] is True
+    assert "stood very close" in llm.dialogue_calls[0].system_prompt
+
+
+def test_passive_perception_follows_the_master_switch(tmp_path, monkeypatch):
+    monkeypatch.setenv("MANTELLA_LW_BODY_LANGUAGE", "0")
+    llm, start, *_ = talk(tmp_path, [presence(actors.gerdur(), "crowd", 3.4995, distance_m=0.6, seconds=5.0)])
+    assert start[KEY_PASSIVE_BODY_ON] is False and start[KEY_BODY_ON] is False
+
+
+def test_passive_records_are_named():
+    assert all(P.is_passive_record(presence(actors.gerdur(), w, 3.5)) for w in ("approach", "crowd", "backed_off", "stare"))
+    assert not any(P.is_passive_record(presence(actors.gerdur(), w, 3.5))
+                   for w in ("weapon", "peek", "wave", "handshake", "salute", "stroke", "open_arms"))
 
 
 # ---- face test command ("debug face happy") ----
