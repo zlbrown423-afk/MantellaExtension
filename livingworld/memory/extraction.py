@@ -203,6 +203,16 @@ class Extractor:
         joined, left = row[0]
         return [l for l in lines if l.seq > joined and (left is None or l.seq <= left)]
 
+    def source_time(self, conv_id: int, game_time: float | None) -> float | None:
+        """The game time that what is learnt from this conversation carries: never earlier than the conversation
+        itself or its last line. A save load during or just before the extraction can leave the conversation
+        closed at an earlier game time (the loaded save's), and a memory stamped with that time would show on
+        the loaded timeline although it was said on the branch the player left (2026-11-23 audit, memory 636)."""
+        row = self.store.query("SELECT c.started_gt, MAX(u.game_time) FROM conversation c"
+                               " LEFT JOIN utterance u ON u.conv_id = c.conv_id WHERE c.conv_id = ?", (conv_id,))
+        times = [t for t in (game_time, *(row[0] if row else ())) if t is not None]
+        return max(times) if times else game_time
+
     # ---- one NPC ----
     def extract_for(self, conv_id: int, owner_id: int, backfill: bool = False) -> ExtractionResult:
         all_lines = self.lines(conv_id)
@@ -214,6 +224,7 @@ class Extractor:
             return ExtractionResult()
         location, game_time = self.store.query(
             "SELECT location, COALESCE(ended_gt, started_gt) FROM conversation WHERE conv_id = ?", (conv_id,))[0]
+        game_time = self.source_time(conv_id, game_time)
 
         transcript = "\n".join(f"[{l.seq}] {l.speaker}: {l.text}" for l in heard)
         name_list = ", ".join(names.values())
