@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from livingworld.dialogue import turn_back
-from livingworld.dialogue.turn_back import TurnBackTrimmer, find, strip
+from livingworld.dialogue.turn_back import REPHRASES, TurnBackTrimmer, find, rephrase, strip
 
 
 @pytest.mark.parametrize("text, kept", [
@@ -43,31 +43,39 @@ def test_specific_questions_are_left_alone(text):
     assert strip(text) == text
 
 
-def test_first_hand_back_is_kept_then_repeats_are_cut():
+def test_rephrase_swaps_the_bare_question_for_a_warmer_one():
+    assert rephrase("I'm fine, what about you?") == "I'm fine. " + REPHRASES[0]
+    assert rephrase("Busy day. What about you?", 1) == "Busy day. " + REPHRASES[1]
+    assert rephrase("What about you?", 2) == REPHRASES[2]
+    assert rephrase("No question here.") == "No question here."
+    assert all(find(r) is None for r in REPHRASES)   # a rewording is never caught again
+
+
+def test_first_hand_back_is_reworded_then_repeats_are_cut():
     t = TurnBackTrimmer(gap=4)
     t.start_reply()
-    assert t.trim("Gerdur", "Fine. How about you?") == "Fine. How about you?"
+    assert t.trim("Gerdur", "Fine. What about you?") == "Fine. " + REPHRASES[0]
     for _ in range(3):   # the next three replies
         t.start_reply()
         assert t.trim("Gerdur", "Busy. And you?") == "Busy."
-    t.start_reply()      # fourth reply after the kept one: allowed again
-    assert t.trim("Gerdur", "Tired. And you?") == "Tired. And you?"
-    assert t.cut == 3
+    t.start_reply()      # fourth reply after the kept one: asked again, reworded
+    assert t.trim("Gerdur", "Tired. And you?") == "Tired. " + REPHRASES[1]
+    assert t.cut == 3 and t.reworded == 2
 
 
 def test_second_hand_back_in_one_reply_is_cut():
     t = TurnBackTrimmer()
     t.start_reply()
-    assert t.trim("Hod", "Well, how about you?") == "Well, how about you?"
+    assert t.trim("Hod", "Well, how about you?") == REPHRASES[0]
     assert t.trim("Hod", "Fine day. And yourself?") == "Fine day."
 
 
 def test_speakers_are_counted_apart():
     t = TurnBackTrimmer()
     t.start_reply()
-    assert t.trim("Hod", "Good. And you?") == "Good. And you?"
+    assert t.trim("Hod", "Good. And you?") == "Good. " + REPHRASES[0]
     t.start_reply()
-    assert t.trim("Gerdur", "Good. And you?") == "Good. And you?"
+    assert t.trim("Gerdur", "Good. And you?") == "Good. " + REPHRASES[1]
     t.start_reply()
     assert t.trim("Hod", "Good. And you?") == "Good."
 
@@ -77,7 +85,7 @@ def test_never_leaves_the_npc_silent():
     t.start_reply()
     t.trim("Hod", "Good. And you?")
     t.start_reply()
-    assert t.trim("Hod", "And you?") == "And you?"     # nothing said yet this reply: keep it
+    assert t.trim("Hod", "What about you?") == REPHRASES[1]   # nothing said yet this reply: reworded, not cut
     t.start_reply()
     t.trim("Hod", "Same old.")
     assert t.trim("Hod", "And you?") == ""             # already said something: drop it
@@ -130,7 +138,7 @@ def test_living_world_trims_repeats():
     lw.reply_started()
     first = _content("Gerdur", "Fine. And you?")
     lw.trim_turn_back(first)
-    assert first.text == "Fine. And you?"
+    assert first.text == "Fine. " + REPHRASES[0]
     lw.reply_started()
     second = _content("Gerdur", "Busy. And you?")
     lw.trim_turn_back(second)
