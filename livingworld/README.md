@@ -193,6 +193,15 @@ she does not know well" with familiarity under 0.2, "not where people can see" w
 
 When there is nothing to sit on or nowhere pointed at, the game adds an in-game event line so the NPC can say so.
 
+**Cavalry orders by voice** (`livingworld/dialogue/cavalry_orders.py`). With the Whiterun Cavalry Training
+Grounds mod (WhiterunCavalryTraining.esp 0.7.0 or later) installed, the player can give the riders' orders out
+loud during any conversation: "mount up", "dismount", "fall in" (column), "line abreast", "at ease", "rally to
+me", "rally at the hall". Questions, "don't…", orders for later ("when we reach the gate, dismount") and
+reported speech do nothing. Up to three orders per line, in the order spoken, go to the game with the next NPC
+line as `mantella_lw_cavalry_order` (one digit per order: "mount up and fall in" = 13); the model gets a note so
+the NPC can answer like a rider. Without the cavalry plugin the game ignores it. Off:
+`set MANTELLA_LW_CAVALRY_VOICE=0`.
+
 ## Reputation and gossip (S1: word gets around Riverwood)
 
 On with `MANTELLA_LIVING_WORLD=1`. Switch gossip off with `set MANTELLA_LW_GOSSIP=0` (claims and opinions
