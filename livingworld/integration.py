@@ -33,7 +33,7 @@ from livingworld.bodylang.presence import gesture_group, is_passive_record, is_p
 from livingworld.bodylang.service import BodyLanguage
 from livingworld.social import familiarity
 from livingworld.dialogue import asr_hud, hearing, leads as player_leads
-from livingworld.dialogue import joins, place, promises, trips, undress_words
+from livingworld.dialogue import cavalry_orders, joins, place, promises, trips, undress_words
 from livingworld.dialogue import private_notes
 from livingworld.dialogue import turn_back
 from livingworld.voice import tone as voice_tone
@@ -234,6 +234,8 @@ class LivingWorld:
         self._trips: trips.TripPlanner | None = None   # this conversation's trip question and confirmed trip
         self.undress_prompt = enabled and undress_words.enabled()   # "taking off my tunic" -> yes/no -> Undress (MANTELLA_LW_UNDRESS_PROMPT=0 off)
         self._undress: undress_words.UndressPlanner | None = None   # this conversation's undress question and the player's yes
+        self.cavalry_voice = enabled and cavalry_orders.enabled()   # "Mount up!" moves the riders (MANTELLA_LW_CAVALRY_VOICE=0 off)
+        self._cavalry: cavalry_orders.CavalryVoice | None = None    # this conversation's spoken cavalry orders
         self.hearing = enabled and hearing.hearing_enabled()   # catch misheard speech (MANTELLA_LW_HEARING=0 turns off)
         self.turn_back = enabled and turn_back.enabled()   # fewer "How about you?" (MANTELLA_LW_TURN_BACK=0 turns off)
         self._turn_back = turn_back.TurnBackTrimmer()   # who handed a question back, and when
@@ -603,6 +605,7 @@ class LivingWorld:
         self._lead_learned = set()
         self._trips = trips.TripPlanner(here=str(getattr(context, "location", "") or "")) if self.trips else None
         self._undress = undress_words.UndressPlanner() if self.undress_prompt else None
+        self._cavalry = cavalry_orders.CavalryVoice() if self.cavalry_voice else None
         self._desk = side_jobs.Desk() if self.side_jobs else None
         self._touch = touch_consent.Desk() if self.touch else None
         self._surrender_pending = set()   # survivors in this conversation who have not agreed to follow yet
@@ -681,6 +684,11 @@ class LivingWorld:
         if not hidden:
             ConversationLog(self.store).append(self.conv_id, npc_id, text.strip(), None, context.game_days)
             self._player_said = text.strip()
+        if self._cavalry is not None and not hidden:
+            orders = self._cavalry.heard(text)
+            if orders:
+                logger.log(23, "Living World cavalry: heard the order "
+                           + ", then ".join(cavalry_orders.NAMES[o] for o in orders))
         if self.task_words and not hidden:
             self._help_offered = task_words.player_offers(text, self._npc_last)
         if self.leads and not hidden:
@@ -947,6 +955,7 @@ class LivingWorld:
                 self.errors += 1
                 logger.exception("Living World: could not read squad words; carrying on")
         squad, self._squad_notes = self._squad_notes, []
+        squad = squad + self._cavalry_notes(text, context)
         squad = squad + self._spatial_notes(text, context)
         squad = squad + self._topic_notes(text, context)
         if not self.guard or self.conv_id is None or context is not self._context or not text:
@@ -954,6 +963,22 @@ class LivingWorld:
         scene = self._guard_scene()
         return squad + (private_notes.reowned(self._guard_for(self.store).turn_notes(scene, text), self._ref_ids())
                         if scene else [])
+
+    def _cavalry_notes(self, text: str, context: Any) -> list[str]:
+        """A note for the dialogue model when the player's line gives the riders an order ("Mount up!")."""
+        if self._cavalry is None or self.conv_id is None or context is not self._context or not text:
+            return []
+        try:
+            if not debug_lines.is_debug(text):
+                orders = self._cavalry.heard(text)   # the line may reach here before player_line
+                if orders:
+                    logger.log(23, "Living World cavalry: heard the order "
+                               + ", then ".join(cavalry_orders.NAMES[o] for o in orders))
+            return self._cavalry.take_notes()
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: could not read a cavalry order; carrying on")
+            return []
 
     def _ref_ids(self) -> dict[int, Any]:
         """npc_id -> the game ref_id, for the NPCs registered in this conversation (private notes)."""
@@ -1707,6 +1732,8 @@ class LivingWorld:
             keys[KEY_MOOD] = text
         if self._face_to_send:
             keys[face_test.KEY_FACE], self._face_to_send = self._face_to_send, None
+        if self._cavalry is not None:
+            keys.update(self._cavalry.take_keys())   # spoken cavalry orders, carried out with this line
         false_claim = False
         try:
             false_claim = self._identity_check(sentence)
