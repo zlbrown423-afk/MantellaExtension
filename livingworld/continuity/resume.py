@@ -85,7 +85,7 @@ class ResumePlan:
 def visible_lines(db, conv_id: int) -> list[Line]:
     """The lines of ``conv_id`` the active timeline may see: said at or before its cutoff."""
     rows = db.execute(
-        "SELECT u.seq, u.speaker_id, n.display_name, u.text, u.voice_model, u.game_time FROM utterance u"
+        "SELECT u.seq, u.speaker_id, n.display_name, u.text, u.voice_model, u.game_time FROM v_utterance u"
         " JOIN npc n ON n.npc_id = u.speaker_id"
         " JOIN v_timeline_scope s ON s.timeline_id = u.timeline_id AND u.game_time <= s.cutoff_gt"
         " WHERE u.conv_id = ? ORDER BY u.seq", (conv_id,)).fetchall()

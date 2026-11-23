@@ -282,6 +282,9 @@ def record_scene(pipeline, record: PerceptionRecord, ongoing: bool = False):
         if open_event is not None and new_seers:
             from livingworld.social import claims
             claims.witnesses_added(db, event_id, new_seers)   # already talked about: give the newcomers their copy
+    if not ongoing and etype == EVENT_SCENE:
+        _shared_history(store, event_id, ids)
+        _queue_reflections(store, event_id, ids, gt)
     how = "still running, " if ongoing else ""
     what = "completed" if open_event is not None else "stored"
     logger.log(23, f"Living World: {what} {etype} event {event_id} ({how}{record.key}): {', '.join(people.values())};"
@@ -596,3 +599,42 @@ def lines_for(npc_id: int, name: str, scenes: list[SceneNow], present: dict[int,
                 else:
                     lines.append(f"{name} can see {names} being intimate close by{what}.")
     return lines
+
+
+def _queue_reflections(store, event_id: int, ids: list[int], gt: float) -> None:
+    """A finished scene is something each NPC in it may well write about that night, however it went for them:
+    one diary job per NPC, keyed by the event, so the same scene never queues it twice (an ongoing scene that
+    completes later, or the same end record sent again). The diary writes from their own memories and feelings,
+    not from the fact that a scene happened. Declined invitations, withdrawn consent and scenes that never
+    finished store no ``romance.scene`` end, so they queue nothing here."""
+    from livingworld import diary
+    if not diary.diary_enabled():
+        return
+    from livingworld.diary import service as diaries
+    from livingworld.memory.jobs import JobQueue
+    from livingworld.store.minors import is_child
+    with store.reading() as db:
+        player = diaries.player_id(db)
+        timeline = db.execute("SELECT timeline_id FROM world_event WHERE event_id = ?", (event_id,)).fetchone()[0]
+        npcs = [i for i in ids if i != player and not is_child(db, i)]
+    if player is None:
+        return
+    queue = JobQueue(store)
+    for npc_id in npcs:
+        queue.enqueue(diary.JOB, {"npc_id": npc_id, "player_id": player, "event_id": event_id, "timeline_id": timeline,
+                                  "day": int(gt), "game_days": gt, "encounter": True},
+                      f"diary:event:{event_id}:{npc_id}")
+
+
+def _shared_history(store, event_id: int, ids: list[int]) -> None:
+    """A finished scene with the player is shared history for each NPC in it (familiarity only)."""
+    from livingworld.social import familiarity
+    if not familiarity.enabled():
+        return
+    try:
+        with store.transaction() as db:
+            player = db.execute("SELECT npc_id FROM npc WHERE is_player = 1").fetchone()
+            if player and player[0] in ids:
+                familiarity.after_scene(db, event_id, ids, player[0])
+    except Exception:
+        logger.exception("Living World: could not add shared history for a scene; carrying on")

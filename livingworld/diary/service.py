@@ -87,7 +87,18 @@ def is_keeper(db, npc_id: int, player_id: int | None) -> bool:
         return False
     if is_child(db, npc_id):
         return False
-    return talks_with_player(db, npc_id, player_id) >= diary.min_talks()
+    if talks_with_player(db, npc_id, player_id) >= diary.min_talks():
+        return True
+    # someone who already wrote an entry on this timeline (after an intimate scene) keeps the diary going
+    return db.execute("SELECT 1 FROM v_diary_entry WHERE npc_id = ? LIMIT 1", (npc_id,)).fetchone() is not None
+
+
+def _may_keep(db, npc_id: int, player_id: int | None) -> bool:
+    """Everything ``is_keeper`` asks except the number of talks: a person, not the player, not a child."""
+    if player_id is None or npc_id == player_id:
+        return False
+    row = db.execute("SELECT is_player FROM npc WHERE npc_id = ?", (npc_id,)).fetchone()
+    return bool(row) and not row[0] and not is_child(db, npc_id)
 
 
 def player_id(db) -> int | None:
@@ -165,7 +176,13 @@ def _notes(store: WorldStore, npc_id: int, player: int, day: int, since_mem_id: 
                  previous=earlier[1] if earlier else None, first=first, last_mem_id=newest)
 
 
-def build_prompt(notes: Notes, bio: str | None) -> tuple[str, str]:
+ENCOUNTER_NOTE = ("Something intimate happened between {name} and {player} today. Write how {name} actually took it, "
+                  "true to who {name} is and to what {name} remembers and feels: it may be warm, matter-of-fact, "
+                  "awkward, uncertain, regretful or mixed. Being intimate is not proof of love or a promise of "
+                  "anything; do not make it more (or less) than {name} would.")
+
+
+def build_prompt(notes: Notes, bio: str | None, encounter: bool = False) -> tuple[str, str]:
     system = (HEADER.format(name=notes.name) +
               f"Write {notes.name}'s diary entry for the day, in the first person, in {notes.name}'s own voice "
               f"and manner. It is private: {notes.name} writes what they really think and feel, including things "
@@ -189,6 +206,8 @@ def build_prompt(notes: Notes, bio: str | None) -> tuple[str, str]:
         parts.append("What I remember (my own memories):\n" + "\n".join(f"- {m}" for m in notes.memories))
     if notes.heard:
         parts.append("What I heard from others:\n" + "\n".join(f"- {h}" for h in notes.heard))
+    if encounter:
+        parts.append(ENCOUNTER_NOTE.format(name=notes.name, player=notes.player_name))
     if notes.today_so_far:
         parts.append(f"Today's entry so far:\n{notes.today_so_far}")
     elif notes.previous:
@@ -225,8 +244,10 @@ def parse_entry(reply: str | None) -> str | None:
 def write_entry(store: WorldStore, complete: Complete, payload: dict[str, Any]) -> str | None:
     """The diary job: (re)write the keeper's entry for the day. Returns the text, or None when skipped."""
     npc_id, player, day = int(payload["npc_id"]), int(payload["player_id"]), int(payload["day"])
+    encounter = bool(payload.get("encounter"))
     with store.reading() as db:
-        if not is_keeper(db, npc_id, player):
+        # an intimate scene makes anyone a diary keeper for it, however few talks they had with the player
+        if not (is_keeper(db, npc_id, player) or (encounter and _may_keep(db, npc_id, player))):
             return None
         row = db.execute("SELECT versions, last_mem_id FROM v_diary_entry WHERE npc_id = ? AND game_day = ?",
                          (npc_id, day)).fetchone()
@@ -236,7 +257,7 @@ def write_entry(store: WorldStore, complete: Complete, payload: dict[str, Any]) 
     notes = _notes(store, npc_id, player, day, row[1] if row else None)
     if notes is None or not notes.has_news():
         return None
-    system, user = build_prompt(notes, payload.get("bio"))
+    system, user = build_prompt(notes, payload.get("bio"), encounter)
     text = parse_entry(complete(system, user))
     if text is None:
         raise ValueError("the diary reply held no entry")
@@ -245,6 +266,8 @@ def write_entry(store: WorldStore, complete: Complete, payload: dict[str, Any]) 
         # a new timeline, and an entry about a day the loaded save never had must not land on it
         row = db.execute("SELECT timeline_id FROM conversation WHERE conv_id = ?", (payload.get("conv_id"),)).fetchone() \
             if payload.get("conv_id") is not None else None
+        if row is None and payload.get("timeline_id") is not None:   # an encounter's entry: the scene's timeline
+            row = (int(payload["timeline_id"]),)
         timeline = row[0] if row else db.execute("SELECT timeline_id FROM timeline WHERE is_active = 1").fetchone()[0]
         db.execute("INSERT INTO diary_entry (timeline_id, npc_id, game_day, text, last_mem_id, conv_id, written_gt)"
                    " VALUES (?,?,?,?,?,?,?)",

@@ -130,7 +130,7 @@ def attitude(u: Uniform, name: str, race: str | None, location: str | None) -> A
 
 def regard(db, npc_id: int, player_id: int) -> float:
     """This person's own regard for the player: the mean of affinity, trust and respect (-1..1), 0 if none."""
-    row = db.execute("SELECT affinity, trust, respect FROM relationship WHERE from_id = ? AND to_id = ?",
+    row = db.execute("SELECT affinity, trust, respect FROM v_relationship WHERE from_id = ? AND to_id = ?",
                      (npc_id, player_id)).fetchone()
     return (row[0] + row[1] + row[2]) / 3.0 if row else 0.0
 

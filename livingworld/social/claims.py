@@ -31,7 +31,8 @@ def bond(db, holder: int, other: int | None) -> dict:
                      (holder, other)).fetchone()
     if not row:
         return {"status": "stranger", "kinship": None, "trust": 0.0, "affinity": 0.0}
-    return {"status": row[0], "kinship": row[1], "trust": row[2], "affinity": row[3]}
+    from livingworld.social.familiarity import effective_status   # earned status, true to the active timeline
+    return {"status": effective_status(db, holder, other), "kinship": row[1], "trust": row[2], "affinity": row[3]}
 
 
 def is_close(b: dict) -> bool:

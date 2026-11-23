@@ -240,7 +240,7 @@ def _visible_lines(store: WorldStore, conv_id: int, joined: int | None, left: in
                    limit: int) -> list[tuple]:
     """The last ``limit`` lines of ``conv_id`` this NPC was there for and the active timeline may see, newest first."""
     return store.query(
-        "SELECT n.display_name, u.text, u.game_time FROM utterance u JOIN npc n ON n.npc_id = u.speaker_id"
+        "SELECT n.display_name, u.text, u.game_time FROM v_utterance u JOIN npc n ON n.npc_id = u.speaker_id"
         " JOIN v_timeline_scope s ON s.timeline_id = u.timeline_id AND u.game_time <= s.cutoff_gt"
         " WHERE u.conv_id = ? AND u.seq > ? AND (? IS NULL OR u.seq <= ?)"
         " ORDER BY u.seq DESC LIMIT ?", (conv_id, joined or 0, left, left, limit))
@@ -355,13 +355,17 @@ def _seen(store: WorldStore, recall: Recall, now_gt: float) -> None:
 def opinion_line(store: WorldStore, npc_id: int, player_id: int) -> str | None:
     """How this NPC feels about the player, from their own relationship values, in plain words."""
     row = store.query("SELECT r.trust, r.affinity, r.respect, r.admiration, r.fear, r.suspicion, r.attraction,"
-                      " p.display_name"
+                      " p.display_name, r.familiarity, r.intimacy"
                       " FROM v_relationship r JOIN npc p ON p.npc_id = r.to_id WHERE r.from_id = ? AND r.to_id = ?",
                       (npc_id, player_id))
     if not row:
         return None
-    trust, affinity, respect, admiration, fear, suspicion, attraction, name = row[0]
+    trust, affinity, respect, admiration, fear, suspicion, attraction, name, familiarity, intimacy = row[0]
     feelings = []
+    if familiarity >= 0.35:
+        feelings.append("I know them well")
+    elif familiarity >= 0.1:
+        feelings.append("I've got to know them a little")
     if trust >= 0.3:
         feelings.append("I trust them")
     elif trust <= -0.3:
@@ -390,6 +394,8 @@ def opinion_line(store: WorldStore, npc_id: int, player_id: int) -> str | None:
         feelings.append("I'm strongly attracted to them")
     elif attraction >= 0.3:
         feelings.append("I find them attractive")
+    if intimacy >= 0.05:
+        feelings.append("we have been intimate (something we shared, not a promise)")
     if not feelings:
         return None
     if attraction >= 0.3:
