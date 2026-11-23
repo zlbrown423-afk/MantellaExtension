@@ -26,9 +26,10 @@ from livingworld.memory.recall import mark_rehearsed_rows, recall_for
 from livingworld.dialogue import debug_lines, context_prep
 from livingworld import mood as moods
 from livingworld.bodylang import (adult_gestures_enabled, body_language_enabled, conv_anim_enabled, gesture_notices,
+                                  passive_body_enabled,
                                   gestures_enabled, handshake_enabled, salute_enabled)
 from livingworld.bodylang import face_test
-from livingworld.bodylang.presence import gesture_group, is_presence
+from livingworld.bodylang.presence import gesture_group, is_passive_record, is_presence
 from livingworld.bodylang.service import BodyLanguage
 from livingworld.dialogue import asr_hud, hearing, leads as player_leads
 from livingworld.dialogue import joins, place, promises, trips, undress_words
@@ -108,6 +109,7 @@ KEY_GESTURE_NOTICES = "mantella_lw_gesture_notices"   # start reply: show each r
 KEY_HANDSHAKE_ON = "mantella_lw_handshake_on"          # start reply: handshake gesture (MANTELLA_LW_HANDSHAKE)
 KEY_SALUTE_ON = "mantella_lw_salute_on"                # start reply: salute gesture (MANTELLA_LW_SALUTE)
 KEY_ADULT_GESTURES_ON = "mantella_lw_adult_gestures_on"   # start reply: adult gestures (MANTELLA_LW_ADULT_GESTURES=1)
+KEY_PASSIVE_BODY_ON = "mantella_lw_passive_body_on"    # start reply: crowding, step back, stare (MANTELLA_LW_PASSIVE_BODY=1)
 KEY_CONV_ANIM_ON = "mantella_lw_conv_anim_on"          # start reply: listening/thinking head and eyes (MANTELLA_LW_CONV_ANIM)
 KEY_BODY = "mantella_lw_body"                    # sent with an NPC line: changed expression profiles ('Name|comfort|gaze|guard|step')
 KEY_HINTS = "mantella_lw_hints"                  # sent with the first NPC line: what the player overhears (S2)
@@ -387,6 +389,8 @@ class LivingWorld:
         switched = {"gestures": gestures_enabled(), "handshake": handshake_enabled(), "salute": salute_enabled(),
                     "adult": adult_gestures_enabled()}   # a game still sending a switched-off kind is ignored
         body_raw = [r for r in body_raw if switched.get(gesture_group(r) or "", True)]
+        if not passive_body_enabled():   # passive perception off: a game still sending crowd/stare records is ignored
+            body_raw = [r for r in body_raw if not is_passive_record(r)]
         raw = [r for r in raw if not is_presence(r)]
         rebind_raw = [r for r in raw if rebind.is_rebind_record(r)]
         if rebind_raw:   # before anyone is registered: the copy must already resolve to the NPC it replaces
@@ -1843,6 +1847,7 @@ class LivingWorld:
         keys[KEY_SALUTE_ON] = bool(self.body_language and salute_enabled())
         keys[KEY_ADULT_GESTURES_ON] = bool(self.body_language and adult_gestures_enabled())
         keys[KEY_CONV_ANIM_ON] = bool(self.body_language and conv_anim_enabled())
+        keys[KEY_PASSIVE_BODY_ON] = bool(self.body_language and passive_body_enabled())
         keys[intimate_scenes.KEY_INTIMACY_ON] = bool(self.intimacy)
         keys[confront.KEY_CONFRONT_ON] = bool(self.confront)
         keys[decency.KEY_DECENCY_ON] = bool(self.decency)

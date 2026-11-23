@@ -53,6 +53,7 @@ SALUTE = ("salute",)
 ADULT = ("stroke", "point_down")
 WHATS = ("approach", "crowd", "backed_off", "weapon", "stare", "peek") + GESTURES + HANDSHAKE + SALUTE + ADULT
 OBSERVATION_MINUTES = 15.0   # older observations are not worth telling the dialogue model
+PASSIVE = ("approach", "crowd", "backed_off", "stare")   # where the player stands or faces (MANTELLA_LW_PASSIVE_BODY)
 ANSWERS = ("nod", "shake")   # a silent yes or no only means something right after a question
 ANSWER_MINUTES = 2.0
 MAX_OBSERVATIONS = 3
@@ -72,6 +73,11 @@ def _what_of(raw: str) -> str:
 def is_gesture_record(raw: str) -> bool:
     """One of the BL2 gestures (``MANTELLA_LW_GESTURES``)."""
     return _what_of(raw) in GESTURES
+
+
+def is_passive_record(raw: str) -> bool:
+    """A passive perception record: approach, crowding, backing off or a stare."""
+    return _what_of(raw) in PASSIVE
 
 
 def gesture_group(raw: str) -> str | None:

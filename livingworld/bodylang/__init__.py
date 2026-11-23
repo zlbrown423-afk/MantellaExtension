@@ -29,6 +29,13 @@ gives each state a small, rate-limited head and eye behaviour of its own (hold t
 talk, one short glance away while "thinking" for reserved NPCs). Nothing here is sent to the AI and no LLM
 call is involved. ``MANTELLA_LW_CONV_ANIM=0`` turns only that off.
 
+Passive perception (2026-11-23): the reactions to where the player merely stands and faces (approach,
+crowding with its step back and folded arms, stare, and the NPC's own glances or looking away outside a
+talk) are OFF unless ``MANTELLA_LW_PASSIVE_BODY=1``. Off, the game does not react or record them and the
+server drops any such record a game still sends, so no feelings, no "noticed" lines and no comfort growth
+come from them. Weapon records, women's glances, conversation states, gestures, touch and grabs are separate
+and keep their own switches.
+
 ``MANTELLA_LW_BODY_LANGUAGE=0`` turns all of it off, the mood clamp included. ``MANTELLA_LW_GESTURES=0``
 turns off only the gestures, and ``MANTELLA_LW_GESTURE_NOTICES=0`` stops the game showing each gesture it
 recognised (on while gestures are being tuned).
@@ -44,6 +51,7 @@ ENV_HANDSHAKE = "MANTELLA_LW_HANDSHAKE"
 ENV_SALUTE = "MANTELLA_LW_SALUTE"
 ENV_ADULT_GESTURES = "MANTELLA_LW_ADULT_GESTURES"
 ENV_CONV_ANIM = "MANTELLA_LW_CONV_ANIM"
+ENV_PASSIVE = "MANTELLA_LW_PASSIVE_BODY"
 _OFF = {"0", "false", "no", "off"}
 _ON = {"1", "true", "yes", "on"}
 
@@ -76,3 +84,8 @@ def adult_gestures_enabled() -> bool:
 def conv_anim_enabled() -> bool:
     """Conversation states (listening / thinking / speaking) in the game; on unless ``MANTELLA_LW_CONV_ANIM=0``."""
     return body_language_enabled() and os.environ.get(ENV_CONV_ANIM, "").strip().lower() not in _OFF
+
+
+def passive_body_enabled() -> bool:
+    """Approach, crowding, step back, stare and gaze reactions; OFF unless ``MANTELLA_LW_PASSIVE_BODY=1``."""
+    return body_language_enabled() and os.environ.get(ENV_PASSIVE, "").strip().lower() in _ON
