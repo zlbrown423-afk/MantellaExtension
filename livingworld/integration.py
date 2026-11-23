@@ -2723,7 +2723,7 @@ class LivingWorld:
             text = content.text
             kept = self._turn_back.trim(speaker.name, text)
             if kept != text:
-                logger.log(23, f"Living World: {speaker.name} asked the question back again; cut {text[len(kept):].strip()!r}")
+                logger.log(23, f"Living World: {speaker.name} handed the question back; {text.strip()!r} -> {kept.strip()!r}")
                 content.text = kept
         except Exception:
             self.errors += 1
