@@ -78,6 +78,13 @@ view, so no NPC sees or later remembers another NPC's private note.
 
 In group talk a private note with an unknown owner is shown to nobody. One-on-one prompts are unchanged.
 
+
+**Crowded talks (2026-11-24):** with three or more NPCs present, the first speaker is the NPC who has gone longest
+without speaking (never the one who spoke last), instead of the first one listed, so one NPC no longer answers
+nearly every turn. Each reply in such a crowd is also asked to stay to one or two short sentences. The TTS no
+longer reloads a fallback voice before every line when a character's own voice model is not installed
+(`TTSable._needs_voice_change`).
+
 ### PR D: save reloads and plugin names (server side, with the Mantella-Spell `living-world-m1` branch)
 
 | Piece | File | What it does |

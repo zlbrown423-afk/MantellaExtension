@@ -45,6 +45,7 @@ class TTSable(ABC):
         os.makedirs(f"{self._voiceline_folder}/save", exist_ok=True)
         self._language = config.language
         self._last_voice = '' # last active voice model
+        self._last_voice_request: tuple | None = None # what the last voice change was asked for (a fallback voice never matches the ask)
         self._lip_generation_enabled = config.lip_generation
         # determines whether the voiceline should play internally
         #self.debug_mode = config.debug_mode
@@ -74,6 +75,18 @@ class TTSable(ABC):
         except Exception:
             pass
 
+    def _needs_voice_change(self, voice: str, in_game_voice: str, csv_in_game_voice: str, advanced_voice_model: str | None, voice_accent: str) -> bool:
+        """Whether the loaded voice must be swapped. Living World: when the asked-for voice does not exist the TTS
+        loads a fallback, which never matches the ask, so the same ask is remembered and not reloaded line after line."""
+        request = (voice, in_game_voice, csv_in_game_voice, advanced_voice_model, voice_accent)
+        if self._last_voice != '' and request == self._last_voice_request:
+            return False
+        asked = {isinstance(v, str) and v.lower() for v in {voice, in_game_voice, csv_in_game_voice, advanced_voice_model, f'fo4_{voice}'}}
+        if self._last_voice == '' or (isinstance(self._last_voice, str) and self._last_voice.lower() not in asked):
+            self._last_voice_request = request
+            return True
+        return False
+
     @utils.time_it
     def synthesize(self, voice: str, voiceline: str, in_game_voice: str, csv_in_game_voice: str, voice_accent: str, synth_options: SynthesizationOptions, advanced_voice_model: str | None = None) -> tuple[str, bool]:
         """Synthesizes a given voiceline
@@ -82,7 +95,7 @@ class TTSable(ABC):
             tuple[str, bool]: the path to the synthesized voiceline file, and whether the voiceline was already played externally during synthesis (streamed fast response)
         """
         logger.debug(f'last_voice: {self._last_voice}, voice: {voice}, in_game_voice: {in_game_voice}, csv_in_game_voice: {csv_in_game_voice}, advanced_voice_model: {advanced_voice_model}, voice_accent: {voice_accent}')
-        if self._last_voice == '' or (isinstance(self._last_voice, str) and self._last_voice.lower() not in {isinstance(v, str) and v.lower() for v in {voice, in_game_voice, csv_in_game_voice, advanced_voice_model, f'fo4_{voice}'}}):
+        if self._needs_voice_change(voice, in_game_voice, csv_in_game_voice, advanced_voice_model, voice_accent):
             self.change_voice(voice, in_game_voice, csv_in_game_voice, advanced_voice_model, voice_accent)
 
         logger.log(22, f'Synthesizing voiceline: {voiceline.strip()}')
