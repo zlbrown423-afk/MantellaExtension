@@ -43,6 +43,9 @@ from livingworld.lordship import debug as lordship_debug, prompts as lordship_pr
 from livingworld.diplomacy import diplomacy_debug_enabled, diplomacy_enabled
 from livingworld.diplomacy import catchup as diplomacy_catchup, debug as diplomacy_debug, prompts as diplomacy_prompts
 from livingworld import fog
+from livingworld.territory import territory_debug_enabled, territory_enabled
+from livingworld.territory import debug as territory_debug, gossip as territory_gossip, ingest as territory_ingest
+from livingworld.territory import prompts as territory_prompts, records as territory_records
 from livingworld.continuity import continuity_enabled, service as continuity
 from livingworld.continuity import resume as conv_resume
 from livingworld.spatial import spatial_enabled, service as spatial_service
@@ -270,6 +273,9 @@ class LivingWorld:
         self.diplomacy = enabled and diplomacy_enabled()   # diplomatic memory (livingworld/diplomacy); OFF unless MANTELLA_LW_DIPLOMACY=1
         self.diplomacy_debug = enabled and diplomacy_debug_enabled()
         self._diplomacy_refreshed: int | None = None    # conv_id whose diplomacy was caught up
+        self.territory = enabled and territory_enabled()   # camps held by the Thalmor/Wardens (livingworld/territory); OFF unless MANTELLA_LW_TERRITORY=1
+        self.territory_debug = enabled and territory_debug_enabled()
+        self._territory_refreshed: int | None = None    # conv_id whose news was spread
         self._squad_notes: list[str] = []          # for the dialogue model with the player's next line
         self._squad_seen: tuple[int, str] | None = None   # (conversation, player line) already read for squad words
         self.asked_joins = enabled and joins.joins_enabled()   # only add people the player asked for (MANTELLA_LW_ASKED_JOINS=0 off)
@@ -410,6 +416,11 @@ class LivingWorld:
             raw = [r for r in raw if not side_jobs.is_job_record(r)]
             if self.side_jobs and self.store is not None:
                 self._side_job_records(job_raw)
+        territory_raw = [r for r in raw if territory_records.is_territory_record(r)]
+        if territory_raw:
+            raw = [r for r in raw if not territory_records.is_territory_record(r)]
+            if self.territory and self.store is not None:
+                self._territory_records(territory_raw)
         if body_raw and self.store is not None and self.body_language:
             try:
                 self._body_for(self.store).ingest(body_raw)
@@ -734,6 +745,11 @@ class LivingWorld:
                 result = lordship_debug.run(db, command, npc_id, context.game_days)
             if result:
                 logger.log(23, f"Living World lordship test command: {result}")
+        if self.territory_debug and hidden:
+            with self.store.transaction() as db:
+                result = territory_debug.run(db, command, npc_id, context.game_days)
+            if result:
+                logger.log(23, f"Living World territory test command: {result}")
         if self.diplomacy_debug and hidden:
             present_ids = [self._npc_ids.get(c.ref_id) or self._register(c, context.game_days)
                            for c in context.npcs_in_conversation.get_all_characters()]
@@ -861,6 +877,7 @@ class LivingWorld:
         self._refresh_guard()   # before work upkeep, which would expire duties without the reprimand
         self._refresh_work(now)
         self._refresh_lordship(now)
+        self._refresh_territory(now)
         self._refresh_diplomacy(now, list(present))
         scene = self._scene(player_id, player.name if player else "the player", list(present))
         blocks = []
@@ -935,6 +952,9 @@ class LivingWorld:
             if charter:
                 blocks.append(f"The Plains Wardens' charter, and {character.name}:\n"
                               + "\n".join(f"- {line}" for line in charter))
+            camps = self._territory_lines(npc_id, character.name, now)
+            if camps:
+                blocks.append(f"The camps and who holds them, and {character.name}:\n" + "\n".join(f"- {line}" for line in camps))
             talks = self._diplomacy_lines(npc_id, character.name, player_id,
                                           player.name if player is not None else "the player", now)
             if talks:
@@ -1474,6 +1494,40 @@ class LivingWorld:
         except Exception:
             self.errors += 1
             logger.exception("Living World: lordship reckoning failed; carrying on")
+
+    # ---- territory (livingworld/territory) ----
+    def _territory_records(self, raw: list[str]) -> None:
+        """The game's ``territory`` records: who holds which camp, garrison posts, and who saw it."""
+        result = territory_ingest.ingest(self.store, PerceptionPipeline(self.store).identities, raw)
+        if result.applied or result.skipped:
+            logger.log(23, f"Living World territory: {result.applied} record(s) stored, {result.duplicate} repeated,"
+                           f" {result.skipped} skipped")
+
+    def _refresh_territory(self, now: float) -> None:
+        """Once per conversation: let news of a change reach the people it would reach by now."""
+        if not self.territory or self.store is None or self._territory_refreshed == self.conv_id:
+            return
+        self._territory_refreshed = self.conv_id
+        try:
+            with self.store.transaction() as db:
+                told = territory_gossip.spread(db, now)
+            if told:
+                logger.log(23, f"Living World territory: news of the camps reached {told} more people")
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: territory news failed; carrying on")
+
+    def _territory_lines(self, npc_id: int, name: str, now: float) -> list[str]:
+        """What this person knows (and how they know it) about the camps; nothing for anyone who knows nothing."""
+        if not self.territory or self.store is None:
+            return []
+        try:
+            with self.store.reading() as db:
+                return territory_prompts.lines(db, npc_id, name, now)
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: territory prompt lines failed; carrying on")
+            return []
 
     # ---- diplomacy (livingworld/diplomacy) ----
     def _refresh_diplomacy(self, now: float, present: list[int]) -> None:

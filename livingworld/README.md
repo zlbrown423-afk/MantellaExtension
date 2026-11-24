@@ -1291,3 +1291,17 @@ model can still mislabel a line (the journal shows the quote).
 
 In-game check (needs the game): with `MANTELLA_LW_DIPLOMACY=1`, ask Ulfric in private whether he would consider a
 truce, end the conversation, run the journal; then talk to Tullius and confirm he does not know what Ulfric said.
+
+## Territory: who holds the camps, as the game saw it (`livingworld/territory/`)
+
+**Off unless `MANTELLA_LW_TERRITORY=1`** (debug commands follow `MANTELLA_LW_TERRITORY_DEBUG`). The game (LWTerritory)
+owns the map, timers and every soldier; Living World only mirrors it and never moves soldiers or changes owners.
+- Records `type=territory` arrive in `mantella_lw_events`. Site vias: occupied, reinforced, cleared, withdrawn,
+  established, contested, abandoned, sighted. Garrison vias: assign, recall, dead, replace, transfer.
+- Migration 031: append-only `territory_change` (previous owner, new owner, date, strength, contested, cooldown),
+  `garrison_assignment`/`garrison_status`, and `territory_knowledge` (witnessed / reported / told / rumor, with
+  confidence). Timeline-scoped, so an older save rolls it back.
+- NPCs are not omniscient: only people within 50 m with line of sight, or the commander and officers, know a
+  change; others hear it by thin, seeded gossip (confidence 0.4-0.5, once per person). Children are excluded.
+- Events are `territory.<kind>` world events. Prompts get a short block only when the person knows something.
+- Sites: `territory/data/sites.json` (the 8 Whiterun camps). Test: "debug territory status|occupy|reinforce|clear|establish|tell [site]".
