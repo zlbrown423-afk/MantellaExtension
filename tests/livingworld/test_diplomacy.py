@@ -574,3 +574,20 @@ def test_gate_words():
     from livingworld.diplomacy.extract import _POLITICAL
     assert _POLITICAL.search("We should talk about a truce with the Imperials")
     assert not _POLITICAL.search("Do you have any sweetrolls?")
+
+
+def test_journal_cli_reads_a_copy_and_writes_nothing(tmp_path, capsys):
+    import os
+    path = str(tmp_path / "World.sqlite")
+    store = WorldStore(path)
+    with store.transaction() as db:
+        ids = {"player": npc(db, "Zachary", "00000007", True), "ulfric": npc(db, "Ulfric Stormcloak", ULFRIC)}
+        Talk(db, ids, ["player", "ulfric"], [("ulfric", "I will hear the Empire out.")]).record(
+            item(1, "Ulfric Stormcloak", "position", "negotiation", stance=0.3, summary="will hear the Empire out"))
+    store.close()
+    before = os.path.getmtime(path)
+    assert J.main(["--db", path]) == 0
+    assert "will hear the Empire out" in capsys.readouterr().out
+    assert J.main(["--db", path, "--gm"]) == 0
+    assert os.path.getmtime(path) == before
+    assert J.main(["--db", str(tmp_path / "missing.sqlite")]) == 2

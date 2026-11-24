@@ -8,7 +8,7 @@ or a rumour, with who passed it on. Private convictions never appear here.
 
 ``--gm`` shows everything, including every person's seeded and stated convictions, clearly labelled.
 
-Command line, never imported by the server (opened read-only, like ``social/who_knows.py``)::
+Command line, never imported by the server (opened read-only into an in-memory copy)::
 
     python -m livingworld.diplomacy.journal --db World.sqlite
     python -m livingworld.diplomacy.journal --db World.sqlite --gm
@@ -151,8 +151,38 @@ def render(view: dict) -> str:
     return "\n".join(out).rstrip()
 
 
+class Refused(Exception):
+    """The journal cannot be read (no such database). The message says why."""
+
+
+def snapshot(path: str, timeline: int | None = None):
+    """A private in-memory copy of the world; the file itself is only opened read-only (as social/who_knows.py)."""
+    import os
+    import sqlite3
+    from pathlib import Path
+    if not os.path.isfile(path):
+        raise Refused(f"no such database: {path}")
+    quiet = "" if os.path.exists(path + "-wal") else "&immutable=1"
+    src = sqlite3.connect(f"file:{Path(path).resolve().as_posix()}?mode=ro{quiet}", uri=True, timeout=5.0)
+    try:
+        try:
+            src.execute("SELECT COALESCE(MAX(version), 0) FROM schema_version").fetchone()
+        except sqlite3.DatabaseError as e:
+            raise Refused(f"not a Living World database ({e})")
+        mem = sqlite3.connect(":memory:")
+        src.backup(mem)
+    finally:
+        src.close()
+    mem.row_factory = sqlite3.Row
+    if timeline is not None:
+        if not mem.execute("SELECT 1 FROM timeline WHERE timeline_id = ?", (timeline,)).fetchone():
+            raise Refused(f"no timeline {timeline}")
+        mem.execute("UPDATE timeline SET is_active = 0 WHERE is_active = 1")
+        mem.execute("UPDATE timeline SET is_active = 1 WHERE timeline_id = ?", (timeline,))
+    return mem
+
+
 def main(argv: list[str] | None = None) -> int:
-    from livingworld.social.who_knows import Refused, snapshot
     ap = argparse.ArgumentParser(prog="python -m livingworld.diplomacy.journal", description=__doc__.split("\n\n")[0])
     ap.add_argument("--db", required=True, help="the world database; opened read-only")
     ap.add_argument("--timeline", type=int, help="look at this save timeline instead of the active one")
