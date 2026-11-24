@@ -1,0 +1,13 @@
+{
+  "_about": "The sites that can change hands (design doc 2026-11-24). key = stable id used in records, events and the game plugin config; form_id = the Location record in Skyrim.esm (plugin-relative); anchor = a place name the game reports in its location string; weight = strategic importance 0..1 (the game's own config decides what it does with it; the server only uses it to word the news); news_places = where people hear of it first (matched on npc.home_location). Civil-war forts and camps, the Western Watchtower and quest dungeons are left out on purpose.",
+  "sites": [
+    {"key": "halted_stream_camp", "name": "Halted Stream Camp", "location": "Halted Stream Camp", "form_id": "0x00019193", "plugin": "Skyrim.esm", "hold": "Whiterun", "kind": "bandit camp", "weight": 0.55, "news_places": ["Whiterun", "Rorikstead"]},
+    {"key": "silent_moons_camp", "name": "Silent Moons Camp", "location": "Silent Moons Camp", "form_id": "0x000192A9", "plugin": "Skyrim.esm", "hold": "Whiterun", "kind": "bandit camp", "weight": 0.5, "news_places": ["Whiterun", "Riverwood"]},
+    {"key": "white_river_watch", "name": "White River Watch", "location": "White River Watch", "form_id": "0x000192C5", "plugin": "Skyrim.esm", "hold": "Whiterun", "kind": "bandit camp", "weight": 0.6, "news_places": ["Whiterun", "Riverwood"]},
+    {"key": "redorans_retreat", "name": "Redoran's Retreat", "location": "Redoran's Retreat", "form_id": "0x00019295", "plugin": "Skyrim.esm", "hold": "Whiterun", "kind": "bandit camp", "weight": 0.3, "news_places": ["Whiterun"]},
+    {"key": "valtheim_keep", "name": "Valtheim Keep", "location": "Valtheim Keep", "form_id": "0x000192C1", "plugin": "Skyrim.esm", "hold": "Whiterun", "kind": "bandit camp", "weight": 0.8, "news_places": ["Whiterun", "Windhelm"]},
+    {"key": "swindlers_den", "name": "Swindler's Den", "location": "Swindler's Den", "form_id": "0x00018EE2", "plugin": "Skyrim.esm", "hold": "Whiterun", "kind": "bandit camp", "weight": 0.35, "news_places": ["Whiterun"]},
+    {"key": "rannveigs_fast", "name": "Rannveig's Fast", "location": "Rannveig's Fast", "form_id": "0x00019290", "plugin": "Skyrim.esm", "hold": "Whiterun", "kind": "warlock lair", "weight": 0.4, "news_places": ["Whiterun"]},
+    {"key": "graywinter_watch", "name": "Graywinter Watch", "location": "Graywinter Watch", "form_id": "0x0001918B", "plugin": "Skyrim.esm", "hold": "Whiterun", "kind": "animal den", "weight": 0.25, "news_places": ["Whiterun"]}
+  ]
+}
