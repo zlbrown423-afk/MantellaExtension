@@ -30,6 +30,8 @@ from livingworld.memory import jobs
     ("Riders, to me!", [CO.RALLY_ME]),
     ("Rally at the hall.", [CO.RALLY_HALL]),
     ("Head back to the stables and wait.", [CO.RALLY_HALL]),
+    ("Rally at Greymarch.", [CO.RALLY_HALL]),
+    ("Riders, back to Greymarch.", [CO.RALLY_HALL]),
     ("Mount up and fall in.", [CO.MOUNT, CO.COLUMN]),
     ("Dismount. At ease.", [CO.DISMOUNT, CO.EASE]),
     ("Mount up, then line abreast, then at ease, then dismount.", [CO.MOUNT, CO.LINE, CO.EASE]),
@@ -54,6 +56,8 @@ def test_orders(text, orders):
     "I could fall in love with this place.",
     "We should mount up soon.",
     "The hall looks good.",
+    "Greymarch looks good.",
+    "I love Greymarch.",
     "How do I mount a horse?",
     "",
 ])
