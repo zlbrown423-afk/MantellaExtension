@@ -13,7 +13,7 @@ fall in (column)   3     "fall in", "fall in line", "form a column", "single fil
 line abreast       4     "line abreast", "form a line", "form up abreast"
 at ease            5     "at ease", "break formation", "fall out"
 rally to me        6     "rally to me", "rally on me", "riders, to me", "form on me"
-rally at the hall  7     "rally at the hall", "back to the hall", "wait at the stables"
+rally at the hall  7     "rally at the hall", "back to Greymarch", "wait at the stables"
 =================  ====  =====================================================================
 
 Only the player's own words count, never an NPC's. Deliberately narrow, so a passing remark never moves the
@@ -50,7 +50,7 @@ NAMES = {
 }
 
 _HORSES = r"(?:horses?|mounts?|steeds?|saddles?)"
-_PLACE = r"(?:the\s+)?(?:(?:guild\s+|wardens'?\s+)?hall|stables?|yard|paddock|barracks)"
+_PLACE = r"(?:the\s+)?(?:(?:guild\s+|wardens'?\s+)?hall|stables?|yard|paddock|barracks|greymarch)"
 
 # Checked in this order: the longer phrase wins where two overlap ("fall in line abreast" is a line).
 _PATTERNS: tuple[tuple[int, re.Pattern[str]], ...] = (
