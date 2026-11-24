@@ -275,3 +275,49 @@ def test_mentions_matches_whole_names_only():
     assert mentions("Hod, come here", "Hod") == 0
     assert mentions("Hodgepodge of things", "Hod") == -1
     assert mentions("Ask the whiterun guard", "Whiterun Guard") == 8
+
+
+class _Said:
+    def __init__(self, name, text="Aye."):
+        self.speaker = type("S", (), {"name": name, "is_player_character": False})()
+        self.text = text
+
+
+def test_first_speaker_is_the_one_who_has_waited_longest():
+    from livingworld.dialogue import group
+    from src.llm.messages import AssistantMessage
+
+    class Npc:
+        def __init__(self, name):
+            self.name = name
+
+    class Msgs(list):
+        pass
+
+    def assistant(*names):
+        m = AssistantMessage.__new__(AssistantMessage)
+        m._AssistantMessage__sentences = [_Said(n) for n in names]
+        return m
+
+    npcs = [Npc("Salonia"), Npc("Lillith"), Npc("Skulvar")]
+    msgs = Msgs([assistant("Salonia", "Lillith"), assistant("Salonia")])
+    # Salonia spoke last, Lillith before her, Skulvar never: Skulvar goes first
+    spoke = group.speaking_order(msgs)
+    assert spoke["Salonia"] > spoke["Lillith"] and "Skulvar" not in spoke
+    msgs.append(assistant("Skulvar"))
+    # now Skulvar spoke last; Lillith waited longest
+    assert min([c for c in npcs if c.name != group.last_npc_speaker(msgs)],
+               key=lambda c: group.speaking_order(msgs).get(c.name, -1)).name == "Lillith"
+
+
+def test_a_missing_voice_is_not_reloaded_on_every_line():
+    from src.tts.ttsable import TTSable
+
+    f = object.__new__(type("FakeTTS", (TTSable,), {"change_voice": lambda *a, **k: None, "_synthesize_voiceline": lambda *a, **k: None, "__abstractmethods__": frozenset()}))
+    f._last_voice = ''
+    f._last_voice_request = None
+    ask = ("FemaleCoward", "FemaleCoward", "FemaleCoward", None, "en")
+    assert f._needs_voice_change(*ask)            # first line: load
+    f._last_voice = "femaleeventoned"             # what the TTS fell back to
+    assert not f._needs_voice_change(*ask)        # the next line of the same voice: keep it loaded
+    assert f._needs_voice_change("FemaleNord", "FemaleNord", "FemaleNord", None, "en")   # another voice: swap

@@ -12,7 +12,9 @@ Here each speaker gets their own call:
 * the reply can only be that NPC's. A line that tries to switch to another speaker is cut off
   there and logged, because the only characters the reply parser knows are the speaker and the player.
 
-Who speaks: the NPC the player named first, otherwise the NPC who did not speak last. If the
+Who speaks: the NPC the player named first, otherwise the NPC who has gone longest without speaking
+(never the one who spoke last, so a crowd takes turns instead of the first-listed NPC answering every
+time). In a crowd of ``CROWD_NPCS`` or more NPCs each reply is asked to stay to a sentence or two. If the
 speaker names another NPC in their reply, that NPC answers next, up to ``MAX_SPEAKERS`` per turn.
 """
 from __future__ import annotations
@@ -35,6 +37,10 @@ from livingworld.dialogue import private_notes
 logger = utils.get_logger()
 
 MAX_SPEAKERS = 2
+CROWD_NPCS = 3   # three NPCs and the player: a ceremony, a briefing, a table
+
+CROWD_NOTE = """
+This is a crowded conversation: keep your reply to one or two short sentences, and leave room for the others to speak."""
 
 GROUP_NOTE = """
 
@@ -96,10 +102,24 @@ def choose_first_speaker(messages: message_thread, npcs: list[Any]) -> Any:
     if named:
         return named[0][2]
     last = last_npc_speaker(messages)
-    for character in npcs:
-        if character.name != last:
-            return character
+    spoke = speaking_order(messages)
+    rested = [c for c in npcs if c.name != last]
+    if rested:
+        return min(rested, key=lambda c: spoke.get(c.name, -1))   # ties keep the listed order
     return npcs[0]
+
+
+def speaking_order(messages: message_thread) -> dict[str, int]:
+    """Where in the conversation each NPC last spoke (higher = more recently). NPCs who never spoke are absent."""
+    spoke: dict[str, int] = {}
+    position = 0
+    for i in range(len(messages)):
+        if isinstance(messages[i], AssistantMessage):
+            for content in messages[i]._AssistantMessage__sentences:
+                if content.text.strip() and not content.speaker.is_player_character:
+                    position += 1
+                    spoke[content.speaker.name] = position
+    return spoke
 
 
 def speaker_view(characters: Characters, speaker: Any) -> Characters:
@@ -205,6 +225,8 @@ class GroupTurn:
                         others=", ".join(others), are="is" if len(others) == 1 else "are",
                         others_or=" or ".join(others), name=speaker.name,
                         player=player.name if player else "the player")
+                if len(npcs) >= CROWD_NPCS:
+                    prompt += CROWD_NOTE
                 thread = thread_for(speaker, prompt, messages, config, this_turn)
                 before = len(turn_queue.spoken)
                 started = time.perf_counter()
