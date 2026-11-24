@@ -336,7 +336,7 @@ def sentence(db, claim: dict, viewer: int, second_person: bool = False) -> str:
     else:
         subject = name(claim["subject_id"])
     place = f" in {claim['location']}" if claim.get("location") else ""
-    if claim["act"] == "reported":
+    if claim["act"] in ("reported", "declared"):   # declared: livingworld/diplomacy, detail continues the name
         return f"{subject} {claim['detail'].strip()}"
     if claim["act"] == "drank":
         return f"{subject} {'were' if subject == 'you' else 'was'} drinking{claim['detail']}{place}"

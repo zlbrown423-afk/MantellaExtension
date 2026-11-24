@@ -1,0 +1,131 @@
+{
+  "_about": "Political figures whose convictions are seeded the first time Living World meets them. Matched in game by plugin + base form ID (from Mantella's data/Skyrim/skyrim_characters.csv, checked 2026-11-24). Values are -1..1 per dimension: empire, stormcloaks, thalmor = how they regard that power; negotiation = willingness to negotiate with the other side of the civil war; concordat = support for the White-Gold Concordat; ceasefire = support for a temporary ceasefire between the Empire and the Stormcloaks; alliance = support for an Empire-Stormcloak alliance against the Thalmor. 'personal' is what they believe; 'official' is the line their faction holds, as they understand it (left out where it is the same). confidence 0..1 says how sure the lore is; low-confidence values are said gently in the prompt. Every dimension is written on its own: nobody's Concordat view is inferred from their Thalmor view. These are starting convictions only, never outcomes: nothing here makes anyone agree to anything. 'circle' is the court whose members hear each other's public statements (an existing-gossip community). 'cares' is what they argue from.",
+  "figures": [
+    {
+      "key": "ulfric", "name": "Ulfric Stormcloak", "aliases": ["Ulfric", "Jarl Ulfric", "Jarl Ulfric Stormcloak"],
+      "plugin": "Skyrim.esm", "base_id": "0x0001414D", "faction": "stormcloaks", "speaks_for": "stormcloaks",
+      "role": "Jarl of Windhelm and leader of the Stormcloak rebellion", "circle": "windhelm_court",
+      "cares": "Talos worship, Skyrim ruled by Nords, his own legitimacy as a claimant to the High King's throne, and never looking weak",
+      "personal": {"empire": [-0.7, 0.8], "stormcloaks": [1.0, 1.0], "thalmor": [-0.95, 0.9], "negotiation": [-0.4, 0.6],
+                   "concordat": [-1.0, 1.0], "ceasefire": [-0.3, 0.5], "alliance": [-0.5, 0.5]},
+      "official": {"empire": [-0.9, 0.9], "negotiation": [-0.6, 0.7], "ceasefire": [-0.5, 0.6], "alliance": [-0.7, 0.6]}
+    },
+    {
+      "key": "galmar", "name": "Galmar Stone-Fist", "aliases": ["Galmar"],
+      "plugin": "Skyrim.esm", "base_id": "0x00014128", "faction": "stormcloaks",
+      "role": "Ulfric's housecarl and general of the Stormcloak army", "circle": "windhelm_court",
+      "cares": "winning the war, Ulfric's honour, and his soldiers' lives not being thrown away",
+      "personal": {"empire": [-0.9, 0.9], "stormcloaks": [1.0, 1.0], "thalmor": [-0.9, 0.8], "negotiation": [-0.8, 0.7],
+                   "concordat": [-1.0, 0.9], "ceasefire": [-0.6, 0.6], "alliance": [-0.7, 0.6]}
+    },
+    {
+      "key": "jorleif", "name": "Jorleif", "aliases": [],
+      "plugin": "Skyrim.esm", "base_id": "0x00014135", "faction": "stormcloaks",
+      "role": "steward of Windhelm", "circle": "windhelm_court",
+      "cares": "Windhelm's treasury and supply, and keeping Ulfric's court running",
+      "personal": {"empire": [-0.4, 0.5], "stormcloaks": [0.8, 0.8], "thalmor": [-0.7, 0.6], "negotiation": [0.1, 0.4],
+                   "concordat": [-0.7, 0.5], "ceasefire": [0.0, 0.3], "alliance": [-0.2, 0.3]},
+      "official": {"empire": [-0.9, 0.8], "negotiation": [-0.6, 0.6]}
+    },
+    {
+      "key": "brunwulf", "name": "Brunwulf Free-Winter", "aliases": ["Brunwulf"],
+      "plugin": "Skyrim.esm", "base_id": "0x00014149", "faction": "other",
+      "role": "a veteran of the Great War living in Windhelm, critical of Ulfric's treatment of the Dunmer", "circle": "windhelm_court",
+      "cares": "fair treatment of Windhelm's Dark Elves and Argonians, and the lives of ordinary Nords",
+      "personal": {"empire": [0.2, 0.4], "stormcloaks": [0.0, 0.4], "thalmor": [-0.8, 0.7], "negotiation": [0.5, 0.5],
+                   "concordat": [-0.5, 0.4], "ceasefire": [0.5, 0.5], "alliance": [0.3, 0.4]}
+    },
+    {
+      "key": "tullius", "name": "General Tullius", "aliases": ["Tullius", "the General"],
+      "plugin": "Skyrim.esm", "base_id": "0x0001327E", "faction": "empire", "speaks_for": "empire",
+      "role": "Military Governor of Skyrim and commander of the Imperial Legion there", "circle": "solitude_court",
+      "cares": "ending the rebellion, the Legion's readiness for the next war with the Dominion, and the Empire's authority",
+      "personal": {"empire": [1.0, 1.0], "stormcloaks": [-0.8, 0.8], "thalmor": [-0.5, 0.6], "negotiation": [-0.3, 0.5],
+                   "concordat": [0.2, 0.4], "ceasefire": [-0.2, 0.4], "alliance": [0.0, 0.3]},
+      "official": {"stormcloaks": [-0.9, 0.9], "thalmor": [0.2, 0.6], "negotiation": [-0.5, 0.6],
+                   "concordat": [0.8, 0.8], "ceasefire": [-0.4, 0.5], "alliance": [-0.6, 0.6]}
+    },
+    {
+      "key": "rikke", "name": "Legate Rikke", "aliases": ["Rikke"],
+      "plugin": "Skyrim.esm", "base_id": "0x000132A1", "faction": "empire",
+      "role": "Legate of the Imperial Legion, a Nord who fought beside Ulfric and Galmar in the Great War", "circle": "solitude_court",
+      "cares": "the Legion, Skyrim's Nords on both sides, and old comrades now her enemies",
+      "personal": {"empire": [0.9, 0.9], "stormcloaks": [-0.2, 0.5], "thalmor": [-0.8, 0.6], "negotiation": [0.3, 0.4],
+                   "concordat": [-0.4, 0.4], "ceasefire": [0.3, 0.4], "alliance": [0.2, 0.3]},
+      "official": {"stormcloaks": [-0.8, 0.8], "thalmor": [0.1, 0.5], "negotiation": [-0.3, 0.5], "concordat": [0.8, 0.8],
+                   "ceasefire": [-0.3, 0.5], "alliance": [-0.5, 0.5]}
+    },
+    {
+      "key": "elisif", "name": "Elisif the Fair", "aliases": ["Elisif", "Jarl Elisif", "Jarl Elisif the Fair"],
+      "plugin": "Skyrim.esm", "base_id": "0x0001326A", "faction": "empire",
+      "role": "Jarl of Solitude and widow of High King Torygg, whom Ulfric killed", "circle": "solitude_court",
+      "cares": "justice for Torygg, Solitude's people, and being taken seriously as a ruler",
+      "personal": {"empire": [0.8, 0.8], "stormcloaks": [-0.9, 0.9], "thalmor": [-0.3, 0.4], "negotiation": [-0.5, 0.5],
+                   "concordat": [0.0, 0.3], "ceasefire": [-0.3, 0.4], "alliance": [-0.6, 0.5]},
+      "official": {"concordat": [0.7, 0.7]}
+    },
+    {
+      "key": "falk", "name": "Falk Firebeard", "aliases": ["Falk"],
+      "plugin": "Skyrim.esm", "base_id": "0x00013274", "faction": "empire",
+      "role": "steward of Solitude and Elisif's counsellor", "circle": "solitude_court",
+      "cares": "Elisif's standing, Solitude's stability, and not provoking the Thalmor",
+      "personal": {"empire": [0.8, 0.7], "stormcloaks": [-0.7, 0.7], "thalmor": [-0.4, 0.5], "negotiation": [0.0, 0.4],
+                   "concordat": [0.3, 0.4], "ceasefire": [0.0, 0.3]},
+      "official": {"concordat": [0.6, 0.6]}
+    },
+    {
+      "key": "balgruuf", "name": "Balgruuf the Greater", "aliases": ["Balgruuf", "Jarl Balgruuf", "the Jarl"],
+      "plugin": "Skyrim.esm", "base_id": "0x00013BBD", "faction": "whiterun", "speaks_for": "whiterun",
+      "role": "Jarl of Whiterun, who has kept his hold out of the war", "circle": "whiterun_court",
+      "cares": "Whiterun's interests first, staying out of the civil war, the dragon threat, and his own authority",
+      "personal": {"empire": [0.1, 0.5], "stormcloaks": [-0.3, 0.6], "thalmor": [-0.9, 0.8], "negotiation": [0.4, 0.5],
+                   "concordat": [-0.2, 0.3], "ceasefire": [0.5, 0.6], "alliance": [0.1, 0.3]},
+      "official": {"empire": [0.0, 0.7], "stormcloaks": [0.0, 0.7], "thalmor": [0.0, 0.5]}
+    },
+    {
+      "key": "proventus", "name": "Proventus Avenicci", "aliases": ["Proventus"],
+      "plugin": "Skyrim.esm", "base_id": "0x00013BBA", "faction": "whiterun",
+      "role": "steward of Dragonsreach", "circle": "whiterun_court",
+      "cares": "the treasury, trade on the roads, and caution",
+      "personal": {"empire": [0.5, 0.6], "stormcloaks": [-0.4, 0.5], "thalmor": [-0.2, 0.4], "negotiation": [0.3, 0.4],
+                   "concordat": [0.2, 0.3], "ceasefire": [0.4, 0.5]}
+    },
+    {
+      "key": "irileth", "name": "Irileth", "aliases": [],
+      "plugin": "Skyrim.esm", "base_id": "0x00013BB8", "faction": "whiterun",
+      "role": "the Jarl's housecarl", "circle": "whiterun_court",
+      "cares": "the Jarl's safety and Whiterun's defences",
+      "personal": {"empire": [0.0, 0.4], "stormcloaks": [-0.2, 0.4], "thalmor": [-0.6, 0.5], "negotiation": [0.0, 0.3]}
+    },
+    {
+      "key": "hrongar", "name": "Hrongar", "aliases": [],
+      "plugin": "Skyrim.esm", "base_id": "0x00013BBC", "faction": "whiterun",
+      "role": "the Jarl's brother, who wants Whiterun to join the Legion", "circle": "whiterun_court",
+      "cares": "the Empire's cause and his brother's honour",
+      "personal": {"empire": [0.6, 0.6], "stormcloaks": [-0.5, 0.6], "thalmor": [-0.6, 0.5], "negotiation": [-0.2, 0.4]}
+    },
+    {
+      "key": "elenwen", "name": "Elenwen", "aliases": ["Ambassador Elenwen", "First Emissary Elenwen"],
+      "plugin": "Skyrim.esm", "base_id": "0x00013269", "faction": "thalmor", "speaks_for": "thalmor",
+      "role": "First Emissary of the Aldmeri Dominion in Skyrim", "circle": "thalmor_embassy",
+      "cares": "the Dominion's interests, enforcing the Concordat, and Talos worship stamped out",
+      "personal": {"empire": [0.2, 0.6], "stormcloaks": [0.1, 0.4], "thalmor": [1.0, 1.0], "negotiation": [-0.9, 0.6],
+                   "concordat": [1.0, 1.0], "ceasefire": [-0.9, 0.6], "alliance": [-1.0, 1.0]},
+      "official": {"empire": [0.5, 0.7], "stormcloaks": [-0.7, 0.8], "negotiation": [0.2, 0.4], "ceasefire": [0.0, 0.4]}
+    },
+    {
+      "key": "ondolemar", "name": "Ondolemar", "aliases": [],
+      "plugin": "Skyrim.esm", "base_id": "0x000133AF", "faction": "thalmor",
+      "role": "head of the Thalmor Justiciars in Markarth", "circle": "thalmor_embassy",
+      "cares": "enforcing the Concordat and finding Talos worshippers",
+      "personal": {"empire": [0.0, 0.5], "stormcloaks": [-0.8, 0.7], "thalmor": [1.0, 1.0], "negotiation": [-0.5, 0.4],
+                   "concordat": [1.0, 1.0], "alliance": [-1.0, 0.9]}
+    }
+  ],
+  "circles": {
+    "windhelm_court": {"name": "Ulfric's court in Windhelm", "location": "Windhelm"},
+    "solitude_court": {"name": "the Imperial court in Solitude", "location": "Solitude"},
+    "whiterun_court": {"name": "the Jarl's court at Dragonsreach", "location": "Whiterun"},
+    "thalmor_embassy": {"name": "the Thalmor Embassy", "location": "Thalmor Embassy"}
+  }
+}

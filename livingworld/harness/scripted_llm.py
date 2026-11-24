@@ -227,6 +227,7 @@ class ScriptedExtraction:
     memories: list[str] = field(default_factory=list)
     raw_facts: list[dict[str, Any]] = field(default_factory=list)  # passed through unchecked
     reports: list[dict[str, Any]] = field(default_factory=list)    # passed through unchecked
+    diplomacy: list[dict[str, Any]] = field(default_factory=list)  # livingworld/diplomacy items ("phrase" finds the line)
 
     def reply(self, transcript: str) -> str:
         facts = list(self.raw_facts)
@@ -249,5 +250,19 @@ class ScriptedExtraction:
                         report.setdefault("said_by", m.group(2))
                         break
             reports.append(report)
-        return json.dumps({"facts": facts, "memories": [{"text": t, "importance": 0.6} for t in self.memories],
-                           "reports": reports})
+        diplomacy = []
+        for item in self.diplomacy:
+            item = dict(item)
+            phrase = item.pop("phrase", None)
+            if phrase:
+                for line in transcript.splitlines():
+                    m = re.match(r"\[(\d+)\] ([^:]+): (.*)", line)
+                    if m and phrase.lower() in m.group(3).lower():
+                        item.setdefault("line", int(m.group(1)))
+                        item.setdefault("said_by", m.group(2))
+                        break
+            diplomacy.append(item)
+        out = {"facts": facts, "memories": [{"text": t, "importance": 0.6} for t in self.memories], "reports": reports}
+        if diplomacy:
+            out["diplomacy"] = diplomacy
+        return json.dumps(out)
