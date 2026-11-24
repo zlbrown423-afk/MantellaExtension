@@ -32,6 +32,9 @@ ACTS: dict[str, Act] = {
                         domains={"generosity": 0.18}),
     "helped": Act("helped", 0.35, {"affinity": 0.04, "respect": 0.04, "trust": 0.03},
                   domains={"reliability": 0.15, "generosity": 0.08}),        # work/ tasks
+    # diplomacy (livingworld/diplomacy): something a person said in front of others about the war. Talked about,
+    # but it changes nobody's opinion of them by itself: listeners judge the politics for themselves.
+    "declared": Act("declared", 0.5),
     "let_down": Act("let down", 0.45, {"trust": -0.06, "respect": -0.04}, harms_object=True,
                     domains={"reliability": -0.25}),  # work/ tasks
     # romance (social/romance.py); a partner's own reaction is in romance.on_learned

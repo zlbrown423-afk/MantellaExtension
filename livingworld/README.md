@@ -1231,3 +1231,56 @@ reckoning now), `debug charter status`. Results go to the server log.
 In-game check (needs the game): with `MANTELLA_LW_LORDSHIP=1`, talk to Balgruuf, say `debug charter grant`, then
 `debug charter riders 20` and `debug charter month` twice; Proventus and Irileth should then speak of the
 Wardens growing past their charter, and Balgruuf of a review or suspension.
+
+## Diplomacy: a memory of the war talks, not a script (`livingworld/diplomacy/`)
+
+Design doc 2026-11-24 ("Living World diplomacy: audit and design"). **Off unless `MANTELLA_LW_DIPLOMACY=1`.** Test
+commands follow `MANTELLA_LW_DIPLOMACY_DEBUG` (on with diplomacy unless `0`). With the flag off every prompt,
+including the extraction prompt, is unchanged.
+
+The rules remember what was said and work out who could know it; they never decide an outcome. Nothing moves an
+NPC toward agreeing: the dialogue model voices each leader from their convictions, history and interests.
+
+* **No new AI calls.** After a political conversation (a figure from `data/figures.json` took part, or the
+  transcript mentions the war, a leader, the Thalmor, the Concordat, a truce, an alliance or a meeting), one
+  participant's normal memory extraction (the NPC who heard the most lines) also returns a `diplomacy` list.
+* **Checked against the transcript** (`record.py`): the line must exist and be said by the named speaker; a
+  question stays a question, "if/unless" makes it conditional, "what if/suppose" hypothetical, hearsay a rumour;
+  only a person can commit themselves (anything said on someone else's behalf is a report).
+* **Migration 030** (new tables only, all on the save timeline, statuses as append-only change logs):
+  `political_position` (per person, per dimension: empire, stormcloaks, thalmor, negotiation, concordat, ceasefire,
+  alliance; layer personal or official), `dip_statement`, `dip_awareness` (said / witnessed / told / courier /
+  rumour), `dip_commitment` (+ change), `dip_meeting` (+ change), `dip_invitation` (+ change), `dip_attendance`,
+  `dip_followup` (couriers).
+* **Positions.** Figures are seeded at game time 0 the first time they are met (lore-based, every dimension on its
+  own: disliking the Thalmor says nothing about the Concordat). Afterwards only the person's own asserted words
+  move them: private words the personal layer, public words a faction head's official layer. Public words never
+  rewrite private belief.
+* **Promises** open / kept / withdrawn / lapsed (due date passed) / broken (missed an accepted meeting). Kept and
+  broken move only `reliability` standing of the person promised; trust is never moved by these rules.
+* **Meetings.** An invitation is only delivered when the invitee is told (in person, by whoever carries it, or by
+  courier); only the invitee's own words answer it (accepted, conditional, declined, countered); agreed when every
+  invitee accepted; convened only when two or more expected parties are at the venue together in the game;
+  concluded when that conversation ends, with attendance written and absentees' promises broken. An answer that
+  mentions a courier/letter reaches an absent inviter after 2 game days.
+* **Gossip.** A first-hand public statement becomes a `declared` claim (no opinion change by itself) held by those
+  present; court circles (`windhelm_court`, `solitude_court`, `whiterun_court`, `thalmor_embassy`) are gossip
+  communities of the figures Living World has met; whoever hears it that way holds the statement as a rumour.
+* **Double-dealing.** Someone who comes to know the same person took opposite stances on one issue in two
+  conversations within 30 days loses a little `honesty` standing for them (once per pair).
+* **Prompt block** ("The war and the Thalmor: what X knows of the talks") for figures and anyone holding a
+  statement: convictions (private), the official line if different, what they said (private or in front of
+  others), promises, invitations to them, what they heard (marked unconfirmed). It ends by saying these are
+  records, not instructions, and that they may agree, set conditions, refuse or change the subject.
+
+Journal (read-only, safe while playing): `python -m livingworld.diplomacy.journal --db "<save>\data\livingworld\<World>.sqlite"`
+shows only what the player has learned (confirmed versus report/rumour, conditions, promises, meetings,
+unresolved issues); `--gm` shows everything, including private convictions. In conversation: `debug diplomacy
+status`, `debug diplomacy journal`, `debug diplomacy catch up` (results in the server log).
+
+Limits: nothing moves NPCs to a venue (an NPC who agrees may use Mantella's own Follow); a change of mind within
+30 days can read as double-dealing; lines spoken before the scribe joined a group are not read; the extraction
+model can still mislabel a line (the journal shows the quote).
+
+In-game check (needs the game): with `MANTELLA_LW_DIPLOMACY=1`, ask Ulfric in private whether he would consider a
+truce, end the conversation, run the journal; then talk to Tullius and confirm he does not know what Ulfric said.

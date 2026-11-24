@@ -48,3 +48,20 @@ def hod() -> dict[str, Any]:
 def alfhild() -> dict[str, Any]:
     """Alfhild Battle-Born (Whiterun; runs Battle-Born Farm). Form IDs from data/Skyrim/skyrim_characters.csv."""
     return actor("Alfhild Battle-Born", 0x00013BB0, 0x0001A68B, 1, "Nord", "FemaleNord")
+
+
+def ulfric() -> dict[str, Any]:
+    """Jarl Ulfric Stormcloak (Windhelm). Form IDs from data/Skyrim/skyrim_characters.csv."""
+    return actor("Ulfric Stormcloak", 0x0001414D, 0x0001B131, 0, "Nord", "MaleNordCommander")
+
+
+def galmar() -> dict[str, Any]:
+    return actor("Galmar Stone-Fist", 0x00014128, 0x0001B133, 0, "Nord", "MaleNord")
+
+
+def tullius() -> dict[str, Any]:
+    return actor("General Tullius", 0x0001327E, 0x000198BA, 0, "Imperial", "MaleCommander")
+
+
+def balgruuf() -> dict[str, Any]:
+    return actor("Balgruuf the Greater", 0x00013BBD, 0x0001A677, 0, "Nord", "MaleNordCommander")

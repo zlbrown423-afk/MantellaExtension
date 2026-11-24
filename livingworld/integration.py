@@ -40,6 +40,8 @@ from livingworld.voice import tone as voice_tone
 from livingworld.squad import squad_enabled, service as squad_service, words as squad_words
 from livingworld.lordship import lordship_debug_enabled, lordship_enabled
 from livingworld.lordship import debug as lordship_debug, prompts as lordship_prompts, reckoning as lordship_reckoning
+from livingworld.diplomacy import diplomacy_debug_enabled, diplomacy_enabled
+from livingworld.diplomacy import catchup as diplomacy_catchup, debug as diplomacy_debug, prompts as diplomacy_prompts
 from livingworld import fog
 from livingworld.continuity import continuity_enabled, service as continuity
 from livingworld.continuity import resume as conv_resume
@@ -265,6 +267,9 @@ class LivingWorld:
         self.lordship = enabled and lordship_enabled()   # Plains Wardens charter (livingworld/lordship); OFF unless MANTELLA_LW_LORDSHIP=1
         self.lordship_debug = enabled and lordship_debug_enabled()
         self._lordship_refreshed: int | None = None     # conv_id whose monthly reckonings were caught up
+        self.diplomacy = enabled and diplomacy_enabled()   # diplomatic memory (livingworld/diplomacy); OFF unless MANTELLA_LW_DIPLOMACY=1
+        self.diplomacy_debug = enabled and diplomacy_debug_enabled()
+        self._diplomacy_refreshed: int | None = None    # conv_id whose diplomacy was caught up
         self._squad_notes: list[str] = []          # for the dialogue model with the player's next line
         self._squad_seen: tuple[int, str] | None = None   # (conversation, player line) already read for squad words
         self.asked_joins = enabled and joins.joins_enabled()   # only add people the player asked for (MANTELLA_LW_ASKED_JOINS=0 off)
@@ -729,6 +734,14 @@ class LivingWorld:
                 result = lordship_debug.run(db, command, npc_id, context.game_days)
             if result:
                 logger.log(23, f"Living World lordship test command: {result}")
+        if self.diplomacy_debug and hidden:
+            present_ids = [self._npc_ids.get(c.ref_id) or self._register(c, context.game_days)
+                           for c in context.npcs_in_conversation.get_all_characters()]
+            with self.store.transaction() as db:
+                result = diplomacy_debug.run(db, command, npc_id, context.game_days, present_ids,
+                                             getattr(context, "location", None), self.conv_id)
+            if result:
+                logger.log(23, f"Living World diplomacy test command: {result}")
 
     def _hygiene_debug(self, text: str, player_id: int, context: Any) -> None:
         from livingworld.hygiene import debug
@@ -848,6 +861,7 @@ class LivingWorld:
         self._refresh_guard()   # before work upkeep, which would expire duties without the reprimand
         self._refresh_work(now)
         self._refresh_lordship(now)
+        self._refresh_diplomacy(now, list(present))
         scene = self._scene(player_id, player.name if player else "the player", list(present))
         blocks = []
         for character in characters:
@@ -921,6 +935,15 @@ class LivingWorld:
             if charter:
                 blocks.append(f"The Plains Wardens' charter, and {character.name}:\n"
                               + "\n".join(f"- {line}" for line in charter))
+            talks = self._diplomacy_lines(npc_id, character.name, player_id,
+                                          player.name if player is not None else "the player", now)
+            if talks:
+                block = f"The war and the Thalmor: what {character.name} knows of the talks:\n" + "\n".join(
+                    f"- {line}" for line in talks)
+                if self._fog_active() and player is not None and player_id is not None:
+                    with store.reading() as db:
+                        block = fog_names.hide_player_name(db, npc_id, fog_names.Person(player_id, player.name), block)
+                blocks.append(block)
         if self.place and player is not None:
             npcs = [c.name for c in characters if not c.is_player_character]
             where = place.prompt_lines(getattr(self._context, "location", ""),
@@ -1451,6 +1474,35 @@ class LivingWorld:
         except Exception:
             self.errors += 1
             logger.exception("Living World: lordship reckoning failed; carrying on")
+
+    # ---- diplomacy (livingworld/diplomacy) ----
+    def _refresh_diplomacy(self, now: float, present: list[int]) -> None:
+        """Once per conversation: seed figures who are here, court gossip, overdue promises, couriers, meetings."""
+        if not self.diplomacy or self.store is None or self._diplomacy_refreshed == self.conv_id:
+            return
+        self._diplomacy_refreshed = self.conv_id
+        try:
+            from livingworld.social.world import gossip_enabled
+            with self.store.transaction() as db:
+                result = diplomacy_catchup.run(db, now, present, getattr(self._context, "location", None),
+                                               self.conv_id, gossip=gossip_enabled())
+            if result.any():
+                logger.log(23, f"Living World diplomacy: {result}")
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: diplomacy catch-up failed; carrying on")
+
+    def _diplomacy_lines(self, npc_id: int, name: str, player_id: int | None, player_name: str, now: float) -> list[str]:
+        """What this NPC knows of the talks: their convictions, what they said, promises, invitations, news."""
+        if not self.diplomacy or self.store is None:
+            return []
+        try:
+            with self.store.reading() as db:
+                return diplomacy_prompts.lines_for(db, npc_id, name, player_id, player_name, now)
+        except Exception:
+            self.errors += 1
+            logger.exception("Living World: diplomacy prompt lines failed; carrying on")
+            return []
 
     def _lordship_lines(self, npc_id: int, name: str, player_id: int | None, player_name: str, now: float) -> list[str]:
         """For a court official: the charter, last month's reckoning and their own view of the Wardens."""

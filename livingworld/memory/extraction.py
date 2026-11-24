@@ -75,6 +75,7 @@ class ExtractionResult:
     reports_added: int = 0
     facts_skipped: int = 0
     memories_added: int = 0
+    diplomacy: int = 0          # diplomatic statements recorded (livingworld/diplomacy), scribe only
     rejected: list[str] = field(default_factory=list)
 
 
@@ -229,6 +230,10 @@ class Extractor:
         transcript = "\n".join(f"[{l.seq}] {l.speaker}: {l.text}" for l in heard)
         name_list = ", ".join(names.values())
         system = SYSTEM_PROMPT.format(owner=owner, names=name_list)
+        scribe = not backfill and self._diplomacy_scribe(conv_id, owner_id, people, all_lines)
+        if scribe:   # one NPC's call per political conversation also reads the politics (no extra AI call)
+            from livingworld.diplomacy import extract as dip_extract
+            system += dip_extract.section()
         user = USER_PROMPT.format(location=location, names=name_list, transcript=transcript, owner=owner)
         reply = self.complete(system, user)
         try:
@@ -243,7 +248,46 @@ class Extractor:
             data = parse_reply(reply)
         if backfill:
             data["reports"] = []   # old news is not passed on again as if it were fresh gossip
-        return self.apply(conv_id, owner_id, data, heard, names, location, game_time)
+        result = self.apply(conv_id, owner_id, data, heard, names, location, game_time)
+        if scribe:
+            self._apply_diplomacy(conv_id, data, heard, names, location, game_time, result)
+        return result
+
+    # ---- diplomacy (livingworld/diplomacy): one scribe per political conversation ----
+    def _diplomacy_scribe(self, conv_id: int, owner_id: int, people: list[tuple[int, str, bool]],
+                          lines: list[Line]) -> bool:
+        from livingworld.diplomacy import diplomacy_enabled
+        if not diplomacy_enabled():
+            return False
+        try:
+            from livingworld.diplomacy import extract as dip_extract
+            if dip_extract.scribe(self.store, conv_id, people, lines) != owner_id:
+                return False
+            with self.store.reading() as db:
+                return dip_extract.is_political(" ".join(l.text for l in lines), [p[0] for p in people], db)
+        except Exception:
+            logger.exception("Living World: could not decide whether to read diplomacy; leaving it out")
+            return False
+
+    def _apply_diplomacy(self, conv_id: int, data: dict[str, Any], heard: list[Line], names: dict[int, str],
+                         location: str, game_time: float, result: ExtractionResult) -> None:
+        from livingworld.diplomacy import extract as dip_extract
+        from livingworld.diplomacy import record as dip_record
+        items = dip_extract.items_from(data)
+        if not items:
+            return
+        try:
+            with self.store.transaction() as db:
+                done = dip_record.record(db, conv_id, items, heard, names, location, game_time)
+            result.diplomacy = done.statements
+            logger.log(23, f"Living World diplomacy: conversation {conv_id}: {done.statements} statement(s), "
+                           f"{done.positions} position change(s), {done.claims} claim(s)"
+                           + (f"; {', '.join(done.changes)}" if done.changes else "")
+                           + (f"; {done.duplicates} already recorded" if done.duplicates else ""))
+            for reason in done.rejected:
+                logger.log(23, f"Living World diplomacy: dropped an item: {reason}")
+        except Exception:
+            logger.exception("Living World: could not record diplomacy; the memories were kept")
 
     # ---- writing what the model returned, after checking it ----
     def apply(self, conv_id: int, owner_id: int, data: dict[str, Any], heard: list[Line],
